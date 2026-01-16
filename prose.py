@@ -1,0 +1,5078 @@
+#!/usr/bin/python3
+
+from __future__ import annotations
+
+import json
+import re
+import subprocess
+import threading
+import time
+import urllib.error
+import urllib.request
+from dataclasses import dataclass
+from datetime import datetime
+from pathlib import Path
+from typing import Any, Callable, Iterable
+
+import gi
+
+gi.require_version("Gtk", "4.0")
+gi.require_version("Adw", "1")
+from gi.repository import Adw, Gdk, Gio, GLib, Gtk, Pango  # type: ignore
+
+try:
+    import uno  # type: ignore
+    from com.sun.star.beans import PropertyValue  # type: ignore
+    from com.sun.star.connection import NoConnectException  # type: ignore
+    from com.sun.star.frame import XModel  # type: ignore
+    from com.sun.star.text import ControlCharacter, XTextDocument  # type: ignore
+except Exception:  # noqa: BLE001
+    uno = None  # type: ignore
+    ControlCharacter = None  # type: ignore[assignment]
+
+
+APP_ID = "com.mcglaw.Prose"
+ACTION_OBJECT_PATH = "/org/gtk/Application"
+APP_NAME = "Prose"
+GLib.set_application_name(APP_NAME)
+
+CONFIG_FILE = Path(__file__).with_name("config.json")
+CONFIG_KEY_PROOFREAD_API_URL = "api_url"
+CONFIG_KEY_PROOFREAD_MODEL_ID = "model_id"
+CONFIG_KEY_PROOFREAD_API_KEY = "api_key"
+CONFIG_KEY_PROOFREAD_PROMPT = "proofread_prompt"
+CONFIG_KEY_SPELLING_API_URL = "spellingstyle_api_url"
+CONFIG_KEY_SPELLING_MODEL_ID = "spellingstyle_model_id"
+CONFIG_KEY_SPELLING_API_KEY = "spellingstyle_api_key"
+CONFIG_KEY_SPELLING_PROMPT = "spellingstyle_prompt"
+CONFIG_KEY_IMPROVE1_API_URL = "improve1_api_url"
+CONFIG_KEY_IMPROVE1_MODEL_ID = "improve1_model_id"
+CONFIG_KEY_IMPROVE1_API_KEY = "improve1_api_key"
+CONFIG_KEY_IMPROVE1_PROMPT = "improve1_prompt"
+CONFIG_KEY_IMPROVE2_API_URL = "improve2_api_url"
+CONFIG_KEY_IMPROVE2_MODEL_ID = "improve2_model_id"
+CONFIG_KEY_IMPROVE2_API_KEY = "improve2_api_key"
+CONFIG_KEY_IMPROVE2_PROMPT = "improve2_prompt"
+CONFIG_KEY_COMBINE_CITES_API_URL = "combine_cites_api_url"
+CONFIG_KEY_COMBINE_CITES_MODEL_ID = "combine_cites_model_id"
+CONFIG_KEY_COMBINE_CITES_API_KEY = "combine_cites_api_key"
+CONFIG_KEY_COMBINE_CITES_PROMPT = "combine_cites_prompt"
+CONFIG_KEY_THESAURUS_API_URL = "thesaurus_api_url"
+CONFIG_KEY_THESAURUS_MODEL_ID = "thesaurus_model_id"
+CONFIG_KEY_THESAURUS_API_KEY = "thesaurus_api_key"
+CONFIG_KEY_THESAURUS_PROMPT = "thesaurus_prompt"
+CONFIG_KEY_REFERENCE_API_URL = "reference_api_url"
+CONFIG_KEY_REFERENCE_MODEL_ID = "reference_model_id"
+CONFIG_KEY_REFERENCE_API_KEY = "reference_api_key"
+CONFIG_KEY_REFERENCE_TAVILY_API_KEY = "reference_tavily_api_key"
+CONFIG_KEY_REFERENCE_PROMPT = "reference_prompt"
+CONFIG_KEY_REFERENCE_ASK_PROMPT = "reference_ask_prompt"
+CONFIG_KEY_ASK_API_URL = "ask_api_url"
+CONFIG_KEY_ASK_MODEL_ID = "ask_model_id"
+CONFIG_KEY_ASK_API_KEY = "ask_api_key"
+CONFIG_KEY_ASK_TAVILY_API_KEY = "ask_tavily_api_key"
+CONFIG_KEY_ASK_PROMPT = "ask_prompt"
+CONFIG_KEY_SHORTEN_API_URL = "shorten_api_url"
+CONFIG_KEY_SHORTEN_MODEL_ID = "shorten_model_id"
+CONFIG_KEY_SHORTEN_API_KEY = "shorten_api_key"
+CONFIG_KEY_SHORTEN_PROMPT = "shorten_prompt"
+CONFIG_KEY_INTRO_API_URL = "introduction_api_url"
+CONFIG_KEY_INTRO_MODEL_ID = "introduction_model_id"
+CONFIG_KEY_INTRO_API_KEY = "introduction_api_key"
+CONFIG_KEY_INTRO_PROMPT = "introduction_prompt"
+CONFIG_KEY_CONCLUSION_API_URL = "conclusion_api_url"
+CONFIG_KEY_CONCLUSION_MODEL_ID = "conclusion_model_id"
+CONFIG_KEY_CONCLUSION_API_KEY = "conclusion_api_key"
+CONFIG_KEY_CONCLUSION_PROMPT = "conclusion_prompt"
+CONFIG_KEY_CONCL_NO_ISSUES_API_URL = "concl_no_issues_api_url"
+CONFIG_KEY_CONCL_NO_ISSUES_MODEL_ID = "concl_no_issues_model_id"
+CONFIG_KEY_CONCL_NO_ISSUES_API_KEY = "concl_no_issues_api_key"
+CONFIG_KEY_CONCL_NO_ISSUES_PROMPT = "concl_no_issues_prompt"
+CONFIG_KEY_TOPIC_SENTENCE_API_URL = "topic_sentence_api_url"
+CONFIG_KEY_TOPIC_SENTENCE_MODEL_ID = "topic_sentence_model_id"
+CONFIG_KEY_TOPIC_SENTENCE_API_KEY = "topic_sentence_api_key"
+CONFIG_KEY_TOPIC_SENTENCE_PROMPT = "topic_sentence_prompt"
+CONFIG_KEY_CONCL_SECTION_API_URL = "concl_section_api_url"
+CONFIG_KEY_CONCL_SECTION_MODEL_ID = "concl_section_model_id"
+CONFIG_KEY_CONCL_SECTION_API_KEY = "concl_section_api_key"
+CONFIG_KEY_CONCL_SECTION_PROMPT = "concl_section_prompt"
+CONFIG_KEY_EDITOR_SOURCE_FILE = "editor_source_file"
+CONFIG_KEY_LAST_ODT_FILE = "last_odt_file"
+
+DEFAULT_PROMPT = (
+    "You are a meticulous legal proofreader. Improve clarity, fix grammar, and preserve legal meaning. "
+    "Do not shorten or embellish facts. Respond with concrete edits, not generic advice."
+)
+DEFAULT_SPELLINGSTYLE_PROMPT = (
+    "Revise the source text for spelling, grammar, and style. Preserve meaning and facts. "
+    "Return only the revised text."
+)
+DEFAULT_IMPROVE1_PROMPT = "Improve the following text for clarity and precision while preserving meaning."
+DEFAULT_IMPROVE2_PROMPT = "Improve the following text for clarity and precision while preserving meaning."
+DEFAULT_COMBINE_CITES_PROMPT = ""
+DEFAULT_THESAURUS_PROMPT = (
+    "Return JSON only with an 'alternatives' array of synonyms or short phrases for the selected text. "
+    "Example: {\"alternatives\": [\"option\", \"best choice\"]}."
+)
+DEFAULT_REFERENCE_PROMPT = (
+    "Use Tavily search to provide the definition of a word or phrase and use the word in a sentence. "
+    "Consult two sources and cite the url for each source. Here is the word or phrase:"
+)
+DEFAULT_REFERENCE_ASK_PROMPT = "Answer the following question."
+DEFAULT_ASK_PROMPT = DEFAULT_REFERENCE_ASK_PROMPT
+DEFAULT_SHORTEN_PROMPT = (
+    "Shorten the selected text by removing unnecessary facts while preserving meaning. "
+    "Return only the shortened text."
+)
+DEFAULT_INTRO_PROMPT = (
+    "Write a concise introduction for the brief based on the provided argument section. "
+    "Return only the introduction."
+)
+DEFAULT_CONCLUSION_PROMPT = (
+    "Write a conclusion for the brief based on the provided argument section. "
+    "Return only the conclusion."
+)
+DEFAULT_CONCL_NO_ISSUES_PROMPT = (
+    "Write a conclusion for the brief based on the provided issues-considered section. "
+    "Return only the conclusion."
+)
+DEFAULT_TOPIC_SENTENCE_PROMPT = (
+    "Write a concise topic sentence that captures the central meaning of the paragraph. "
+    "Return only the topic sentence."
+)
+
+DEFAULT_CONCL_SECTION_PROMPT = (
+    "Write a concise conclusion for the provided section. "
+    "Return only the conclusion."
+)
+
+LIBREOFFICE_PROFILE = Path.home() / ".config" / "libreoffice-prose-profile"
+UNO_BRIDGE_URL = "uno:socket,host=127.0.0.1,port=2004;urp;StarOffice.ComponentContext"
+SOFFICE_PATH = Path("/usr/lib/libreoffice/program/soffice")
+SPELLING_OUTPUT_FONT_SIZE_PX = 18
+SPELLING_OUTPUT_PADDING_PX = 12
+SPELLING_OUTPUT_CORNER_RADIUS_PX = 10
+REFERENCE_OUTPUT_FONT_SIZE_PX = SPELLING_OUTPUT_FONT_SIZE_PX
+TAVILY_MCP_SERVER_URL = "https://mcp.tavily.com/mcp"
+REFERENCE_URL_RE = re.compile(r"https?://[^\s)\]]+")
+CONCORDANCE_FILE = Path("/home/jesse/Dropbox/MCGLAW/CONCORDANCE/Concordance_File.sdi")
+
+
+def _read_config() -> dict[str, Any]:
+    if not CONFIG_FILE.exists():
+        return {}
+    try:
+        return json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def _write_config(data: dict[str, Any]) -> None:
+    try:
+        CONFIG_FILE.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    except OSError:
+        pass
+
+
+def _action_command(
+    action_name: str,
+    param: str | None = None,
+    object_path: str = ACTION_OBJECT_PATH,
+) -> str:
+    params = "[]" if param is None else f"[{param}]"
+    return (
+        f"gdbus call --session --dest {APP_ID} --object-path {object_path} "
+        f'--method org.gtk.Actions.Activate "{action_name}" {params} {{}}'
+    )
+
+
+@dataclass
+class ProofreadSettings:
+    api_url: str
+    model_id: str
+    api_key: str
+    prompt: str
+
+    def is_configured(self) -> bool:
+        return all(
+            value.strip()
+            for value in (self.api_url, self.api_key, self.prompt or DEFAULT_PROMPT)
+        )
+
+
+@dataclass
+class SpellingStyleSettings:
+    api_url: str
+    model_id: str
+    api_key: str
+    prompt: str
+
+    def is_configured(self) -> bool:
+        return all(
+            value.strip()
+            for value in (self.api_url, self.api_key, self.prompt or DEFAULT_SPELLINGSTYLE_PROMPT)
+        )
+
+
+@dataclass
+class Improve1Settings:
+    api_url: str
+    model_id: str
+    api_key: str
+    prompt: str
+
+    def is_configured(self) -> bool:
+        return all(
+            value.strip()
+            for value in (self.api_url, self.api_key, self.prompt or DEFAULT_IMPROVE1_PROMPT)
+        )
+
+
+@dataclass
+class Improve2Settings:
+    api_url: str
+    model_id: str
+    api_key: str
+    prompt: str
+
+    def is_configured(self) -> bool:
+        return all(
+            value.strip()
+            for value in (self.api_url, self.api_key, self.prompt or DEFAULT_IMPROVE2_PROMPT)
+        )
+
+
+@dataclass
+class CombineCitesSettings:
+    api_url: str
+    model_id: str
+    api_key: str
+    prompt: str
+
+    def is_configured(self) -> bool:
+        return all(
+            value.strip()
+            for value in (self.api_url, self.api_key, self.prompt or DEFAULT_COMBINE_CITES_PROMPT)
+        )
+
+
+@dataclass
+class ThesaurusSettings:
+    api_url: str
+    model_id: str
+    api_key: str
+    prompt: str
+
+    def is_configured(self) -> bool:
+        return all(
+            value.strip()
+            for value in (self.api_url, self.api_key, self.prompt or DEFAULT_THESAURUS_PROMPT)
+        )
+
+
+@dataclass
+class ReferenceSettings:
+    api_url: str
+    model_id: str
+    api_key: str
+    tavily_api_key: str
+    prompt: str
+
+    def is_configured(self) -> bool:
+        return all(
+            value.strip()
+            for value in (
+                self.api_url,
+                self.api_key,
+                self.tavily_api_key,
+                self.prompt or DEFAULT_REFERENCE_PROMPT,
+            )
+        )
+
+
+@dataclass
+class AskSettings:
+    api_url: str
+    model_id: str
+    api_key: str
+    tavily_api_key: str
+    prompt: str
+
+    def is_configured(self) -> bool:
+        return all(
+            value.strip()
+            for value in (
+                self.api_url,
+                self.api_key,
+                self.tavily_api_key,
+                self.prompt or DEFAULT_ASK_PROMPT,
+            )
+        )
+
+
+@dataclass
+class ShortenSettings:
+    api_url: str
+    model_id: str
+    api_key: str
+    prompt: str
+
+    def is_configured(self) -> bool:
+        return all(
+            value.strip()
+            for value in (self.api_url, self.api_key, self.prompt or DEFAULT_SHORTEN_PROMPT)
+        )
+
+
+@dataclass
+class IntroductionSettings:
+    api_url: str
+    model_id: str
+    api_key: str
+    prompt: str
+
+    def is_configured(self) -> bool:
+        return all(
+            value.strip()
+            for value in (self.api_url, self.api_key, self.prompt or DEFAULT_INTRO_PROMPT)
+        )
+
+
+@dataclass
+class ConclusionSettings:
+    api_url: str
+    model_id: str
+    api_key: str
+    prompt: str
+
+    def is_configured(self) -> bool:
+        return all(
+            value.strip()
+            for value in (self.api_url, self.api_key, self.prompt or DEFAULT_CONCLUSION_PROMPT)
+        )
+
+
+@dataclass
+class ConclNoIssuesSettings:
+    api_url: str
+    model_id: str
+    api_key: str
+    prompt: str
+
+    def is_configured(self) -> bool:
+        return all(
+            value.strip()
+            for value in (self.api_url, self.api_key, self.prompt or DEFAULT_CONCL_NO_ISSUES_PROMPT)
+        )
+
+
+@dataclass
+class TopicSentenceSettings:
+    api_url: str
+    model_id: str
+    api_key: str
+    prompt: str
+
+    def is_configured(self) -> bool:
+        return all(
+            value.strip()
+            for value in (self.api_url, self.api_key, self.prompt or DEFAULT_TOPIC_SENTENCE_PROMPT)
+        )
+
+
+@dataclass
+class ConclSectionSettings:
+    api_url: str
+    model_id: str
+    api_key: str
+    prompt: str
+
+    def is_configured(self) -> bool:
+        return all(
+            value.strip()
+            for value in (self.api_url, self.api_key, self.prompt or DEFAULT_CONCL_SECTION_PROMPT)
+        )
+
+
+@dataclass
+class PromptEditorWidgets:
+    api_url_row: Adw.EntryRow
+    model_row: Adw.EntryRow
+    api_key_row: Adw.PasswordEntryRow
+    tavily_api_key_row: Adw.PasswordEntryRow | None
+    prompt_buffer: Gtk.TextBuffer
+    ask_prompt_buffer: Gtk.TextBuffer | None
+
+
+def load_proofread_settings() -> ProofreadSettings:
+    raw = _read_config()
+    return ProofreadSettings(
+        api_url=str(raw.get(CONFIG_KEY_PROOFREAD_API_URL, "") or "").strip(),
+        model_id=str(raw.get(CONFIG_KEY_PROOFREAD_MODEL_ID, "") or "").strip(),
+        api_key=str(raw.get(CONFIG_KEY_PROOFREAD_API_KEY, "") or "").strip(),
+        prompt=str(raw.get(CONFIG_KEY_PROOFREAD_PROMPT, DEFAULT_PROMPT) or DEFAULT_PROMPT).strip(),
+    )
+
+
+def save_proofread_settings(settings: ProofreadSettings) -> None:
+    data = _read_config()
+    data[CONFIG_KEY_PROOFREAD_API_URL] = settings.api_url
+    data[CONFIG_KEY_PROOFREAD_MODEL_ID] = settings.model_id
+    data[CONFIG_KEY_PROOFREAD_API_KEY] = settings.api_key
+    data[CONFIG_KEY_PROOFREAD_PROMPT] = settings.prompt or DEFAULT_PROMPT
+    _write_config(data)
+
+
+def load_spellingstyle_settings() -> SpellingStyleSettings:
+    raw = _read_config()
+    return SpellingStyleSettings(
+        api_url=str(raw.get(CONFIG_KEY_SPELLING_API_URL, "") or "").strip(),
+        model_id=str(raw.get(CONFIG_KEY_SPELLING_MODEL_ID, "") or "").strip(),
+        api_key=str(raw.get(CONFIG_KEY_SPELLING_API_KEY, "") or "").strip(),
+        prompt=str(raw.get(CONFIG_KEY_SPELLING_PROMPT, DEFAULT_SPELLINGSTYLE_PROMPT) or DEFAULT_SPELLINGSTYLE_PROMPT)
+        .strip(),
+    )
+
+
+def save_spellingstyle_settings(settings: SpellingStyleSettings) -> None:
+    data = _read_config()
+    data[CONFIG_KEY_SPELLING_API_URL] = settings.api_url
+    data[CONFIG_KEY_SPELLING_MODEL_ID] = settings.model_id
+    data[CONFIG_KEY_SPELLING_API_KEY] = settings.api_key
+    data[CONFIG_KEY_SPELLING_PROMPT] = settings.prompt or DEFAULT_SPELLINGSTYLE_PROMPT
+    _write_config(data)
+
+
+def load_improve1_settings() -> Improve1Settings:
+    raw = _read_config()
+    return Improve1Settings(
+        api_url=str(raw.get(CONFIG_KEY_IMPROVE1_API_URL, "") or "").strip(),
+        model_id=str(raw.get(CONFIG_KEY_IMPROVE1_MODEL_ID, "") or "").strip(),
+        api_key=str(raw.get(CONFIG_KEY_IMPROVE1_API_KEY, "") or "").strip(),
+        prompt=str(raw.get(CONFIG_KEY_IMPROVE1_PROMPT, DEFAULT_IMPROVE1_PROMPT) or DEFAULT_IMPROVE1_PROMPT).strip(),
+    )
+
+
+def save_improve1_settings(settings: Improve1Settings) -> None:
+    data = _read_config()
+    data[CONFIG_KEY_IMPROVE1_API_URL] = settings.api_url
+    data[CONFIG_KEY_IMPROVE1_MODEL_ID] = settings.model_id
+    data[CONFIG_KEY_IMPROVE1_API_KEY] = settings.api_key
+    data[CONFIG_KEY_IMPROVE1_PROMPT] = settings.prompt or DEFAULT_IMPROVE1_PROMPT
+    _write_config(data)
+
+
+def load_improve2_settings() -> Improve2Settings:
+    raw = _read_config()
+    return Improve2Settings(
+        api_url=str(raw.get(CONFIG_KEY_IMPROVE2_API_URL, "") or "").strip(),
+        model_id=str(raw.get(CONFIG_KEY_IMPROVE2_MODEL_ID, "") or "").strip(),
+        api_key=str(raw.get(CONFIG_KEY_IMPROVE2_API_KEY, "") or "").strip(),
+        prompt=str(raw.get(CONFIG_KEY_IMPROVE2_PROMPT, DEFAULT_IMPROVE2_PROMPT) or DEFAULT_IMPROVE2_PROMPT).strip(),
+    )
+
+
+def save_improve2_settings(settings: Improve2Settings) -> None:
+    data = _read_config()
+    data[CONFIG_KEY_IMPROVE2_API_URL] = settings.api_url
+    data[CONFIG_KEY_IMPROVE2_MODEL_ID] = settings.model_id
+    data[CONFIG_KEY_IMPROVE2_API_KEY] = settings.api_key
+    data[CONFIG_KEY_IMPROVE2_PROMPT] = settings.prompt or DEFAULT_IMPROVE2_PROMPT
+    _write_config(data)
+
+
+def load_combine_cites_settings() -> CombineCitesSettings:
+    raw = _read_config()
+    return CombineCitesSettings(
+        api_url=str(raw.get(CONFIG_KEY_COMBINE_CITES_API_URL, "") or "").strip(),
+        model_id=str(raw.get(CONFIG_KEY_COMBINE_CITES_MODEL_ID, "") or "").strip(),
+        api_key=str(raw.get(CONFIG_KEY_COMBINE_CITES_API_KEY, "") or "").strip(),
+        prompt=str(raw.get(CONFIG_KEY_COMBINE_CITES_PROMPT, DEFAULT_COMBINE_CITES_PROMPT) or DEFAULT_COMBINE_CITES_PROMPT)
+        .strip(),
+    )
+
+
+def save_combine_cites_settings(settings: CombineCitesSettings) -> None:
+    data = _read_config()
+    data[CONFIG_KEY_COMBINE_CITES_API_URL] = settings.api_url
+    data[CONFIG_KEY_COMBINE_CITES_MODEL_ID] = settings.model_id
+    data[CONFIG_KEY_COMBINE_CITES_API_KEY] = settings.api_key
+    data[CONFIG_KEY_COMBINE_CITES_PROMPT] = settings.prompt or DEFAULT_COMBINE_CITES_PROMPT
+    _write_config(data)
+
+
+def load_thesaurus_settings() -> ThesaurusSettings:
+    raw = _read_config()
+    return ThesaurusSettings(
+        api_url=str(raw.get(CONFIG_KEY_THESAURUS_API_URL, "") or "").strip(),
+        model_id=str(raw.get(CONFIG_KEY_THESAURUS_MODEL_ID, "") or "").strip(),
+        api_key=str(raw.get(CONFIG_KEY_THESAURUS_API_KEY, "") or "").strip(),
+        prompt=str(raw.get(CONFIG_KEY_THESAURUS_PROMPT, DEFAULT_THESAURUS_PROMPT) or DEFAULT_THESAURUS_PROMPT).strip(),
+    )
+
+
+def save_thesaurus_settings(settings: ThesaurusSettings) -> None:
+    data = _read_config()
+    data[CONFIG_KEY_THESAURUS_API_URL] = settings.api_url
+    data[CONFIG_KEY_THESAURUS_MODEL_ID] = settings.model_id
+    data[CONFIG_KEY_THESAURUS_API_KEY] = settings.api_key
+    data[CONFIG_KEY_THESAURUS_PROMPT] = settings.prompt or DEFAULT_THESAURUS_PROMPT
+    _write_config(data)
+
+
+def load_reference_settings() -> ReferenceSettings:
+    raw = _read_config()
+    return ReferenceSettings(
+        api_url=str(raw.get(CONFIG_KEY_REFERENCE_API_URL, "") or "").strip(),
+        model_id=str(raw.get(CONFIG_KEY_REFERENCE_MODEL_ID, "") or "").strip(),
+        api_key=str(raw.get(CONFIG_KEY_REFERENCE_API_KEY, "") or "").strip(),
+        tavily_api_key=str(raw.get(CONFIG_KEY_REFERENCE_TAVILY_API_KEY, "") or "").strip(),
+        prompt=str(raw.get(CONFIG_KEY_REFERENCE_PROMPT, DEFAULT_REFERENCE_PROMPT) or DEFAULT_REFERENCE_PROMPT).strip(),
+    )
+
+
+def save_reference_settings(settings: ReferenceSettings) -> None:
+    data = _read_config()
+    data[CONFIG_KEY_REFERENCE_API_URL] = settings.api_url
+    data[CONFIG_KEY_REFERENCE_MODEL_ID] = settings.model_id
+    data[CONFIG_KEY_REFERENCE_API_KEY] = settings.api_key
+    data[CONFIG_KEY_REFERENCE_TAVILY_API_KEY] = settings.tavily_api_key
+    data[CONFIG_KEY_REFERENCE_PROMPT] = settings.prompt or DEFAULT_REFERENCE_PROMPT
+    _write_config(data)
+
+
+def load_ask_settings() -> AskSettings:
+    raw = _read_config()
+    prompt = str(raw.get(CONFIG_KEY_ASK_PROMPT, "") or "").strip()
+    if not prompt:
+        prompt = str(raw.get(CONFIG_KEY_REFERENCE_ASK_PROMPT, DEFAULT_ASK_PROMPT) or DEFAULT_ASK_PROMPT).strip()
+    return AskSettings(
+        api_url=str(raw.get(CONFIG_KEY_ASK_API_URL, "") or "").strip(),
+        model_id=str(raw.get(CONFIG_KEY_ASK_MODEL_ID, "") or "").strip(),
+        api_key=str(raw.get(CONFIG_KEY_ASK_API_KEY, "") or "").strip(),
+        tavily_api_key=str(raw.get(CONFIG_KEY_ASK_TAVILY_API_KEY, "") or "").strip(),
+        prompt=prompt,
+    )
+
+
+def save_ask_settings(settings: AskSettings) -> None:
+    data = _read_config()
+    data[CONFIG_KEY_ASK_API_URL] = settings.api_url
+    data[CONFIG_KEY_ASK_MODEL_ID] = settings.model_id
+    data[CONFIG_KEY_ASK_API_KEY] = settings.api_key
+    data[CONFIG_KEY_ASK_TAVILY_API_KEY] = settings.tavily_api_key
+    data[CONFIG_KEY_ASK_PROMPT] = settings.prompt or DEFAULT_ASK_PROMPT
+    _write_config(data)
+
+
+def load_shorten_settings() -> ShortenSettings:
+    raw = _read_config()
+    return ShortenSettings(
+        api_url=str(raw.get(CONFIG_KEY_SHORTEN_API_URL, "") or "").strip(),
+        model_id=str(raw.get(CONFIG_KEY_SHORTEN_MODEL_ID, "") or "").strip(),
+        api_key=str(raw.get(CONFIG_KEY_SHORTEN_API_KEY, "") or "").strip(),
+        prompt=str(raw.get(CONFIG_KEY_SHORTEN_PROMPT, DEFAULT_SHORTEN_PROMPT) or DEFAULT_SHORTEN_PROMPT).strip(),
+    )
+
+
+def save_shorten_settings(settings: ShortenSettings) -> None:
+    data = _read_config()
+    data[CONFIG_KEY_SHORTEN_API_URL] = settings.api_url
+    data[CONFIG_KEY_SHORTEN_MODEL_ID] = settings.model_id
+    data[CONFIG_KEY_SHORTEN_API_KEY] = settings.api_key
+    data[CONFIG_KEY_SHORTEN_PROMPT] = settings.prompt or DEFAULT_SHORTEN_PROMPT
+    _write_config(data)
+
+
+def load_introduction_settings() -> IntroductionSettings:
+    raw = _read_config()
+    return IntroductionSettings(
+        api_url=str(raw.get(CONFIG_KEY_INTRO_API_URL, "") or "").strip(),
+        model_id=str(raw.get(CONFIG_KEY_INTRO_MODEL_ID, "") or "").strip(),
+        api_key=str(raw.get(CONFIG_KEY_INTRO_API_KEY, "") or "").strip(),
+        prompt=str(raw.get(CONFIG_KEY_INTRO_PROMPT, DEFAULT_INTRO_PROMPT) or DEFAULT_INTRO_PROMPT).strip(),
+    )
+
+
+def save_introduction_settings(settings: IntroductionSettings) -> None:
+    data = _read_config()
+    data[CONFIG_KEY_INTRO_API_URL] = settings.api_url
+    data[CONFIG_KEY_INTRO_MODEL_ID] = settings.model_id
+    data[CONFIG_KEY_INTRO_API_KEY] = settings.api_key
+    data[CONFIG_KEY_INTRO_PROMPT] = settings.prompt or DEFAULT_INTRO_PROMPT
+    _write_config(data)
+
+
+def load_conclusion_settings() -> ConclusionSettings:
+    raw = _read_config()
+    return ConclusionSettings(
+        api_url=str(raw.get(CONFIG_KEY_CONCLUSION_API_URL, "") or "").strip(),
+        model_id=str(raw.get(CONFIG_KEY_CONCLUSION_MODEL_ID, "") or "").strip(),
+        api_key=str(raw.get(CONFIG_KEY_CONCLUSION_API_KEY, "") or "").strip(),
+        prompt=str(raw.get(CONFIG_KEY_CONCLUSION_PROMPT, DEFAULT_CONCLUSION_PROMPT) or DEFAULT_CONCLUSION_PROMPT).strip(),
+    )
+
+
+def save_conclusion_settings(settings: ConclusionSettings) -> None:
+    data = _read_config()
+    data[CONFIG_KEY_CONCLUSION_API_URL] = settings.api_url
+    data[CONFIG_KEY_CONCLUSION_MODEL_ID] = settings.model_id
+    data[CONFIG_KEY_CONCLUSION_API_KEY] = settings.api_key
+    data[CONFIG_KEY_CONCLUSION_PROMPT] = settings.prompt or DEFAULT_CONCLUSION_PROMPT
+    _write_config(data)
+
+
+def load_concl_no_issues_settings() -> ConclNoIssuesSettings:
+    raw = _read_config()
+    return ConclNoIssuesSettings(
+        api_url=str(raw.get(CONFIG_KEY_CONCL_NO_ISSUES_API_URL, "") or "").strip(),
+        model_id=str(raw.get(CONFIG_KEY_CONCL_NO_ISSUES_MODEL_ID, "") or "").strip(),
+        api_key=str(raw.get(CONFIG_KEY_CONCL_NO_ISSUES_API_KEY, "") or "").strip(),
+        prompt=str(raw.get(CONFIG_KEY_CONCL_NO_ISSUES_PROMPT, DEFAULT_CONCL_NO_ISSUES_PROMPT) or DEFAULT_CONCL_NO_ISSUES_PROMPT)
+        .strip(),
+    )
+
+
+def save_concl_no_issues_settings(settings: ConclNoIssuesSettings) -> None:
+    data = _read_config()
+    data[CONFIG_KEY_CONCL_NO_ISSUES_API_URL] = settings.api_url
+    data[CONFIG_KEY_CONCL_NO_ISSUES_MODEL_ID] = settings.model_id
+    data[CONFIG_KEY_CONCL_NO_ISSUES_API_KEY] = settings.api_key
+    data[CONFIG_KEY_CONCL_NO_ISSUES_PROMPT] = settings.prompt or DEFAULT_CONCL_NO_ISSUES_PROMPT
+    _write_config(data)
+
+
+def load_topic_sentence_settings() -> TopicSentenceSettings:
+    raw = _read_config()
+    return TopicSentenceSettings(
+        api_url=str(raw.get(CONFIG_KEY_TOPIC_SENTENCE_API_URL, "") or "").strip(),
+        model_id=str(raw.get(CONFIG_KEY_TOPIC_SENTENCE_MODEL_ID, "") or "").strip(),
+        api_key=str(raw.get(CONFIG_KEY_TOPIC_SENTENCE_API_KEY, "") or "").strip(),
+        prompt=str(raw.get(CONFIG_KEY_TOPIC_SENTENCE_PROMPT, DEFAULT_TOPIC_SENTENCE_PROMPT) or DEFAULT_TOPIC_SENTENCE_PROMPT)
+        .strip(),
+    )
+
+
+def save_topic_sentence_settings(settings: TopicSentenceSettings) -> None:
+    data = _read_config()
+    data[CONFIG_KEY_TOPIC_SENTENCE_API_URL] = settings.api_url
+    data[CONFIG_KEY_TOPIC_SENTENCE_MODEL_ID] = settings.model_id
+    data[CONFIG_KEY_TOPIC_SENTENCE_API_KEY] = settings.api_key
+    data[CONFIG_KEY_TOPIC_SENTENCE_PROMPT] = settings.prompt or DEFAULT_TOPIC_SENTENCE_PROMPT
+    _write_config(data)
+
+
+def load_concl_section_settings() -> ConclSectionSettings:
+    raw = _read_config()
+    return ConclSectionSettings(
+        api_url=str(raw.get(CONFIG_KEY_CONCL_SECTION_API_URL, "") or "").strip(),
+        model_id=str(raw.get(CONFIG_KEY_CONCL_SECTION_MODEL_ID, "") or "").strip(),
+        api_key=str(raw.get(CONFIG_KEY_CONCL_SECTION_API_KEY, "") or "").strip(),
+        prompt=str(raw.get(CONFIG_KEY_CONCL_SECTION_PROMPT, DEFAULT_CONCL_SECTION_PROMPT) or DEFAULT_CONCL_SECTION_PROMPT)
+        .strip(),
+    )
+
+
+def save_concl_section_settings(settings: ConclSectionSettings) -> None:
+    data = _read_config()
+    data[CONFIG_KEY_CONCL_SECTION_API_URL] = settings.api_url
+    data[CONFIG_KEY_CONCL_SECTION_MODEL_ID] = settings.model_id
+    data[CONFIG_KEY_CONCL_SECTION_API_KEY] = settings.api_key
+    data[CONFIG_KEY_CONCL_SECTION_PROMPT] = settings.prompt or DEFAULT_CONCL_SECTION_PROMPT
+    _write_config(data)
+
+def load_editor_source_file() -> Path | None:
+    raw = _read_config()
+    path = raw.get(CONFIG_KEY_EDITOR_SOURCE_FILE)
+    if isinstance(path, str) and path.strip():
+        return Path(path).expanduser().resolve(strict=False)
+    return None
+
+
+def save_editor_source_file(path: Path | None) -> None:
+    data = _read_config()
+    if path:
+        data[CONFIG_KEY_EDITOR_SOURCE_FILE] = str(path.expanduser().resolve(strict=False))
+    else:
+        data.pop(CONFIG_KEY_EDITOR_SOURCE_FILE, None)
+    _write_config(data)
+
+
+def load_last_odt_file() -> Path | None:
+    raw = _read_config()
+    path = raw.get(CONFIG_KEY_LAST_ODT_FILE)
+    if isinstance(path, str) and path.strip():
+        return Path(path).expanduser().resolve(strict=False)
+    return None
+
+
+def save_last_odt_file(path: Path | None) -> None:
+    data = _read_config()
+    if path:
+        data[CONFIG_KEY_LAST_ODT_FILE] = str(path.expanduser().resolve(strict=False))
+    else:
+        data.pop(CONFIG_KEY_LAST_ODT_FILE, None)
+    _write_config(data)
+
+
+@dataclass
+class Suggestion:
+    title: str
+    page: int | None
+    snippet: str
+    replacement: str
+    reasoning: str
+
+
+class ProseApp(Adw.Application):
+    def __init__(self) -> None:
+        super().__init__(application_id=APP_ID, flags=Gio.ApplicationFlags.FLAGS_NONE)
+        self._window: ProseWindow | None = None
+
+    def do_activate(self) -> None:  # noqa: D401
+        if not self._window:
+            self._window = ProseWindow(self)
+        self._window.present()
+
+
+class ProseWindow(Adw.ApplicationWindow):
+    def __init__(self, app: ProseApp) -> None:
+        super().__init__(application=app, title=APP_NAME, default_width=920, default_height=680)
+        self._proof_settings = load_proofread_settings()
+        self._spelling_settings = load_spellingstyle_settings()
+        self._improve1_settings = load_improve1_settings()
+        self._improve2_settings = load_improve2_settings()
+        self._combine_cites_settings = load_combine_cites_settings()
+        self._thesaurus_settings = load_thesaurus_settings()
+        self._reference_settings = load_reference_settings()
+        self._ask_settings = load_ask_settings()
+        self._shorten_settings = load_shorten_settings()
+        self._introduction_settings = load_introduction_settings()
+        self._conclusion_settings = load_conclusion_settings()
+        self._concl_no_issues_settings = load_concl_no_issues_settings()
+        self._topic_sentence_settings = load_topic_sentence_settings()
+        self._concl_section_settings = load_concl_section_settings()
+        self._editor_source_file = load_editor_source_file()
+        self._last_odt_path = load_last_odt_file()
+        self._ctx = None
+        self._desktop = None
+        self._active_doc = None
+        self._listener_proc: subprocess.Popen[str] | None = None
+        self._suggestions: list[Suggestion] = []
+        self._suggestion_rows: list[Gtk.Box] = []
+        self._current_doc_path: Path | None = None
+        self._busy = False
+        self._last_raw_response: str | None = None
+        self._json_window: Adw.ApplicationWindow | None = None
+        self._editor_insert_cursor = None
+        self._editor_insert_doc = None
+        self._editor_insert_end = None
+        self._improve_insert_cursor = None
+        self._improve_insert_doc = None
+        self._last_insert_len = 0
+        self._editor_pending_newlines = 0
+        self._improve_pending_newlines = 0
+        self._spelling_output_buffer: Gtk.TextBuffer | None = None
+        self._css_provider: Gtk.CssProvider | None = None
+        self._thesaurus_words: list[str] = []
+        self._thesaurus_rows: list[Gtk.Widget] = []
+        self._reference_output_text = ""
+        self._reference_placeholder_active = True
+        self._combine_cites_doc = None
+        self._combine_cites_cursor = None
+        self._settings_window: SettingsWindow | None = None
+        self._editor_commands_window: EditorCommandsWindow | None = None
+        self._build_ui()
+        self._ensure_menu()
+        self._register_actions()
+        self._update_uno_status()
+
+    # UI -----------------------------------------------------------------
+    def _build_ui(self) -> None:
+        self._ensure_css()
+        view = Adw.ToolbarView()
+        overlay = Adw.ToastOverlay()
+        overlay.set_child(view)
+        self.set_content(overlay)
+        self._overlay = overlay
+
+        header = Adw.HeaderBar()
+        header.add_css_class("flat")
+        view.add_top_bar(header)
+
+        menu_button = Gtk.MenuButton(icon_name="open-menu-symbolic")
+        header.pack_end(menu_button)
+        self._menu_button = menu_button
+
+        launch_btn = Gtk.Button(label="Launch Writer", icon_name="document-open-symbolic")
+        launch_btn.add_css_class("flat")
+        launch_btn.set_action_name("app.launch-writer")
+        header.pack_start(launch_btn)
+        self._launch_btn = launch_btn
+
+        open_last_btn = Gtk.Button(icon_name="document-open-recent-symbolic")
+        open_last_btn.add_css_class("flat")
+        open_last_btn.set_action_name("app.open-last-odt")
+        open_last_btn.set_tooltip_text("Open last Writer document")
+        open_last_btn.set_sensitive(bool(self._last_odt_path))
+        header.pack_start(open_last_btn)
+        self._open_last_btn = open_last_btn
+
+        status_label = Gtk.Label(label="LibreOffice status unknown", halign=Gtk.Align.START)
+        status_label.add_css_class("dim-label")
+        self._status_label = status_label
+
+        mode_switcher = Adw.ViewSwitcher()
+        mode_switcher.set_policy(Adw.ViewSwitcherPolicy.WIDE)
+
+        stack = Adw.ViewStack()
+        stack.set_hexpand(True)
+        stack.set_vexpand(True)
+        mode_switcher.set_stack(stack)
+
+        editor_panel = self._build_editor_panel()
+        proof_panel = self._build_proof_panel()
+        editor_page = stack.add_titled(editor_panel, "editor", "Editor")
+        editor_page.set_icon_name("document-edit-symbolic")
+        proof_page = stack.add_titled(proof_panel, "proof", "Proof Reader")
+        proof_page.set_icon_name("tools-check-spelling-symbolic")
+        stack.set_visible_child_name("editor")
+
+        top_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+        top_box.set_margin_top(18)
+        top_box.set_margin_bottom(6)
+        top_box.set_margin_start(18)
+        top_box.set_margin_end(18)
+        top_box.append(status_label)
+        top_box.append(mode_switcher)
+
+        content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        content.set_vexpand(True)
+        content.append(top_box)
+        content.append(stack)
+        view.set_content(content)
+
+    def _build_editor_panel(self) -> Gtk.Box:
+        panel = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+        panel.set_margin_top(6)
+        panel.set_margin_bottom(12)
+        panel.set_margin_start(18)
+        panel.set_margin_end(18)
+
+        action_wrap = Gtk.FlowBox()
+        action_wrap.set_selection_mode(Gtk.SelectionMode.NONE)
+        action_wrap.set_column_spacing(6)
+        action_wrap.set_row_spacing(6)
+        action_wrap.set_max_children_per_line(6)
+        action_wrap.set_hexpand(True)
+        action_buttons: list[Gtk.Button] = []
+        for label, action_name in (
+            ("Shorten", "app.transform-shorten"),
+            ("Topic Sent.", "app.transform-topic-sentence"),
+            ("Section Concl.", "app.transform-concl-section"),
+            ("Add Case", "app.add-case"),
+            ("Intro", "app.transform-introduction"),
+            ("Concl.", "app.transform-conclusion"),
+            ("No Issues Concl.", "app.transform-concl-no-issues"),
+            ("Quotes", "app.transform-wrap-quotes"),
+        ):
+            button = Gtk.Button(label=label)
+            button.set_action_name(action_name)
+            button.add_css_class("flat")
+            button.add_css_class("transform-pill")
+            button.add_css_class("transform-pill-compact")
+            action_wrap.append(button)
+            action_buttons.append(button)
+        panel.append(action_wrap)
+        self._transform_action_buttons = action_buttons
+
+        split_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+        split_box.set_hexpand(True)
+        split_box.set_vexpand(True)
+
+        output_section = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        output_section.set_hexpand(True)
+        output_section.set_vexpand(True)
+        output_label = Gtk.Label(label="Original output", xalign=0)
+        output_label.add_css_class("dim-label")
+        output_section.append(output_label)
+
+        output_scroller = Gtk.ScrolledWindow()
+        output_scroller.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
+        output_scroller.set_hexpand(True)
+        output_scroller.set_vexpand(True)
+        output_scroller.set_min_content_height(160)
+        output_scroller.add_css_class("spelling-output-scroller")
+        output_buffer = Gtk.TextBuffer()
+        output_view = Gtk.TextView.new_with_buffer(output_buffer)
+        output_view.set_wrap_mode(Gtk.WrapMode.WORD_CHAR)
+        output_view.set_vexpand(True)
+        output_view.set_hexpand(True)
+        output_view.set_left_margin(SPELLING_OUTPUT_PADDING_PX)
+        output_view.set_right_margin(SPELLING_OUTPUT_PADDING_PX)
+        output_view.set_top_margin(SPELLING_OUTPUT_PADDING_PX)
+        output_view.set_bottom_margin(SPELLING_OUTPUT_PADDING_PX)
+        output_view.add_css_class("spelling-output-view")
+        output_scroller.set_child(output_view)
+        output_section.append(output_scroller)
+        self._spelling_output_buffer = output_buffer
+
+        thesaurus_section = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        thesaurus_section.set_hexpand(True)
+        thesaurus_section.set_vexpand(True)
+        thesaurus_header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        thesaurus_header.set_margin_bottom(6)
+        thesaurus_btn = Gtk.Button(label="Thesaurus")
+        thesaurus_btn.add_css_class("flat")
+        thesaurus_btn.add_css_class("reference-toggle")
+        thesaurus_btn.add_css_class("transform-pill")
+        thesaurus_btn.connect("clicked", self._on_thesaurus_button_clicked)
+        thesaurus_header.append(thesaurus_btn)
+        reference_btn = Gtk.Button(label="Look Up")
+        reference_btn.add_css_class("flat")
+        reference_btn.add_css_class("reference-toggle")
+        reference_btn.add_css_class("transform-pill")
+        reference_btn.connect("clicked", self._on_reference_button_clicked)
+        thesaurus_header.append(reference_btn)
+        reference_query_entry = Gtk.Entry()
+        reference_query_entry.set_placeholder_text("Ask")
+        reference_query_entry.set_hexpand(True)
+        reference_query_entry.add_css_class("reference-query-entry")
+        reference_query_entry.connect("activate", self._on_reference_question_activated)
+        thesaurus_header.append(reference_query_entry)
+        thesaurus_section.append(thesaurus_header)
+        self._thesaurus_btn = thesaurus_btn
+        self._reference_btn = reference_btn
+        self._reference_query_entry = reference_query_entry
+
+        thesaurus_stack = Gtk.Stack()
+        thesaurus_stack.set_hexpand(True)
+        thesaurus_stack.set_vexpand(True)
+
+        thesaurus_scroller = Gtk.ScrolledWindow()
+        thesaurus_scroller.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        thesaurus_scroller.set_hexpand(True)
+        thesaurus_scroller.set_vexpand(True)
+        thesaurus_scroller.set_min_content_height(160)
+        thesaurus_scroller.add_css_class("spelling-output-scroller")
+        thesaurus_list = Gtk.ListBox()
+        thesaurus_list.set_selection_mode(Gtk.SelectionMode.NONE)
+        thesaurus_list.add_css_class("thesaurus-list")
+        thesaurus_placeholder = Gtk.Label(label="")
+        thesaurus_placeholder.add_css_class("dim-label")
+        thesaurus_placeholder.set_wrap(True)
+        thesaurus_list.set_placeholder(thesaurus_placeholder)
+        thesaurus_scroller.set_child(thesaurus_list)
+        thesaurus_stack.add_named(thesaurus_scroller, "thesaurus")
+
+        reference_scroller = Gtk.ScrolledWindow()
+        reference_scroller.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        reference_scroller.set_hexpand(True)
+        reference_scroller.set_vexpand(True)
+        reference_scroller.set_min_content_height(160)
+        reference_scroller.add_css_class("spelling-output-scroller")
+        reference_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        reference_box.set_margin_top(SPELLING_OUTPUT_PADDING_PX)
+        reference_box.set_margin_bottom(SPELLING_OUTPUT_PADDING_PX)
+        reference_box.set_margin_start(SPELLING_OUTPUT_PADDING_PX)
+        reference_box.set_margin_end(SPELLING_OUTPUT_PADDING_PX)
+        reference_label = Gtk.Label(label="No reference yet.", xalign=0)
+        reference_label.set_wrap(True)
+        reference_label.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
+        reference_label.set_selectable(True)
+        reference_label.set_use_markup(True)
+        reference_label.add_css_class("dim-label")
+        reference_label.add_css_class("reference-output")
+        reference_label.connect("activate-link", self._on_reference_link_clicked)
+        reference_box.append(reference_label)
+        reference_scroller.set_child(reference_box)
+        thesaurus_stack.add_named(reference_scroller, "reference")
+
+        thesaurus_stack.set_visible_child_name("thesaurus")
+        thesaurus_section.append(thesaurus_stack)
+        self._thesaurus_list = thesaurus_list
+        self._thesaurus_placeholder = thesaurus_placeholder
+        self._thesaurus_stack = thesaurus_stack
+        self._reference_label = reference_label
+
+        split_box.append(output_section)
+        split_box.append(thesaurus_section)
+        panel.append(split_box)
+
+        return panel
+
+    def _ensure_css(self) -> None:
+        if self._css_provider is not None:
+            return
+        css = f"""
+.spelling-output-scroller {{
+  border-radius: {SPELLING_OUTPUT_CORNER_RADIUS_PX}px;
+  background-color: @view_bg_color;
+}}
+.spelling-output-scroller > viewport {{
+  border-radius: {SPELLING_OUTPUT_CORNER_RADIUS_PX}px;
+  background-color: @view_bg_color;
+}}
+.spelling-output-view {{
+  font-size: {SPELLING_OUTPUT_FONT_SIZE_PX}px;
+  background-color: @view_bg_color;
+  border-radius: {SPELLING_OUTPUT_CORNER_RADIUS_PX}px;
+}}
+.thesaurus-list row .title {{
+  font-size: {SPELLING_OUTPUT_FONT_SIZE_PX}px;
+}}
+.reference-toggle-active {{
+  background-color: @card_bg_color;
+  color: @view_fg_color;
+}}
+.transform-pill,
+.transform-pill button {{
+  border-radius: 999px;
+  padding-left: 14px;
+  padding-right: 14px;
+}}
+.transform-pill-compact,
+.transform-pill-compact button {{
+  padding-left: 10px;
+  padding-right: 10px;
+  min-height: 28px;
+  font-size: 0.85rem;
+}}
+.reference-output {{
+  font-size: {REFERENCE_OUTPUT_FONT_SIZE_PX}px;
+}}
+.reference-query-entry {{
+  font-size: {SPELLING_OUTPUT_FONT_SIZE_PX}px;
+}}
+"""
+        provider = Gtk.CssProvider()
+        provider.load_from_data(css.encode("utf-8"))
+        display = Gdk.Display.get_default()
+        if display:
+            Gtk.StyleContext.add_provider_for_display(
+                display,
+                provider,
+                Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION,
+            )
+            self._css_provider = provider
+
+    def _build_proof_panel(self) -> Gtk.Box:
+        panel = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+        panel.set_margin_top(6)
+        panel.set_margin_bottom(12)
+        panel.set_margin_start(18)
+        panel.set_margin_end(18)
+
+        page_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+        page_box.set_hexpand(True)
+        self._start_spin = Gtk.SpinButton.new_with_range(1, 9999, 1)
+        self._start_spin.set_value(1)
+        self._end_spin = Gtk.SpinButton.new_with_range(1, 9999, 1)
+        self._end_spin.set_value(1)
+        page_box.append(Gtk.Label(label="Page range:"))
+        page_box.append(self._start_spin)
+        page_box.append(Gtk.Label(label="to"))
+        page_box.append(self._end_spin)
+        panel.append(page_box)
+
+        run_btn = Gtk.Button(label="Request Changes", icon_name="media-playback-start-symbolic")
+        run_btn.add_css_class("suggested-action")
+        run_btn.add_css_class("flat")
+        run_btn.set_action_name("app.request-changes")
+        self._run_btn = run_btn
+
+        view_json_btn = Gtk.Button(label="View Last JSON", icon_name="text-x-generic-symbolic")
+        view_json_btn.add_css_class("flat")
+        view_json_btn.set_sensitive(False)
+        view_json_btn.set_action_name("app.view-last-json")
+        self._view_json_btn = view_json_btn
+
+        btn_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        btn_row.append(run_btn)
+        btn_row.append(view_json_btn)
+        panel.append(btn_row)
+
+        sep = Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL)
+        panel.append(sep)
+
+        list_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        scroller = Gtk.ScrolledWindow()
+        scroller.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        scroller.set_hexpand(True)
+        scroller.set_vexpand(True)  # fill remaining vertical space for suggestions
+        scroller.set_child(list_box)
+        self._list_box = list_box
+
+        info_label = Gtk.Label(label="Proof reading suggestions will appear here after running the tool.")
+        info_label.set_wrap(True)
+        info_label.add_css_class("dim-label")
+        self._empty_label = info_label
+        list_box.append(info_label)
+
+        panel.append(scroller)
+        return panel
+
+    def _ensure_menu(self) -> None:
+        menu = Gio.Menu()
+        menu.append("Settings", "app.settings")
+        menu.append("Editor Commands", "app.editor-commands")
+        self._menu_button.set_menu_model(menu)
+
+        action_settings = Gio.SimpleAction.new("settings", None)
+        action_settings.connect("activate", self._on_open_settings)
+        self.get_application().add_action(action_settings)
+
+    def _register_actions(self) -> None:
+        app = self.get_application()
+
+        def _add_action(name: str, handler: Callable[[], None]) -> None:
+            action = Gio.SimpleAction.new(name, None)
+            action.connect("activate", lambda _action, _param: handler())
+            app.add_action(action)
+
+        _add_action("launch-writer", lambda: self._on_launch_clicked(None))
+        _add_action("open-last-odt", lambda: self._on_open_last_odt_clicked(None))
+        _add_action("choose-source-file", lambda: self._on_choose_source_file(None))
+        _add_action("editor-commands", lambda: self._on_open_editor_commands())
+        _add_action("direct-input", lambda: self._on_direct_input_clicked(None))
+        _add_action(
+            "direct-input-no-trailing-space",
+            lambda: self._on_direct_input_no_trailing_space_clicked(None),
+        )
+        _add_action("combine-cites", lambda: self._on_combine_cites_clicked(None))
+        _add_action("spellingstyle", lambda: self._on_spellingstyle_clicked(None))
+        _add_action("improve1", lambda: self._on_improve1_clicked(None))
+        _add_action("improve2", lambda: self._on_improve2_clicked(None))
+        _add_action("improve-selected", lambda: self._on_improve_selected_clicked(None))
+        _add_action("keep-original", lambda: self._on_keep_original_clicked(None))
+        _add_action("reference-lookup", lambda: self._on_reference_clicked(None))
+        _add_action("transform-shorten", lambda: self._on_shorten_clicked(None))
+        _add_action("transform-wrap-quotes", lambda: self._on_wrap_quotes_clicked(None))
+        _add_action("transform-topic-sentence", lambda: self._on_topic_sentence_clicked(None))
+        _add_action("transform-introduction", lambda: self._on_introduction_clicked(None))
+        _add_action("transform-conclusion", lambda: self._on_conclusion_clicked(None))
+        _add_action("transform-concl-no-issues", lambda: self._on_concl_no_issues_clicked(None))
+        _add_action("transform-concl-section", lambda: self._on_concl_section_clicked(None))
+        _add_action("add-case", lambda: self._on_add_case_clicked(None))
+        _add_action("request-changes", lambda: self._on_request_clicked(None))
+        _add_action("view-last-json", lambda: self._on_view_json_clicked(None))
+        _add_action("focus-ask", self._on_focus_ask)
+        _add_action("save-settings", self._on_action_save_settings)
+
+        goto_action = Gio.SimpleAction.new("suggestion-goto", GLib.VariantType.new("i"))
+        goto_action.connect("activate", self._on_action_suggestion_goto)
+        app.add_action(goto_action)
+
+        accept_action = Gio.SimpleAction.new("suggestion-accept", GLib.VariantType.new("i"))
+        accept_action.connect("activate", self._on_action_suggestion_accept)
+        app.add_action(accept_action)
+
+        reject_action = Gio.SimpleAction.new("suggestion-reject", GLib.VariantType.new("i"))
+        reject_action.connect("activate", self._on_action_suggestion_reject)
+        app.add_action(reject_action)
+
+        app.set_accels_for_action("app.focus-ask", ["<Ctrl><Shift>Q"])
+
+
+    # Actions ------------------------------------------------------------
+    def _on_open_settings(self, *_args: object) -> None:
+        win = SettingsWindow(
+            self,
+            self._proof_settings,
+            self._spelling_settings,
+            self._improve1_settings,
+            self._improve2_settings,
+            self._combine_cites_settings,
+            self._thesaurus_settings,
+            self._reference_settings,
+            self._ask_settings,
+            self._shorten_settings,
+            self._introduction_settings,
+            self._conclusion_settings,
+            self._concl_no_issues_settings,
+            self._topic_sentence_settings,
+            self._concl_section_settings,
+            self._editor_source_file,
+            self._on_editor_source_file_updated,
+            self._on_settings_saved,
+        )
+        win.connect("close-request", self._on_settings_closed)
+        self._settings_window = win
+        win.present()
+
+    def _on_open_editor_commands(self) -> None:
+        if not self._editor_commands_window:
+            win = EditorCommandsWindow(self)
+            win.connect("close-request", self._on_editor_commands_closed)
+            self._editor_commands_window = win
+        self._editor_commands_window.present()
+
+    def _on_settings_saved(
+        self,
+        proof_settings: ProofreadSettings,
+        spelling_settings: SpellingStyleSettings,
+        improve1_settings: Improve1Settings,
+        improve2_settings: Improve2Settings,
+        combine_cites_settings: CombineCitesSettings,
+        thesaurus_settings: ThesaurusSettings,
+        reference_settings: ReferenceSettings,
+        ask_settings: AskSettings,
+        shorten_settings: ShortenSettings,
+        introduction_settings: IntroductionSettings,
+        conclusion_settings: ConclusionSettings,
+        concl_no_issues_settings: ConclNoIssuesSettings,
+        topic_sentence_settings: TopicSentenceSettings,
+        concl_section_settings: ConclSectionSettings,
+    ) -> None:
+        self._proof_settings = proof_settings
+        self._spelling_settings = spelling_settings
+        self._improve1_settings = improve1_settings
+        self._improve2_settings = improve2_settings
+        self._combine_cites_settings = combine_cites_settings
+        self._thesaurus_settings = thesaurus_settings
+        self._reference_settings = reference_settings
+        self._ask_settings = ask_settings
+        self._shorten_settings = shorten_settings
+        self._introduction_settings = introduction_settings
+        self._conclusion_settings = conclusion_settings
+        self._concl_no_issues_settings = concl_no_issues_settings
+        self._topic_sentence_settings = topic_sentence_settings
+        self._concl_section_settings = concl_section_settings
+        save_proofread_settings(proof_settings)
+        save_spellingstyle_settings(spelling_settings)
+        save_improve1_settings(improve1_settings)
+        save_improve2_settings(improve2_settings)
+        save_combine_cites_settings(combine_cites_settings)
+        save_thesaurus_settings(thesaurus_settings)
+        save_reference_settings(reference_settings)
+        save_ask_settings(ask_settings)
+        save_shorten_settings(shorten_settings)
+        save_introduction_settings(introduction_settings)
+        save_conclusion_settings(conclusion_settings)
+        save_concl_no_issues_settings(concl_no_issues_settings)
+        save_topic_sentence_settings(topic_sentence_settings)
+        save_concl_section_settings(concl_section_settings)
+
+    def _on_settings_closed(self, _window: Gtk.Window) -> bool:
+        self._settings_window = None
+        return False
+
+    def _on_editor_commands_closed(self, _window: Gtk.Window) -> bool:
+        self._editor_commands_window = None
+        return False
+
+    def _on_launch_clicked(self, _button: Gtk.Button) -> None:
+        dialog = Gtk.FileDialog(title="Choose a Writer document")
+        dialog.open(self, None, self._on_file_chosen)
+
+    def _on_open_last_odt_clicked(self, _button: Gtk.Button) -> None:
+        path = self._last_odt_path
+        if not path:
+            self._show_toast("No recent Writer document saved.")
+            return
+        if not path.exists():
+            self._show_toast("Last Writer document no longer exists.")
+            self._set_last_odt_path(None)
+            return
+        self._current_doc_path = path
+        self._launch_writer_document(path)
+
+    def _on_file_chosen(self, dialog: Gtk.FileDialog, result: Gio.AsyncResult) -> None:  # noqa: D401
+        try:
+            file = dialog.open_finish(result)
+            path = Path(file.get_path() or "")
+        except Exception:
+            return
+        if not path:
+            return
+        self._current_doc_path = path
+        self._launch_writer_document(path)
+
+    def _on_choose_source_file(self, _button: Gtk.Button) -> None:
+        dialog = Gtk.FileDialog(title="Choose a source text file")
+        dialog.open(self, None, self._on_source_file_chosen)
+
+    def _on_source_file_chosen(self, dialog: Gtk.FileDialog, result: Gio.AsyncResult) -> None:  # noqa: D401
+        try:
+            file = dialog.open_finish(result)
+            path = Path(file.get_path() or "")
+        except Exception:
+            return
+        if not path:
+            return
+        self._set_editor_source_file(path)
+
+    def _on_editor_source_file_updated(self, path: Path | None) -> None:
+        self._set_editor_source_file(path)
+
+    def _set_editor_source_file(self, path: Path | None) -> None:
+        self._editor_source_file = path.expanduser().resolve(strict=False) if path else None
+        if self._settings_window:
+            self._settings_window.set_source_file(self._editor_source_file)
+        save_editor_source_file(self._editor_source_file)
+
+    def _on_request_clicked(self, _button: Gtk.Button) -> None:
+        if self._busy:
+            return
+        if not self._proof_settings.is_configured():
+            self._show_toast("Add API URL, API key, and prompt in Settings. Model ID may be required.")
+            return
+        desktop = self._get_desktop()
+        if not desktop:
+            self._show_toast("Unable to reach LibreOffice listener. Is the service running?")
+            return
+        doc = self._get_active_writer(desktop)
+        if not doc:
+            self._show_toast("Open a Writer document (File → Launch Writer).")
+            return
+        self._last_raw_response = None
+        self._view_json_btn.set_sensitive(False)
+        start = int(self._start_spin.get_value())
+        end = int(self._end_spin.get_value())
+        if end < start:
+            end = start
+            self._end_spin.set_value(start)
+        self._set_busy(True)
+        self._status_label.set_label("Reading page range…")
+        thread = threading.Thread(target=self._gather_and_request, args=(doc, start, end), daemon=True)
+        thread.start()
+
+    def _on_spellingstyle_clicked(self, _button: Gtk.Button) -> None:
+        if self._busy:
+            return
+        if not self._spelling_settings.is_configured():
+            self._show_toast("Add SpellingStyle API URL, API key, and prompt in Settings. Model ID may be required.")
+            return
+        if self._spelling_settings.api_url.rstrip("/").endswith("/responses"):
+            self._show_toast("SpellingStyle uses a chat endpoint. Update the API URL in Settings.")
+            return
+        source_path = self._editor_source_file
+        if not source_path or not source_path.exists():
+            self._show_toast("Choose a source text file first.")
+            return
+        try:
+            source_text = source_path.read_text(encoding="utf-8")
+        except OSError as exc:
+            self._show_toast(f"Unable to read source file: {exc}")
+            return
+        if not source_text.strip():
+            self._show_toast("Source file is empty.")
+            return
+        desktop = self._get_desktop()
+        if not desktop:
+            self._show_toast("Unable to reach LibreOffice listener. Is the service running?")
+            return
+        doc = self._get_active_writer(desktop)
+        if not doc:
+            self._show_toast("Open a Writer document (File → Launch Writer).")
+            return
+        if not self._prepare_editor_insertion(doc):
+            self._show_toast("Unable to prepare Writer insertion point.")
+            return
+        GLib.idle_add(self._set_spelling_output_text, "")
+        self._set_busy(True)
+        self._status_label.set_label("Streaming SpellingStyle output…")
+        thread = threading.Thread(target=self._run_spellingstyle, args=(doc, source_text), daemon=True)
+        thread.start()
+
+    def _run_direct_input(self, add_trailing_space: bool) -> None:
+        if self._busy:
+            return
+        source_path = self._editor_source_file
+        if not source_path or not source_path.exists():
+            self._show_toast("Choose a source text file first.")
+            return
+        try:
+            source_text = source_path.read_text(encoding="utf-8")
+        except OSError as exc:
+            self._show_toast(f"Unable to read source file: {exc}")
+            return
+        if not source_text.strip():
+            self._show_toast("Source file is empty.")
+            return
+        desktop = self._get_desktop()
+        if not desktop:
+            self._show_toast("Unable to reach LibreOffice listener. Is the service running?")
+            return
+        doc = self._get_active_writer(desktop)
+        if not doc:
+            self._show_toast("Open a Writer document (File → Launch Writer).")
+            return
+        if not self._prepare_editor_insertion(doc):
+            self._show_toast("Unable to prepare Writer insertion point.")
+            return
+        if source_text.startswith(" ") and self._get_preceding_char(doc) == " ":
+            source_text = source_text.lstrip(" ")
+        self._set_busy(True)
+        self._status_label.set_label("Inserting source text…")
+        self._append_editor_text(source_text)
+        if self._editor_insert_doc and self._editor_insert_cursor:
+            self._flush_pending_newlines(
+                self._editor_insert_doc,
+                self._editor_insert_cursor,
+                "_editor_pending_newlines",
+            )
+            if add_trailing_space:
+                self._ensure_single_trailing_space(self._editor_insert_doc, self._editor_insert_cursor)
+            else:
+                self._trim_trailing_whitespace(self._editor_insert_doc, self._editor_insert_cursor)
+        self._capture_spellingstyle_range_end()
+        self._set_busy(False)
+        self._status_label.set_label("Source text inserted.")
+
+    def _on_direct_input_clicked(self, _button: Gtk.Button) -> None:
+        self._run_direct_input(add_trailing_space=True)
+
+    def _on_direct_input_no_trailing_space_clicked(self, _button: Gtk.Button) -> None:
+        self._run_direct_input(add_trailing_space=False)
+
+    def _on_combine_cites_clicked(self, _button: Gtk.Button) -> None:
+        if self._busy:
+            return
+        if not self._combine_cites_settings.is_configured():
+            self._show_toast("Add Combine Cites API URL, API key, and prompt in Settings. Model ID may be required.")
+            return
+        desktop = self._get_desktop()
+        if not desktop:
+            self._show_toast("Unable to reach LibreOffice listener. Is the service running?")
+            return
+        doc = self._get_active_writer(desktop)
+        if not doc:
+            self._show_toast("Open a Writer document (File → Launch Writer).")
+            return
+        self._ensure_writer_frame_active(desktop, doc)
+        found = self._find_first_uncombined_cites(doc)
+        if not found:
+            self._show_toast("No uncombined citation runs found.")
+            return
+        cite_text, cite_cursor = found
+        self._combine_cites_doc = doc
+        self._combine_cites_cursor = cite_cursor
+        self._set_busy(True)
+        self._status_label.set_label("Combining citations…")
+        thread = threading.Thread(target=self._run_combine_cites, args=(cite_text,), daemon=True)
+        thread.start()
+
+    def _on_improve1_clicked(self, _button: Gtk.Button) -> None:
+        if self._busy:
+            return
+        if not self._improve1_settings.is_configured():
+            self._show_toast("Add Improve 1 API URL, API key, and prompt in Settings. Model ID may be required.")
+            return
+        source_text = self._get_spelling_output_text().strip()
+        if not source_text:
+            self._show_toast("SpellingStyle output is empty.")
+            return
+        desktop = self._get_desktop()
+        if not desktop:
+            self._show_toast("Unable to reach LibreOffice listener. Is the service running?")
+            return
+        doc = self._get_active_writer(desktop)
+        if not doc:
+            self._show_toast("Open a Writer document (File → Launch Writer).")
+            return
+        if not self._select_spellingstyle_range(doc):
+            self._show_toast("Unable to select the last SpellingStyle range.")
+            return
+        if not self._prepare_improve_insertion(doc):
+            self._show_toast("Unable to prepare Improve 1 insertion point.")
+            return
+        self._set_busy(True)
+        self._status_label.set_label("Improving SpellingStyle output…")
+        thread = threading.Thread(target=self._run_improve1, args=(source_text,), daemon=True)
+        thread.start()
+
+    def _on_improve2_clicked(self, _button: Gtk.Button) -> None:
+        if self._busy:
+            return
+        if not self._improve2_settings.is_configured():
+            self._show_toast("Add Improve 2 API URL, API key, and prompt in Settings. Model ID may be required.")
+            return
+        source_text = self._get_spelling_output_text().strip()
+        if not source_text:
+            self._show_toast("SpellingStyle output is empty.")
+            return
+        desktop = self._get_desktop()
+        if not desktop:
+            self._show_toast("Unable to reach LibreOffice listener. Is the service running?")
+            return
+        doc = self._get_active_writer(desktop)
+        if not doc:
+            self._show_toast("Open a Writer document (File → Launch Writer).")
+            return
+        if not self._select_spellingstyle_range(doc):
+            self._show_toast("Unable to select the last streamed range.")
+            return
+        if not self._prepare_improve_insertion(doc):
+            self._show_toast("Unable to prepare Improve 2 insertion point.")
+            return
+        self._set_busy(True)
+        self._status_label.set_label("Improving SpellingStyle output (Improve 2)…")
+        thread = threading.Thread(target=self._run_improve2, args=(source_text,), daemon=True)
+        thread.start()
+
+    def _on_improve_selected_clicked(self, _button: Gtk.Button) -> None:
+        if self._busy:
+            return
+        if not self._improve1_settings.is_configured():
+            self._show_toast("Add Improve 1 API URL, API key, and prompt in Settings. Model ID may be required.")
+            return
+        desktop = self._get_desktop()
+        if not desktop:
+            self._show_toast("Unable to reach LibreOffice listener. Is the service running?")
+            return
+        doc = self._get_active_writer(desktop)
+        if not doc:
+            self._show_toast("Open a Writer document (File → Launch Writer).")
+            return
+        view_cursor = doc.getCurrentController().getViewCursor()
+        source_text = view_cursor.getString()
+        if not source_text.strip():
+            self._show_toast("Select text in Writer first.")
+            return
+        self._set_spelling_output_text(source_text)
+        if not self._prepare_selection_insertion(doc, view_cursor):
+            self._show_toast("Unable to prepare selected text replacement.")
+            return
+        self._set_busy(True)
+        self._status_label.set_label("Improving selected text…")
+        thread = threading.Thread(target=self._run_improve_selected, args=(source_text,), daemon=True)
+        thread.start()
+
+    def _on_keep_original_clicked(self, _button: Gtk.Button) -> None:
+        if self._busy:
+            return
+        source_text = self._get_spelling_output_text().strip()
+        if not source_text:
+            self._show_toast("SpellingStyle output is empty.")
+            return
+        desktop = self._get_desktop()
+        if not desktop:
+            self._show_toast("Unable to reach LibreOffice listener. Is the service running?")
+            return
+        doc = self._get_active_writer(desktop)
+        if not doc:
+            self._show_toast("Open a Writer document (File → Launch Writer).")
+            return
+        if not self._select_spellingstyle_range(doc):
+            self._show_toast("Unable to select the last streamed range.")
+            return
+        if not self._prepare_improve_insertion(doc):
+            self._show_toast("Unable to prepare insertion point.")
+            return
+        self._set_busy(True)
+        self._status_label.set_label("Restoring SpellingStyle output…")
+        self._append_improve1_text(source_text)
+        if self._improve_insert_doc and self._improve_insert_cursor:
+            self._ensure_single_trailing_space(self._improve_insert_doc, self._improve_insert_cursor)
+        self._capture_improve1_range_end()
+        self._set_busy(False)
+        self._status_label.set_label("Original output restored.")
+
+    def _on_thesaurus_button_clicked(self, _button: Gtk.Button) -> None:
+        self._on_thesaurus_clicked(_button)
+
+    def _on_thesaurus_clicked(self, _button: Gtk.Button) -> None:
+        if self._busy:
+            return
+        if not self._thesaurus_settings.is_configured():
+            self._show_toast("Add Thesaurus API URL, API key, and prompt in Settings. Model ID may be required.")
+            return
+        desktop = self._get_desktop()
+        if not desktop:
+            self._show_toast("Unable to reach LibreOffice listener. Is the service running?")
+            return
+        doc = self._get_active_writer(desktop)
+        if not doc:
+            self._show_toast("Open a Writer document (File → Launch Writer).")
+            return
+        view_cursor = doc.getCurrentController().getViewCursor()
+        source_text = view_cursor.getString()
+        if not source_text.strip():
+            self._show_toast("Select text in Writer first.")
+            return
+        self._show_thesaurus_output()
+        self._set_thesaurus_placeholder("Looking up alternatives…")
+        self._thesaurus_words = []
+        self._render_thesaurus_words()
+        self._set_busy(True)
+        self._status_label.set_label("Fetching thesaurus alternatives…")
+        thread = threading.Thread(target=self._run_thesaurus, args=(source_text,), daemon=True)
+        thread.start()
+
+    def _on_reference_button_clicked(self, _button: Gtk.Button) -> None:
+        self._on_reference_clicked(_button)
+
+    def _on_reference_clicked(self, _button: Gtk.Button) -> None:
+        if self._busy:
+            return
+        if not self._reference_settings.is_configured():
+            self._show_toast(
+                "Add Reference API URL, API key, Tavily API key, and prompt in Settings. Model ID may be required."
+            )
+            return
+        desktop = self._get_desktop()
+        if not desktop:
+            self._show_toast("Unable to reach LibreOffice listener. Is the service running?")
+            return
+        doc = self._get_active_writer(desktop)
+        if not doc:
+            self._show_toast("Open a Writer document (File → Launch Writer).")
+            return
+        view_cursor = doc.getCurrentController().getViewCursor()
+        source_text = view_cursor.getString()
+        if not source_text.strip():
+            self._show_toast("Select text in Writer first.")
+            return
+        self._show_reference_output()
+        self._set_reference_placeholder("Looking up definition…")
+        self._set_busy(True)
+        self._status_label.set_label("Fetching reference definition…")
+        thread = threading.Thread(target=self._run_reference, args=(source_text, None), daemon=True)
+        thread.start()
+
+    def _on_reference_question_activated(self, entry: Gtk.Entry) -> None:
+        question = entry.get_text().strip()
+        if not question:
+            return
+        if self._busy:
+            return
+        if not self._ask_settings.is_configured():
+            self._show_toast(
+                "Add Ask API URL, API key, Tavily API key, and prompt in Settings. Model ID may be required."
+            )
+            return
+        self._show_reference_output()
+        self._set_reference_placeholder("Answering question…")
+        self._set_busy(True)
+        self._status_label.set_label("Answering question…")
+        thread = threading.Thread(target=self._run_ask, args=(question,), daemon=True)
+        thread.start()
+
+    def _on_focus_ask(self) -> None:
+        if hasattr(self, "_reference_query_entry"):
+            self._reference_query_entry.grab_focus()
+
+    def _on_shorten_clicked(self, _button: Gtk.Button) -> None:
+        if self._busy:
+            return
+        if not self._shorten_settings.is_configured():
+            self._show_toast("Add Shorten API URL, API key, and prompt in Settings. Model ID may be required.")
+            return
+        desktop = self._get_desktop()
+        if not desktop:
+            self._show_toast("Unable to reach LibreOffice listener. Is the service running?")
+            return
+        doc = self._get_active_writer(desktop)
+        if not doc:
+            self._show_toast("Open a Writer document (File → Launch Writer).")
+            return
+        view_cursor = doc.getCurrentController().getViewCursor()
+        source_text = view_cursor.getString()
+        if not source_text.strip():
+            self._show_toast("Select text in Writer first.")
+            return
+        self._set_spelling_output_text("")
+        if not self._prepare_selection_insertion(doc, view_cursor):
+            self._show_toast("Unable to prepare selected text replacement.")
+            return
+        self._set_busy(True)
+        self._status_label.set_label("Shortening selection…")
+        thread = threading.Thread(target=self._run_shorten, args=(source_text,), daemon=True)
+        thread.start()
+
+    def _on_wrap_quotes_clicked(self, _button: Gtk.Button) -> None:
+        if self._busy:
+            return
+        desktop = self._get_desktop()
+        if not desktop:
+            self._show_toast("Unable to reach LibreOffice listener. Is the service running?")
+            return
+        doc = self._get_active_writer(desktop)
+        if not doc:
+            self._show_toast("Open a Writer document (File → Launch Writer).")
+            return
+        view_cursor = doc.getCurrentController().getViewCursor()
+        source_text = view_cursor.getString()
+        if not source_text.strip():
+            self._show_toast("Select text in Writer first.")
+            return
+        wrapped = self._wrap_text_in_curly_quotes(source_text)
+        self._replace_selected_text_no_trailing_space(wrapped)
+
+    def _on_add_case_clicked(self, _button: Gtk.Button) -> None:
+        if self._busy:
+            return
+        desktop = self._get_desktop()
+        if not desktop:
+            self._show_toast("Unable to reach LibreOffice listener. Is the service running?")
+            return
+        doc = self._get_active_writer(desktop)
+        if not doc:
+            self._show_toast("Open a Writer document (File → Launch Writer).")
+            return
+        view_cursor = doc.getCurrentController().getViewCursor()
+        citation = " ".join(view_cursor.getString().split())
+        if not citation:
+            self._show_toast("Select a case citation in Writer first.")
+            return
+        self._set_busy(True)
+        self._status_label.set_label("Adding case to concordance and AutoText…")
+        selection_start = view_cursor.getStart()
+        selection_end = view_cursor.getEnd()
+        thread = threading.Thread(
+            target=self._run_add_case,
+            args=(citation, doc, selection_start, selection_end),
+            daemon=True,
+        )
+        thread.start()
+
+    def _run_add_case(
+        self,
+        citation: str,
+        doc: XTextDocument,
+        selection_start: Any,
+        selection_end: Any,
+    ) -> None:
+        try:
+            self._append_case_to_concordance(citation)
+            added_autotext = self._add_case_to_autotext(citation, doc, selection_start, selection_end)
+        except Exception as exc:  # noqa: BLE001
+            GLib.idle_add(self._on_add_case_failed, f"{type(exc).__name__}: {exc}")
+            return
+        GLib.idle_add(self._on_add_case_finished, added_autotext)
+
+    def _on_add_case_finished(self, added_autotext: bool) -> bool:
+        if added_autotext:
+            self._show_toast("Added case to concordance and AutoText.")
+        else:
+            self._show_toast("Added case to concordance. AutoText already had it.")
+        self._status_label.set_label("Ready.")
+        self._set_busy(False)
+        return GLib.SOURCE_REMOVE
+
+    def _on_add_case_failed(self, message: str) -> bool:
+        self._show_toast(f"Unable to add case: {message}")
+        self._status_label.set_label("Ready.")
+        self._set_busy(False)
+        return GLib.SOURCE_REMOVE
+
+    def _on_topic_sentence_clicked(self, _button: Gtk.Button) -> None:
+        if self._busy:
+            return
+        if not self._topic_sentence_settings.is_configured():
+            self._show_toast("Add Topic Sentence API URL, API key, and prompt in Settings. Model ID may be required.")
+            return
+        desktop = self._get_desktop()
+        if not desktop:
+            self._show_toast("Unable to reach LibreOffice listener. Is the service running?")
+            return
+        doc = self._get_active_writer(desktop)
+        if not doc:
+            self._show_toast("Open a Writer document (File → Launch Writer).")
+            return
+        source_text = self._extract_paragraph_at_cursor(doc)
+        if not source_text:
+            self._show_toast("Place the cursor in a paragraph to summarize.")
+            return
+        if not self._prepare_editor_insertion(doc):
+            self._show_toast("Unable to prepare Writer insertion point.")
+            return
+        self._set_spelling_output_text("")
+        self._set_busy(True)
+        self._status_label.set_label("Creating topic sentence…")
+        thread = threading.Thread(target=self._run_topic_sentence, args=(source_text,), daemon=True)
+        thread.start()
+
+    def _on_introduction_clicked(self, _button: Gtk.Button) -> None:
+        if self._busy:
+            return
+        if not self._introduction_settings.is_configured():
+            self._show_toast("Add Introduction API URL, API key, and prompt in Settings. Model ID may be required.")
+            return
+        desktop = self._get_desktop()
+        if not desktop:
+            self._show_toast("Unable to reach LibreOffice listener. Is the service running?")
+            return
+        doc = self._get_active_writer(desktop)
+        if not doc:
+            self._show_toast("Open a Writer document (File → Launch Writer).")
+            return
+        source_text = self._extract_section_between_headings(doc, "ARGUMENT", "CONCLUSION")
+        if not source_text:
+            self._show_toast('Unable to find text between "ARGUMENT" and "CONCLUSION".')
+            return
+        if not self._prepare_editor_insertion(doc):
+            self._show_toast("Unable to prepare Writer insertion point.")
+            return
+        self._set_spelling_output_text("")
+        self._set_busy(True)
+        self._status_label.set_label("Writing introduction…")
+        thread = threading.Thread(target=self._run_introduction, args=(source_text,), daemon=True)
+        thread.start()
+
+    def _on_conclusion_clicked(self, _button: Gtk.Button) -> None:
+        if self._busy:
+            return
+        if not self._conclusion_settings.is_configured():
+            self._show_toast("Add Conclusion API URL, API key, and prompt in Settings. Model ID may be required.")
+            return
+        desktop = self._get_desktop()
+        if not desktop:
+            self._show_toast("Unable to reach LibreOffice listener. Is the service running?")
+            return
+        doc = self._get_active_writer(desktop)
+        if not doc:
+            self._show_toast("Open a Writer document (File → Launch Writer).")
+            return
+        source_text = self._extract_section_between_headings(doc, "ARGUMENT", "CONCLUSION")
+        if not source_text:
+            self._show_toast('Unable to find text between "ARGUMENT" and "CONCLUSION".')
+            return
+        if not self._prepare_editor_insertion(doc):
+            self._show_toast("Unable to prepare Writer insertion point.")
+            return
+        self._set_spelling_output_text("")
+        self._set_busy(True)
+        self._status_label.set_label("Writing conclusion…")
+        thread = threading.Thread(target=self._run_conclusion, args=(source_text,), daemon=True)
+        thread.start()
+
+    def _on_concl_no_issues_clicked(self, _button: Gtk.Button) -> None:
+        if self._busy:
+            return
+        if not self._concl_no_issues_settings.is_configured():
+            self._show_toast(
+                "Add Concl. No Issues API URL, API key, and prompt in Settings. Model ID may be required."
+            )
+            return
+        desktop = self._get_desktop()
+        if not desktop:
+            self._show_toast("Unable to reach LibreOffice listener. Is the service running?")
+            return
+        doc = self._get_active_writer(desktop)
+        if not doc:
+            self._show_toast("Open a Writer document (File → Launch Writer).")
+            return
+        source_text = self._extract_section_between_headings(doc, "ISSUES CONSIDERED", "CONCLUSION")
+        if not source_text:
+            self._show_toast('Unable to find text between "ISSUES CONSIDERED" and "CONCLUSION".')
+            return
+        if not self._prepare_editor_insertion(doc):
+            self._show_toast("Unable to prepare Writer insertion point.")
+            return
+        self._set_spelling_output_text("")
+        self._set_busy(True)
+        self._status_label.set_label("Writing conclusion (no issues)…")
+        thread = threading.Thread(target=self._run_conclusion_no_issues, args=(source_text,), daemon=True)
+        thread.start()
+
+    def _on_concl_section_clicked(self, _button: Gtk.Button) -> None:
+        if self._busy:
+            return
+        if not self._concl_section_settings.is_configured():
+            self._show_toast("Add Concl. Section API URL, API key, and prompt in Settings. Model ID may be required.")
+            return
+        desktop = self._get_desktop()
+        if not desktop:
+            self._show_toast("Unable to reach LibreOffice listener. Is the service running?")
+            return
+        doc = self._get_active_writer(desktop)
+        if not doc:
+            self._show_toast("Open a Writer document (File → Launch Writer).")
+            return
+        view_cursor = doc.getCurrentController().getViewCursor()
+        source_text = self._extract_section_to_last_heading(doc, view_cursor)
+        if not source_text:
+            self._show_toast("Unable to find a heading before the cursor.")
+            return
+        if not self._prepare_editor_insertion(doc):
+            self._show_toast("Unable to prepare Writer insertion point.")
+            return
+        self._set_spelling_output_text("")
+        self._set_busy(True)
+        self._status_label.set_label("Writing section conclusion…")
+        thread = threading.Thread(target=self._run_concl_section, args=(source_text,), daemon=True)
+        thread.start()
+
+    # Thesaurus pipeline -------------------------------------------------
+    def _run_thesaurus(self, source_text: str) -> None:
+        payload = self._compose_thesaurus_payload(source_text)
+        try:
+            words = self._call_thesaurus(payload)
+        except Exception as exc:  # noqa: BLE001
+            GLib.idle_add(self._on_thesaurus_failed, str(exc))
+            return
+        GLib.idle_add(self._on_thesaurus_ready, words)
+
+    def _compose_thesaurus_payload(self, source_text: str) -> dict[str, Any]:
+        prompt = self._thesaurus_settings.prompt or DEFAULT_THESAURUS_PROMPT
+        content = f"{prompt}\n\n{source_text}" if prompt else source_text
+        payload = {
+            "messages": [
+                {"role": "user", "content": content},
+            ],
+            "stream": False,
+        }
+        return self._add_model_id(payload, self._thesaurus_settings.model_id)
+
+    def _call_thesaurus(self, payload: dict[str, Any]) -> list[str]:
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {self._thesaurus_settings.api_key}",
+            "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) Prose/1.0",
+        }
+        data = json.dumps(payload).encode("utf-8")
+        req = urllib.request.Request(self._thesaurus_settings.api_url, data=data, headers=headers, method="POST")
+        with urllib.request.urlopen(req, timeout=120) as resp:
+            raw = resp.read().decode("utf-8", errors="ignore")
+        parts = list(self._extract_response_text(raw))
+        if not parts:
+            raise ValueError("Thesaurus returned empty output.")
+        return self._parse_thesaurus_response("".join(parts).strip())
+
+    def _parse_thesaurus_response(self, text: str) -> list[str]:
+        try:
+            data = json.loads(text)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"Thesaurus response was not valid JSON: {exc}") from exc
+        words = None
+        if isinstance(data, dict):
+            words = data.get("alternatives") or data.get("synonyms") or data.get("words")
+        elif isinstance(data, list):
+            words = data
+        if not isinstance(words, list):
+            raise ValueError("Thesaurus response did not include an alternatives list.")
+        cleaned: list[str] = []
+        seen: set[str] = set()
+        for item in words:
+            word = str(item).strip()
+            if not word or word in seen:
+                continue
+            seen.add(word)
+            cleaned.append(word)
+        if not cleaned:
+            raise ValueError("Thesaurus response contained no alternatives.")
+        return cleaned
+
+    def _on_thesaurus_ready(self, words: list[str]) -> bool:
+        self._set_busy(False)
+        self._thesaurus_words = words
+        self._set_thesaurus_placeholder("")
+        self._render_thesaurus_words()
+        self._status_label.set_label("Thesaurus alternatives ready.")
+        return False
+
+    def _on_thesaurus_failed(self, message: str) -> bool:
+        self._set_busy(False)
+        self._set_thesaurus_placeholder("Unable to load alternatives.")
+        self._thesaurus_words = []
+        self._render_thesaurus_words()
+        self._notify_llm_error(message)
+        return False
+
+    # Reference pipeline ------------------------------------------------
+    def _run_reference(self, source_text: str, prompt_override: str | None) -> None:
+        payload = self._compose_reference_payload(source_text, prompt_override)
+        try:
+            received = False
+            if self._reference_settings.api_url.rstrip("/").endswith("/responses"):
+                stream = self._stream_responses(
+                    payload,
+                    self._reference_settings.api_url,
+                    self._reference_settings.api_key,
+                )
+            else:
+                stream = self._stream_custom(payload, self._reference_settings.api_url, self._reference_settings.api_key)
+            for chunk in stream:
+                received = True
+                GLib.idle_add(self._append_reference_output_text, chunk)
+        except Exception as exc:  # noqa: BLE001
+            GLib.idle_add(self._on_reference_failed, str(exc))
+            return
+        if not received:
+            GLib.idle_add(self._on_reference_failed, "Reference returned empty output.")
+            return
+        GLib.idle_add(self._on_reference_finished, "Reference ready.")
+
+    def _run_ask(self, question: str) -> None:
+        payload = self._compose_ask_payload(question)
+        try:
+            received = False
+            if self._ask_settings.api_url.rstrip("/").endswith("/responses"):
+                stream = self._stream_responses(payload, self._ask_settings.api_url, self._ask_settings.api_key)
+            else:
+                stream = self._stream_custom(payload, self._ask_settings.api_url, self._ask_settings.api_key)
+            for chunk in stream:
+                received = True
+                GLib.idle_add(self._append_reference_output_text, chunk)
+        except Exception as exc:  # noqa: BLE001
+            GLib.idle_add(self._on_reference_failed, str(exc))
+            return
+        if not received:
+            GLib.idle_add(self._on_reference_failed, "Ask returned empty output.")
+            return
+        GLib.idle_add(self._clear_ask_entry)
+        GLib.idle_add(self._on_reference_finished, "Answer ready.")
+
+    def _compose_reference_payload(self, source_text: str, prompt_override: str | None) -> dict[str, Any]:
+        prompt = prompt_override or self._reference_settings.prompt or DEFAULT_REFERENCE_PROMPT
+        content = f"{prompt}\n\n{source_text}" if prompt else source_text
+        payload = {
+            "input": content,
+            "stream": True,
+            "tools": [
+                {
+                    "type": "mcp",
+                    "server_label": "Tavily",
+                    "server_url": TAVILY_MCP_SERVER_URL,
+                    "headers": {
+                        "Authorization": f"Bearer {self._reference_settings.tavily_api_key}",
+                        "x-api-key": self._reference_settings.tavily_api_key,
+                    },
+                }
+            ],
+            "tool_choice": "auto",
+        }
+        return self._add_model_id(payload, self._reference_settings.model_id)
+
+    def _compose_ask_payload(self, question: str) -> dict[str, Any]:
+        prompt = self._ask_settings.prompt or DEFAULT_ASK_PROMPT
+        today = datetime.now().strftime("%B %d, %Y")
+        date_line = f"Today is {today}."
+        if prompt:
+            content = f"{date_line}\n\n{prompt}\n\n{question}"
+        else:
+            content = f"{date_line}\n\n{question}"
+        payload = {
+            "input": content,
+            "stream": True,
+            "tools": [
+                {
+                    "type": "mcp",
+                    "server_label": "Tavily",
+                    "server_url": TAVILY_MCP_SERVER_URL,
+                    "headers": {
+                        "Authorization": f"Bearer {self._ask_settings.tavily_api_key}",
+                        "x-api-key": self._ask_settings.tavily_api_key,
+                    },
+                }
+            ],
+            "tool_choice": "auto",
+        }
+        return self._add_model_id(payload, self._ask_settings.model_id)
+
+    def _on_reference_finished(self, message: str) -> bool:
+        self._set_busy(False)
+        self._status_label.set_label(message)
+        return False
+
+    def _on_reference_failed(self, message: str) -> bool:
+        self._set_busy(False)
+        self._set_reference_placeholder("Unable to load reference.")
+        self._notify_llm_error(message)
+        return False
+
+    def _set_thesaurus_placeholder(self, text: str) -> None:
+        if hasattr(self, "_thesaurus_placeholder"):
+            self._thesaurus_placeholder.set_label(text)
+
+    def _show_thesaurus_output(self) -> None:
+        if hasattr(self, "_thesaurus_stack"):
+            self._thesaurus_stack.set_visible_child_name("thesaurus")
+        self._set_reference_toggle_state("thesaurus")
+
+    def _show_reference_output(self) -> None:
+        if hasattr(self, "_thesaurus_stack"):
+            self._thesaurus_stack.set_visible_child_name("reference")
+        self._set_reference_toggle_state("reference")
+
+    def _set_reference_toggle_state(self, active: str) -> None:
+        if not hasattr(self, "_thesaurus_btn") or not hasattr(self, "_reference_btn"):
+            return
+        if active == "reference":
+            self._reference_btn.add_css_class("reference-toggle-active")
+            self._thesaurus_btn.remove_css_class("reference-toggle-active")
+        else:
+            self._thesaurus_btn.add_css_class("reference-toggle-active")
+            self._reference_btn.remove_css_class("reference-toggle-active")
+
+    def _set_reference_placeholder(self, text: str) -> None:
+        self._reference_output_text = text or ""
+        self._reference_placeholder_active = True
+        if hasattr(self, "_reference_label"):
+            self._reference_label.add_css_class("dim-label")
+            self._reference_label.set_text(text or "")
+
+    def _clear_ask_entry(self) -> bool:
+        if hasattr(self, "_reference_query_entry"):
+            self._reference_query_entry.set_text("")
+        return False
+
+    def _set_reference_output_text(self, text: str) -> bool:
+        self._reference_output_text = text or ""
+        self._reference_placeholder_active = False
+        self._render_reference_output()
+        return False
+
+    def _append_reference_output_text(self, text: str) -> bool:
+        if not text:
+            return False
+        if self._reference_placeholder_active:
+            self._reference_output_text = ""
+            self._reference_placeholder_active = False
+            if hasattr(self, "_reference_label"):
+                self._reference_label.remove_css_class("dim-label")
+        self._reference_output_text += text
+        self._render_reference_output()
+        return False
+
+    def _render_reference_output(self) -> None:
+        if not hasattr(self, "_reference_label"):
+            return
+        markup = self._format_reference_markup(self._reference_output_text)
+        if markup:
+            self._reference_label.remove_css_class("dim-label")
+            self._reference_label.set_markup(markup)
+        else:
+            self._reference_label.add_css_class("dim-label")
+            self._reference_label.set_text("No reference yet.")
+
+    def _format_reference_markup(self, text: str) -> str:
+        if not text:
+            return ""
+        parts: list[str] = []
+        last = 0
+        for match in REFERENCE_URL_RE.finditer(text):
+            start, end = match.span()
+            if start > last:
+                parts.append(GLib.markup_escape_text(text[last:start]))
+            url = match.group(0)
+            escaped_url = GLib.markup_escape_text(url)
+            parts.append(f'<a href="{escaped_url}">{escaped_url}</a>')
+            last = end
+        if last < len(text):
+            parts.append(GLib.markup_escape_text(text[last:]))
+        return "".join(parts)
+
+    def _on_reference_link_clicked(self, _label: Gtk.Label, uri: str) -> bool:
+        try:
+            Gio.AppInfo.launch_default_for_uri(uri, None)
+        except Exception:
+            self._show_toast("Unable to open link.")
+        return True
+
+    def _render_thesaurus_words(self) -> None:
+        if not hasattr(self, "_thesaurus_list"):
+            return
+        for row in self._thesaurus_rows:
+            self._thesaurus_list.remove(row)
+        self._thesaurus_rows.clear()
+        for word in self._thesaurus_words:
+            row = self._build_thesaurus_row(word)
+            self._thesaurus_list.append(row)
+            self._thesaurus_rows.append(row)
+
+    def _build_thesaurus_row(self, word: str) -> Adw.ActionRow:
+        row = Adw.ActionRow(title=word)
+        row.set_activatable(True)
+        use_btn = Gtk.Button(label="Use")
+        use_btn.add_css_class("flat")
+        use_btn.connect("clicked", self._on_thesaurus_word_clicked, word)
+        row.add_suffix(use_btn)
+        row.set_activatable_widget(use_btn)
+        row.connect("activated", lambda *_args: self._on_thesaurus_word_clicked(None, word))
+        return row
+
+    def _on_thesaurus_word_clicked(self, _button: Gtk.Button | None, word: str) -> None:
+        self._replace_selected_text_no_trailing_space(word)
+
+    def _replace_selected_text_no_trailing_space(self, text: str) -> None:
+        if self._busy:
+            return
+        desktop = self._get_desktop()
+        if not desktop:
+            self._show_toast("Unable to reach LibreOffice listener. Is the service running?")
+            return
+        doc = self._get_active_writer(desktop)
+        if not doc:
+            self._show_toast("Open a Writer document (File → Launch Writer).")
+            return
+        view_cursor = doc.getCurrentController().getViewCursor()
+        if not view_cursor.getString().strip():
+            self._show_toast("Select text in Writer first.")
+            return
+        if not self._prepare_selection_insertion(doc, view_cursor):
+            self._show_toast("Unable to prepare selected text replacement.")
+            return
+        self._set_busy(True)
+        self._status_label.set_label("Replacing selected text…")
+        self._append_improve1_text(text)
+        if self._improve_insert_doc and self._improve_insert_cursor:
+            self._trim_trailing_whitespace(self._improve_insert_doc, self._improve_insert_cursor)
+        self._capture_improve1_range_end()
+        self._set_busy(False)
+        self._status_label.set_label("Selected text replaced.")
+
+    def _wrap_text_in_curly_quotes(self, text: str) -> str:
+        normalized = self._normalize_curly_quotes(text)
+        return f"“{normalized}”"
+
+    def _append_case_to_concordance(self, citation: str) -> None:
+        short = re.sub(r" \(\d{4}\) ", ",supra, ", citation)
+        short = re.sub(r"Cal\.App\.\d+[a-z]*.*", lambda m: m.group(0).split()[0], short)
+        short = re.sub(r"Cal\.\d+[a-z]*.*", lambda m: m.group(0).split()[0], short)
+        short = re.sub(r"U\.S\..*", "U.S.", short)
+        lines = [
+            f"{citation};{citation};Cases;;0;0",
+            f"{short};{citation};Cases;;0;0",
+        ]
+        with CONCORDANCE_FILE.open("a", encoding="utf-8") as handle:
+            for line in lines:
+                handle.write("\n" + line)
+
+    def _autotext_display_name(self, citation: str) -> str:
+        if citation.startswith("In re "):
+            return citation[len("In re ") :]
+        if citation.startswith("People v. "):
+            return citation[len("People v. ") :]
+        return citation
+
+    def _generate_autotext_key(self, display_name: str, existing: set[str]) -> str:
+        base = re.sub(r"[^A-Za-z0-9]+", "", display_name).upper() or "CASE"
+        base = base[:6]
+        for idx in range(1, 10000):
+            candidate = f"{base}{idx:03d}"
+            if candidate not in existing:
+                return candidate
+        raise RuntimeError("Unable to generate a unique AutoText key.")
+
+    def _split_citation_for_italics(self, citation: str) -> tuple[str, str]:
+        match = re.search(r" \(\d{4}\)", citation)
+        if match:
+            return citation[:match.start()], citation[match.start():]
+        return citation, ""
+
+    def _get_font_slant(self, name: str) -> int:
+        if uno is not None and hasattr(uno, "getConstantByName"):
+            try:
+                return uno.getConstantByName(f"com.sun.star.awt.FontSlant.{name}")
+            except Exception:
+                pass
+        try:
+            from com.sun.star.awt import FontSlant as _FontSlant  # type: ignore
+
+            return getattr(_FontSlant, name)
+        except Exception:
+            return 0 if name == "NONE" else 2
+
+    def _get_autotext_group(self, container, title: str):
+        if hasattr(container, "hasByName") and container.hasByName(title):
+            return container.getByName(title)
+        if hasattr(container, "getElementNames"):
+            for name in container.getElementNames():
+                try:
+                    group = container.getByName(name)
+                except Exception:
+                    continue
+                group_title = getattr(group, "Title", None)
+                if not group_title:
+                    try:
+                        group_title = group.getTitle()
+                    except Exception:
+                        group_title = None
+                if group_title == title:
+                    return group
+        if hasattr(container, "insertNewByName"):
+            return container.insertNewByName(title, title)
+        raise RuntimeError("Unable to access AutoText group.")
+
+    def _add_case_to_autotext(
+        self,
+        citation: str,
+        doc: XTextDocument,
+        selection_start: Any,
+        selection_end: Any,
+    ) -> bool:
+        if self._ctx is None:
+            raise RuntimeError("LibreOffice context unavailable.")
+        container = self._ctx.ServiceManager.createInstanceWithContext(
+            "com.sun.star.text.AutoTextContainer", self._ctx
+        )
+        group = self._get_autotext_group(container, "Cases")
+        display_name = self._autotext_display_name(citation)
+        existing_keys = set(group.getElementNames()) if hasattr(group, "getElementNames") else set()
+        if hasattr(group, "hasByName") and group.hasByName(display_name):
+            return False
+        for key in existing_keys:
+            try:
+                entry = group.getByName(key)
+            except Exception:
+                continue
+            title = getattr(entry, "Title", None)
+            if not title:
+                try:
+                    title = entry.getTitle()
+                except Exception:
+                    title = None
+            if title == display_name:
+                return False
+        key = self._generate_autotext_key(display_name, existing_keys)
+        text = doc.getText()
+        range_cursor = text.createTextCursorByRange(selection_start)
+        range_cursor.gotoRange(selection_end, True)
+        group.insertNewByName(key, display_name, range_cursor)
+        if hasattr(group, "store"):
+            group.store()
+        return True
+
+    def _normalize_curly_quotes(self, text: str) -> str:
+        if not text:
+            return ""
+        normalized = re.sub(r"(?<=\\w)'(?=\\w)", "’", text)
+        normalized = self._toggle_ascii_quotes(normalized, '"', "“", "”")
+        normalized = self._toggle_ascii_quotes(normalized, "'", "‘", "’")
+        return normalized
+
+    def _toggle_ascii_quotes(self, text: str, ascii_char: str, open_char: str, close_char: str) -> str:
+        parts: list[str] = []
+        open_state = True
+        for char in text:
+            if char == ascii_char:
+                parts.append(open_char if open_state else close_char)
+                open_state = not open_state
+            else:
+                parts.append(char)
+        return "".join(parts)
+
+    # UNO helpers --------------------------------------------------------
+    def _ensure_writer_frame_active(self, desktop, doc: XTextDocument) -> None:  # type: ignore[type-arg]
+        try:
+            frame = doc.getCurrentController().getFrame()
+            if frame:
+                frame.activate()
+        except Exception:
+            pass
+        try:
+            desktop.setCurrentComponent(doc)
+        except Exception:
+            pass
+
+    def _extract_section_between_headings(
+        self, doc: XTextDocument, start_heading: str, end_heading: str
+    ) -> str | None:  # type: ignore[type-arg]
+        try:
+            doc_text = doc.getText()
+        except Exception:
+            return None
+        section = None
+        try:
+            enum = doc_text.createEnumeration()
+            collecting = False
+            parts: list[str] = []
+            while enum.hasMoreElements():
+                element = enum.nextElement()
+                if not hasattr(element, "getString"):
+                    continue
+                paragraph = element.getString()
+                paragraph_stripped = paragraph.strip()
+                if not collecting:
+                    if paragraph_stripped == start_heading:
+                        collecting = True
+                    continue
+                if paragraph_stripped == end_heading:
+                    break
+                parts.append(paragraph)
+            if collecting and parts:
+                section = "\n".join(part.strip() for part in parts).strip() or None
+        except Exception:
+            section = None
+        if section:
+            return section
+        try:
+            text = doc_text.getString()
+        except Exception:
+            return None
+        text = text.replace("\r\n", "\n").replace("\r", "\n")
+        start_re = re.compile(rf"(?mi)^\\s*{re.escape(start_heading)}\\s*$")
+        end_re = re.compile(rf"(?mi)^\\s*{re.escape(end_heading)}\\s*$")
+        start_match = start_re.search(text)
+        if not start_match:
+            return None
+        end_match = end_re.search(text, start_match.end())
+        if not end_match:
+            return None
+        section = text[start_match.end() : end_match.start()].strip()
+        return section or None
+
+    def _extract_paragraph_at_cursor(self, doc: XTextDocument) -> str | None:  # type: ignore[type-arg]
+        try:
+            controller = doc.getCurrentController()
+            view_cursor = controller.getViewCursor()
+            text = doc.getText()
+            range_cursor = text.createTextCursorByRange(view_cursor)
+            range_cursor.gotoStartOfParagraph(False)
+            range_cursor.gotoEndOfParagraph(True)
+            paragraph = range_cursor.getString()
+        except Exception:
+            return None
+        paragraph = paragraph.strip()
+        return paragraph or None
+
+    def _is_heading_paragraph(self, paragraph: Any) -> bool:  # type: ignore[type-arg]
+        try:
+            outline_level = paragraph.getPropertyValue("OutlineLevel")
+            if isinstance(outline_level, int) and outline_level > 0:
+                return True
+        except Exception:
+            pass
+        try:
+            style = paragraph.getPropertyValue("ParaStyleName")
+            if isinstance(style, str) and style.lower().startswith("heading"):
+                return True
+        except Exception:
+            pass
+        return False
+
+    def _is_heading_cursor(self, cursor: Any) -> bool:  # type: ignore[type-arg]
+        try:
+            outline_level = cursor.getPropertyValue("OutlineLevel")
+            if isinstance(outline_level, int) and outline_level > 0:
+                return True
+        except Exception:
+            pass
+        try:
+            style = cursor.getPropertyValue("ParaStyleName")
+            if isinstance(style, str) and style.lower().startswith("heading"):
+                return True
+        except Exception:
+            pass
+        return False
+
+    def _extract_section_to_last_heading(self, doc: XTextDocument, view_cursor: Any) -> str | None:  # type: ignore[type-arg]
+        try:
+            text = doc.getText()
+            cursor_start = view_cursor.getStart()
+            scan_cursor = text.createTextCursorByRange(cursor_start)
+        except Exception:
+            return None
+        try:
+            scan_cursor.gotoStartOfParagraph(False)
+        except Exception:
+            return None
+        heading_end = None
+        while True:
+            if self._is_heading_cursor(scan_cursor):
+                heading_end = scan_cursor.getEnd()
+                break
+            if not scan_cursor.goLeft(1, False):
+                break
+            try:
+                scan_cursor.gotoStartOfParagraph(False)
+            except Exception:
+                break
+        if not heading_end:
+            return None
+        try:
+            section_cursor = text.createTextCursorByRange(heading_end)
+            section_cursor.gotoRange(cursor_start, True)
+            section = section_cursor.getString()
+        except Exception:
+            return None
+        section = section.strip()
+        return section or None
+
+    def _get_desktop(self):
+        if uno is None:
+            return None
+        if self._desktop is not None:
+            return self._desktop
+        connected = self._connect_desktop()
+        if not connected:
+            self._start_listener()
+            connected = self._connect_desktop()
+        if not connected:
+            self._status_label.set_label("LibreOffice listener unreachable.")
+            self._desktop = None
+        return self._desktop
+
+    def _get_active_writer(self, desktop) -> XTextDocument | None:  # type: ignore[type-arg]
+        try:
+            comp = desktop.getCurrentComponent()
+            if comp and comp.supportsService("com.sun.star.text.TextDocument"):
+                self._active_doc = comp
+                return comp
+        except Exception:
+            pass
+        # Fallback to the last loaded document if UNO does not return a current component (headless mode)
+        if self._active_doc and getattr(self._active_doc, "supportsService", lambda *_: False)(
+            "com.sun.star.text.TextDocument"
+        ):
+            return self._active_doc
+        return None
+
+    def _find_first_uncombined_cites(self, doc: XTextDocument) -> tuple[str, Any] | None:  # type: ignore[type-arg]
+        pattern = "[(][^)]*[)]([[:space:]]+[(][^)]*[)])+"
+        pattern_re = re.compile(r"\([^)]*\)(\s+\([^)]*\))+")
+        try:
+            doc_text = doc.getText()
+        except Exception:
+            doc_text = None
+        found = self._find_first_uncombined_cites_in_searchable(doc, doc_text, pattern)
+        if not found:
+            for note_text in self._iter_note_texts(doc):
+                found = self._find_first_uncombined_cites_in_text(note_text, pattern_re)
+                if found:
+                    break
+        if not found:
+            return None
+        try:
+            cite_text, cite_cursor = found
+            doc.getCurrentController().select(cite_cursor)
+            return cite_text, cite_cursor
+        except Exception:
+            return None
+
+    def _find_first_uncombined_cites_in_searchable(self, searchable: Any, text: Any, pattern: str) -> tuple[str, Any] | None:
+        try:
+            if not searchable or not text:
+                return None
+            search_desc = searchable.createSearchDescriptor()
+            search_desc.SearchString = pattern
+            search_desc.SearchRegularExpression = True
+            found = searchable.findFirst(search_desc)
+            if not found:
+                return None
+            cite_cursor = text.createTextCursorByRange(found)
+            cite_text = cite_cursor.getString()
+            if not cite_text.strip():
+                return None
+            return cite_text, cite_cursor
+        except Exception:
+            return None
+
+    def _find_first_uncombined_cites_in_text(self, text: Any, pattern: re.Pattern[str]) -> tuple[str, Any] | None:
+        try:
+            raw = text.getString()
+            if not raw:
+                return None
+            match = pattern.search(raw)
+            if not match:
+                return None
+            start, end = match.span()
+            cursor = text.createTextCursor()
+            if not cursor.goRight(start, False):
+                return None
+            if not cursor.goRight(end - start, True):
+                return None
+            cite_text = cursor.getString()
+            if not cite_text.strip():
+                return None
+            return cite_text, cursor
+        except Exception:
+            return None
+
+    def _iter_note_texts(self, doc: XTextDocument):  # type: ignore[type-arg]
+        for attr_name in ("getFootnotes", "getEndnotes"):
+            try:
+                notes = getattr(doc, attr_name)()
+            except Exception:
+                continue
+            try:
+                count = notes.getCount()
+            except Exception:
+                continue
+            for idx in range(count):
+                try:
+                    note = notes.getByIndex(idx)
+                    text = note.getText()
+                except Exception:
+                    continue
+                if text is not None:
+                    yield text
+
+    def _run_combine_cites(self, cite_text: str) -> None:
+        payload = self._compose_combine_cites_payload(cite_text)
+        try:
+            combined_text = self._call_combine_cites(payload)
+        except Exception as exc:  # noqa: BLE001
+            GLib.idle_add(self._on_combine_cites_failed, str(exc))
+            return
+        GLib.idle_add(self._apply_combined_cites, combined_text)
+
+    def _compose_combine_cites_payload(self, cite_text: str) -> dict[str, Any]:
+        prompt = self._combine_cites_settings.prompt or DEFAULT_COMBINE_CITES_PROMPT
+        content = f"{prompt}\n\n{cite_text}" if prompt else cite_text
+        payload = {
+            "messages": [
+                {"role": "user", "content": content},
+            ],
+            "stream": False,
+        }
+        return self._add_model_id(payload, self._combine_cites_settings.model_id)
+
+    def _call_combine_cites(self, payload: dict[str, Any]) -> str:
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {self._combine_cites_settings.api_key}",
+            "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) Prose/1.0",
+        }
+        data = json.dumps(payload).encode("utf-8")
+        req = urllib.request.Request(self._combine_cites_settings.api_url, data=data, headers=headers, method="POST")
+        with urllib.request.urlopen(req, timeout=120) as resp:
+            raw = resp.read().decode("utf-8", errors="ignore")
+        parts = list(self._extract_response_text(raw))
+        combined_text = "".join(parts).strip()
+        if not combined_text:
+            raise ValueError("Combine Cites returned empty output.")
+        return combined_text
+
+    def _apply_combined_cites(self, combined_text: str) -> bool:
+        try:
+            if not self._combine_cites_doc or not self._combine_cites_cursor:
+                self._status_label.set_label("Unable to replace citations.")
+                return False
+            self._combine_cites_cursor.setString(combined_text)
+            text = self._get_text_container(self._combine_cites_doc, self._combine_cites_cursor)
+            if not text:
+                self._status_label.set_label("Unable to replace citations.")
+                return False
+            insert_cursor = text.createTextCursorByRange(self._combine_cites_cursor.getEnd())
+            previous_insert_len = self._last_insert_len
+            self._last_insert_len = len(combined_text)
+            self._ensure_single_trailing_space(self._combine_cites_doc, insert_cursor)
+            self._last_insert_len = previous_insert_len
+            try:
+                view_cursor = self._combine_cites_doc.getCurrentController().getViewCursor()
+                move_cursor = text.createTextCursorByRange(insert_cursor)
+                if self._get_following_char_at_cursor(self._combine_cites_doc, insert_cursor) == " ":
+                    move_cursor.goRight(1, False)
+                view_cursor.gotoRange(move_cursor, False)
+            except Exception:
+                pass
+            self._status_label.set_label("Citations combined.")
+            return False
+        except Exception as exc:  # noqa: BLE001
+            self._status_label.set_label(f"Unable to replace citations: {exc}")
+            return False
+        finally:
+            self._set_busy(False)
+            self._combine_cites_doc = None
+            self._combine_cites_cursor = None
+
+    def _on_combine_cites_failed(self, message: str) -> bool:
+        self._set_busy(False)
+        self._notify_llm_error(message)
+        return False
+
+    def _on_action_suggestion_goto(self, _action: Gio.SimpleAction, param: GLib.Variant) -> None:
+        if param is None:
+            return
+        self._on_goto_clicked(None, int(param.get_int32()))
+
+    def _on_action_suggestion_accept(self, _action: Gio.SimpleAction, param: GLib.Variant) -> None:
+        if param is None:
+            return
+        self._on_accept_clicked(None, int(param.get_int32()))
+
+    def _on_action_suggestion_reject(self, _action: Gio.SimpleAction, param: GLib.Variant) -> None:
+        if param is None:
+            return
+        self._on_reject_clicked(None, int(param.get_int32()))
+
+    def _on_action_save_settings(self) -> None:
+        if not self._settings_window:
+            self._show_toast("Settings window is not open.")
+            return
+        self._settings_window.trigger_save()
+
+    def _get_preceding_char(self, doc: XTextDocument) -> str:  # type: ignore[type-arg]
+        try:
+            view_cursor = doc.getCurrentController().getViewCursor()
+            text = self._get_text_container(doc, view_cursor)
+            if not text:
+                return ""
+            range_cursor = text.createTextCursorByRange(view_cursor)
+            if not range_cursor.goLeft(1, True):
+                return ""
+            return range_cursor.getString() or ""
+        except Exception:
+            return ""
+
+    def _get_following_char_at_cursor(self, doc: XTextDocument, insert_cursor: Any) -> str:  # type: ignore[type-arg]
+        try:
+            text = self._get_text_container(doc, insert_cursor)
+            if not text:
+                return ""
+            range_cursor = text.createTextCursorByRange(insert_cursor)
+            if not range_cursor.goRight(1, True):
+                return ""
+            return range_cursor.getString() or ""
+        except Exception:
+            return ""
+
+    def _get_insert_end_cursor(self, doc: XTextDocument, insert_cursor: Any) -> Any | None:  # type: ignore[type-arg]
+        try:
+            text = self._get_text_container(doc, insert_cursor)
+            if not text:
+                return None
+            end_range = insert_cursor.getEnd() if hasattr(insert_cursor, "getEnd") else insert_cursor
+            return text.createTextCursorByRange(end_range)
+        except Exception:
+            return None
+
+    def _move_view_cursor_to_range(self, doc: XTextDocument, text_range: Any) -> Any | None:  # type: ignore[type-arg]
+        try:
+            controller = doc.getCurrentController()
+            view_cursor = controller.getViewCursor()
+            view_cursor.gotoRange(text_range, False)
+            return view_cursor
+        except Exception:
+            return None
+
+    def _insert_space_at_cursor(self, doc: XTextDocument, insert_cursor: Any) -> bool:  # type: ignore[type-arg]
+        try:
+            text = self._get_text_container(doc, insert_cursor)
+            if not text:
+                return False
+            end_cursor = self._get_insert_end_cursor(doc, insert_cursor)
+            if end_cursor:
+                view_cursor = self._move_view_cursor_to_range(doc, end_cursor)
+                if view_cursor:
+                    text.insertString(view_cursor, " ", False)
+                    return True
+                text.insertString(end_cursor, " ", False)
+                return True
+            view_cursor = doc.getCurrentController().getViewCursor()
+            text.insertString(view_cursor, " ", False)
+            return True
+        except Exception:
+            return False
+
+    def _launch_writer_document(self, path: Path) -> None:
+        desktop = self._get_desktop()
+        if not desktop:
+            self._show_toast("LibreOffice listener unavailable; cannot open document.")
+            return
+        try:
+            url = uno.systemPathToFileUrl(str(path))
+
+            def _prop(name: str, value: Any) -> PropertyValue:
+                pv = PropertyValue()
+                pv.Name = name
+                pv.Value = value
+                return pv
+
+            args = (
+                _prop("Hidden", False),
+                _prop("ReadOnly", False),
+                _prop("LockContentExtraction", False),
+                _prop("AsTemplate", False),
+            )
+            doc = desktop.loadComponentFromURL(url, "_blank", 0, args)
+            if not doc:
+                self._show_toast("Document did not open via UNO.")
+                return
+            self._active_doc = doc  # Remember for headless sessions with no visible window
+            self._maybe_save_last_odt(path)
+            try:
+                if getattr(doc, "isReadonly", False):
+                    self._show_toast("Document opened read-only. Close other LibreOffice instances or clear lock file.")
+            except Exception:
+                pass
+            self._status_label.set_label(f"Opened {path.name} in UNO session.")
+            self._show_toast(f"Loaded {path.name} via listener.")
+        except Exception as exc:  # noqa: BLE001
+            self._show_toast(f"Open failed: {exc}")
+
+    def _maybe_save_last_odt(self, path: Path) -> None:
+        if path.suffix.lower() != ".odt":
+            return
+        self._set_last_odt_path(path)
+
+    def _set_last_odt_path(self, path: Path | None) -> None:
+        self._last_odt_path = path.expanduser().resolve(strict=False) if path else None
+        save_last_odt_file(self._last_odt_path)
+        if hasattr(self, "_open_last_btn") and self._open_last_btn:
+            self._open_last_btn.set_sensitive(bool(self._last_odt_path))
+
+    def _extract_page_texts(self, doc: XTextDocument, start: int, end: int) -> list[tuple[int, str]]:  # type: ignore[type-arg]
+        try:
+            controller = doc.getCurrentController()
+            view_cursor = controller.getViewCursor()
+            page_cursor = view_cursor  # XPageCursor interface
+            original_range = view_cursor.getStart()
+            try:
+                results: list[tuple[int, str]] = []
+                text = doc.getText()
+                start_page = max(1, start)
+                end_page = max(start_page, end)
+                for page in range(start_page, end_page + 1):
+                    try:
+                        page_cursor.jumpToPage(page)
+                        page_cursor.jumpToStartOfPage()
+                        page_start = view_cursor.getStart()
+                        page_cursor.jumpToEndOfPage()
+                        page_end = view_cursor.getEnd()
+                        cursor = text.createTextCursorByRange(page_start)
+                        cursor.gotoRange(page_end, True)
+                        page_text = cursor.getString().strip()
+                        if page_text:
+                            results.append((page, page_text))
+                    except Exception:
+                        continue
+            finally:
+                try:
+                    view_cursor.gotoRange(original_range, False)
+                except Exception:
+                    pass
+            if results:
+                return results
+        except Exception:
+            pass
+        try:
+            fallback = doc.getText().getString()
+            if fallback.strip():
+                return [(start, fallback)]
+        except Exception:
+            pass
+        return []
+
+    def _find_range(self, doc: XTextDocument, snippet: str):  # type: ignore[type-arg]
+        def _normalize_for_pattern(text: str) -> str:
+            # Normalize dash/quotes to improve matching across typographic variants.
+            normalized = (
+                text.replace("“", '"')
+                .replace("”", '"')
+                .replace("’", "'")
+                .replace("‘", "'")
+                .replace("–", "-")
+                .replace("—", "-")
+            ).strip()
+            parts = [re.escape(part) for part in re.split(r"\s+", normalized) if part]
+            return r"\s+".join(parts)
+
+        try:
+            search = doc.createSearchDescriptor()
+            search.SearchString = snippet
+            search.SearchRegularExpression = False
+            search.SearchCaseSensitive = False  # type: ignore[attr-defined]
+            found = doc.findFirst(search)
+            if found:
+                return found
+
+            regex_pattern = _normalize_for_pattern(snippet)
+            if not regex_pattern:
+                return None
+            search = doc.createSearchDescriptor()
+            search.SearchString = regex_pattern
+            search.SearchRegularExpression = True
+            search.SearchCaseSensitive = False  # type: ignore[attr-defined]
+            search.SearchWords = False  # type: ignore[attr-defined]
+            return doc.findFirst(search)
+        except Exception:
+            return None
+
+    def _get_text_container(self, doc: XTextDocument, text_range: Any | None):  # type: ignore[type-arg]
+        if text_range is not None:
+            try:
+                text = text_range.getText()
+                if text is not None:
+                    return text
+            except Exception:
+                pass
+        try:
+            return doc.getText()
+        except Exception:
+            return None
+
+    def _prepare_editor_insertion(self, doc: XTextDocument) -> bool:  # type: ignore[type-arg]
+        try:
+            controller = doc.getCurrentController()
+            view_cursor = controller.getViewCursor()
+            try:
+                if view_cursor.getString():
+                    view_cursor.setString("")
+            except Exception:
+                pass
+            text = self._get_text_container(doc, view_cursor)
+            if not text:
+                return False
+            self._editor_insert_cursor = text.createTextCursorByRange(view_cursor)
+            self._editor_insert_end = None
+            self._editor_insert_doc = doc
+            self._last_insert_len = 0
+            self._editor_pending_newlines = 0
+            return True
+        except Exception:
+            return False
+
+    def _append_editor_text(self, text: str) -> bool:
+        if not text or not self._editor_insert_cursor or not self._editor_insert_doc:
+            return False
+        try:
+            self._append_writer_text(
+                text,
+                self._editor_insert_doc,
+                self._editor_insert_cursor,
+                "_editor_pending_newlines",
+            )
+        except Exception as exc:  # noqa: BLE001
+            self._show_toast(f"Unable to insert text: {exc}")
+        return False
+
+    def _prepare_improve_insertion(self, doc: XTextDocument) -> bool:  # type: ignore[type-arg]
+        if not self._editor_insert_end or self._last_insert_len <= 0:
+            return False
+        try:
+            text = self._get_text_container(doc, self._editor_insert_end)
+            if not text:
+                return False
+            range_cursor = text.createTextCursorByRange(self._editor_insert_end)
+            if not range_cursor.goLeft(self._last_insert_len, True):
+                return False
+            try:
+                range_cursor.setString("")
+            except Exception:
+                pass
+            self._improve_insert_cursor = text.createTextCursorByRange(range_cursor)
+            self._improve_insert_doc = doc
+            self._editor_insert_end = None
+            self._last_insert_len = 0
+            self._improve_pending_newlines = 0
+            return True
+        except Exception:
+            return False
+
+    def _prepare_selection_insertion(self, doc: XTextDocument, view_cursor: Any) -> bool:  # type: ignore[type-arg]
+        try:
+            text = self._get_text_container(doc, view_cursor)
+            if not text:
+                return False
+            selection_start = view_cursor.getStart()
+            selection_end = view_cursor.getEnd()
+            range_cursor = text.createTextCursorByRange(selection_start)
+            range_cursor.gotoRange(selection_end, True)
+            try:
+                range_cursor.setString("")
+            except Exception:
+                pass
+            self._improve_insert_cursor = text.createTextCursorByRange(range_cursor)
+            self._improve_insert_doc = doc
+            self._editor_insert_end = None
+            self._last_insert_len = 0
+            self._improve_pending_newlines = 0
+            return True
+        except Exception:
+            return False
+
+    def _append_improve1_text(self, text: str) -> bool:
+        if not text or not self._improve_insert_cursor or not self._improve_insert_doc:
+            return False
+        try:
+            self._append_writer_text(
+                text,
+                self._improve_insert_doc,
+                self._improve_insert_cursor,
+                "_improve_pending_newlines",
+            )
+        except Exception as exc:  # noqa: BLE001
+            self._show_toast(f"Unable to insert improved text: {exc}")
+        return False
+
+    def _trim_trailing_whitespace(self, doc: XTextDocument, insert_cursor: Any) -> None:  # type: ignore[type-arg]
+        if not doc or not insert_cursor or self._last_insert_len <= 0:
+            return
+        try:
+            text = self._get_text_container(doc, insert_cursor)
+            if not text:
+                return
+            range_cursor = text.createTextCursorByRange(insert_cursor)
+            if not range_cursor.goLeft(self._last_insert_len, True):
+                return
+            current = range_cursor.getString()
+            if not current:
+                return
+            trailing_len = len(current) - len(current.rstrip())
+            if trailing_len:
+                trim_cursor = text.createTextCursorByRange(insert_cursor)
+                if trim_cursor.goLeft(trailing_len, True):
+                    trim_cursor.setString("")
+                    self._last_insert_len -= trailing_len
+        except Exception:
+            return
+
+    def _ensure_single_trailing_space(self, doc: XTextDocument, insert_cursor: Any) -> None:  # type: ignore[type-arg]
+        if not doc or not insert_cursor:
+            return
+        if self._last_insert_len > 0:
+            self._trim_trailing_whitespace(doc, insert_cursor)
+        try:
+            end_cursor = self._get_insert_end_cursor(doc, insert_cursor)
+            if end_cursor and self._get_following_char_at_cursor(doc, end_cursor) == " ":
+                return
+            inserted = self._insert_space_at_cursor(doc, insert_cursor)
+            end_cursor = self._get_insert_end_cursor(doc, insert_cursor)
+            following = self._get_following_char_at_cursor(doc, end_cursor) if end_cursor else ""
+            if self._last_insert_len > 0:
+                self._last_insert_len += 1
+        except Exception:
+            return
+
+    def _normalize_newlines(self, text: str) -> str:
+        return text.replace("\r\n", "\n").replace("\r", "\n")
+
+    def _split_text_for_paragraphs(self, text: str, pending_newlines: int) -> tuple[list[tuple[str, str]], int]:
+        normalized = self._normalize_newlines(text)
+        if pending_newlines:
+            normalized = ("\n" * pending_newlines) + normalized
+        parts: list[tuple[str, str]] = []
+        buffer: list[str] = []
+        idx = 0
+        length = len(normalized)
+        while idx < length:
+            char = normalized[idx]
+            if char != "\n":
+                buffer.append(char)
+                idx += 1
+                continue
+            run = 1
+            idx += 1
+            while idx < length and normalized[idx] == "\n":
+                run += 1
+                idx += 1
+            if run >= 2:
+                if buffer:
+                    parts.append(("text", "".join(buffer)))
+                    buffer = []
+                breaks = run // 2
+                for _ in range(breaks):
+                    parts.append(("paragraph", ""))
+                if run % 2:
+                    buffer.append("\n")
+            else:
+                buffer.append("\n")
+        if buffer:
+            parts.append(("text", "".join(buffer)))
+        new_pending = 0
+        if parts and parts[-1][0] == "text" and parts[-1][1].endswith("\n"):
+            text_part = parts[-1][1][:-1]
+            if text_part:
+                parts[-1] = ("text", text_part)
+            else:
+                parts.pop()
+            new_pending = 1
+        return parts, new_pending
+
+    def _insert_paragraph_break(self, doc: XTextDocument, insert_cursor: Any) -> None:  # type: ignore[type-arg]
+        try:
+            text = self._get_text_container(doc, insert_cursor)
+            if not text:
+                return
+            if ControlCharacter is None:
+                raise ValueError("UNO ControlCharacter unavailable")
+            text.insertControlCharacter(insert_cursor, ControlCharacter.PARAGRAPH_BREAK, False)
+        except Exception:
+            text = self._get_text_container(doc, insert_cursor)
+            if not text:
+                return
+            text.insertString(insert_cursor, "\n", False)
+
+    def _append_writer_text(
+        self,
+        text: str,
+        doc: XTextDocument,  # type: ignore[type-arg]
+        insert_cursor: Any,
+        pending_attr: str,
+    ) -> None:
+        pending_newlines = int(getattr(self, pending_attr, 0) or 0)
+        parts, pending_newlines = self._split_text_for_paragraphs(text, pending_newlines)
+        for kind, chunk in parts:
+            if kind == "paragraph":
+                self._insert_paragraph_break(doc, insert_cursor)
+                self._last_insert_len += 1
+                continue
+            if not chunk:
+                continue
+            text_obj = self._get_text_container(doc, insert_cursor)
+            if not text_obj:
+                return
+            text_obj.insertString(insert_cursor, chunk, False)
+            self._last_insert_len += len(chunk)
+        setattr(self, pending_attr, pending_newlines)
+
+    def _flush_pending_newlines(
+        self,
+        doc: XTextDocument,  # type: ignore[type-arg]
+        insert_cursor: Any,
+        pending_attr: str,
+    ) -> None:
+        pending_newlines = int(getattr(self, pending_attr, 0) or 0)
+        if pending_newlines <= 0:
+            return
+        try:
+            breaks = pending_newlines // 2
+            for _ in range(breaks):
+                self._insert_paragraph_break(doc, insert_cursor)
+                self._last_insert_len += 1
+            if pending_newlines % 2:
+                text_obj = self._get_text_container(doc, insert_cursor)
+                if not text_obj:
+                    return
+                text_obj.insertString(insert_cursor, "\n", False)
+                self._last_insert_len += 1
+        except Exception:
+            return
+        setattr(self, pending_attr, 0)
+
+    def _set_spelling_output_text(self, text: str) -> bool:
+        if self._spelling_output_buffer is None:
+            return False
+        self._spelling_output_buffer.set_text(text or "")
+        return False
+
+    def _append_spelling_output_text(self, text: str) -> bool:
+        if not text or self._spelling_output_buffer is None:
+            return False
+        end_iter = self._spelling_output_buffer.get_end_iter()
+        self._spelling_output_buffer.insert(end_iter, text)
+        return False
+
+    def _get_spelling_output_text(self) -> str:
+        if self._spelling_output_buffer is None:
+            return ""
+        start, end = self._spelling_output_buffer.get_bounds()
+        return self._spelling_output_buffer.get_text(start, end, True)
+
+    def _capture_spellingstyle_range_end(self) -> None:
+        if not self._editor_insert_doc or not self._editor_insert_cursor:
+            return
+        try:
+            text = self._get_text_container(self._editor_insert_doc, self._editor_insert_cursor)
+            if not text:
+                return
+            self._editor_insert_end = text.createTextCursorByRange(self._editor_insert_cursor)
+        except Exception:
+            self._editor_insert_end = None
+
+    def _capture_improve1_range_end(self) -> None:
+        if not self._improve_insert_doc or not self._improve_insert_cursor:
+            return
+        try:
+            text = self._get_text_container(self._improve_insert_doc, self._improve_insert_cursor)
+            if not text:
+                return
+            self._editor_insert_end = text.createTextCursorByRange(self._improve_insert_cursor)
+        except Exception:
+            self._editor_insert_end = None
+
+    def _capture_improve2_range_end(self) -> None:
+        if not self._improve_insert_doc or not self._improve_insert_cursor:
+            return
+        try:
+            text = self._get_text_container(self._improve_insert_doc, self._improve_insert_cursor)
+            if not text:
+                return
+            self._editor_insert_end = text.createTextCursorByRange(self._improve_insert_cursor)
+        except Exception:
+            self._editor_insert_end = None
+
+    def _select_spellingstyle_range(self, doc: XTextDocument) -> bool:  # type: ignore[type-arg]
+        if not self._editor_insert_end or self._last_insert_len <= 0:
+            return False
+        try:
+            text = self._get_text_container(doc, self._editor_insert_end)
+            if not text:
+                return False
+            range_cursor = text.createTextCursorByRange(self._editor_insert_end)
+            if not range_cursor.goLeft(self._last_insert_len, True):
+                return False
+            view_cursor = doc.getCurrentController().getViewCursor()
+            view_cursor.gotoRange(range_cursor.getStart(), False)
+            view_cursor.gotoRange(range_cursor.getEnd(), True)
+            return True
+        except Exception:
+            return False
+
+    def _set_busy(self, busy: bool) -> None:
+        self._busy = busy
+        if hasattr(self, "_run_btn"):
+            self._run_btn.set_sensitive(not busy)
+        if hasattr(self, "_spell_btn"):
+            self._spell_btn.set_sensitive(not busy)
+        if hasattr(self, "_direct_input_btn"):
+            self._direct_input_btn.set_sensitive(not busy)
+        if hasattr(self, "_combine_cites_btn"):
+            self._combine_cites_btn.set_sensitive(not busy)
+        if hasattr(self, "_improve1_btn"):
+            self._improve1_btn.set_sensitive(not busy)
+        if hasattr(self, "_improve2_btn"):
+            self._improve2_btn.set_sensitive(not busy)
+        if hasattr(self, "_improve_selected_btn"):
+            self._improve_selected_btn.set_sensitive(not busy)
+        if hasattr(self, "_keep_original_btn"):
+            self._keep_original_btn.set_sensitive(not busy)
+        if hasattr(self, "_thesaurus_btn"):
+            self._thesaurus_btn.set_sensitive(not busy)
+        if hasattr(self, "_reference_btn"):
+            self._reference_btn.set_sensitive(not busy)
+        if hasattr(self, "_transform_action_buttons"):
+            for button in self._transform_action_buttons:
+                button.set_sensitive(not busy)
+
+    # Proofreading pipeline ----------------------------------------------
+    def _gather_and_request(self, doc: XTextDocument, start: int, end: int) -> None:  # type: ignore[type-arg]
+        page_texts = self._extract_page_texts(doc, start, end)
+        if not page_texts:
+            GLib.idle_add(self._on_request_failed, "No text found for the selected page range.")
+            return
+        payload = self._compose_llm_payload(page_texts, start, end)
+        try:
+            suggestions = self._call_llm(payload)
+        except Exception as exc:  # noqa: BLE001
+            GLib.idle_add(self._on_llm_failed, str(exc))
+            return
+        filtered, dropped = self._filter_suggestions_by_range(suggestions, start, end)
+        if not filtered:
+            message = "No suggestions fell within the selected page range."
+            if dropped:
+                message += " The model returned out-of-range pages."
+            GLib.idle_add(self._on_request_failed, message)
+            return
+        GLib.idle_add(self._on_request_finished, filtered, dropped, start, end)
+
+    def _add_model_id(self, payload: dict[str, Any], model_id: str) -> dict[str, Any]:
+        cleaned = model_id.strip()
+        if cleaned:
+            payload["model"] = cleaned
+        return payload
+
+    def _is_gemini_generate_content_url(self, api_url: str) -> bool:
+        lowered = api_url.lower()
+        return "generativelanguage.googleapis.com" in lowered and ":generatecontent" in lowered
+
+    def _call_gemini_generate_content(self, api_url: str, api_key: str, text: str) -> str:
+        headers = {
+            "Content-Type": "application/json",
+            "x-goog-api-key": api_key,
+            "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) Prose/1.0",
+        }
+        payload = {
+            "contents": [
+                {
+                    "parts": [
+                        {"text": text},
+                    ]
+                }
+            ]
+        }
+        data = json.dumps(payload).encode("utf-8")
+        req = urllib.request.Request(api_url, data=data, headers=headers, method="POST")
+        try:
+            with urllib.request.urlopen(req, timeout=300) as resp:
+                raw = resp.read().decode("utf-8", errors="ignore")
+        except urllib.error.HTTPError as exc:
+            detail = ""
+            try:
+                detail = exc.read().decode("utf-8", errors="ignore").strip()
+            except Exception:
+                pass
+            if detail:
+                raise ValueError(f"HTTP {exc.code}: {exc.reason or 'request failed'} - {detail}") from exc
+            raise ValueError(f"HTTP {exc.code}: {exc.reason or 'request failed'}") from exc
+        try:
+            data_obj = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"Gemini response was not valid JSON: {exc}") from exc
+        parts: list[str] = []
+        for candidate in data_obj.get("candidates", []):
+            if not isinstance(candidate, dict):
+                continue
+            content = candidate.get("content") or {}
+            if not isinstance(content, dict):
+                continue
+            for part in content.get("parts", []) or []:
+                if isinstance(part, dict) and part.get("text"):
+                    parts.append(str(part["text"]))
+        output = "".join(parts).strip()
+        if not output:
+            raise ValueError("Gemini returned empty output.")
+        return output
+
+    def _compose_llm_payload(self, pages: Iterable[tuple[int, str]], start: int, end: int) -> dict[str, Any]:
+        system_prompt = self._proof_settings.prompt or DEFAULT_PROMPT
+        instructions = (
+            "Return a JSON array of suggested edits for ONLY the provided Writer page range. "
+            "Each item must look like: {"
+            '"title": short summary, '
+            '"page": page number as integer, '
+            '"snippet": exact text that should be replaced, '
+            '"replacement": improved text, '
+            '"reasoning": short explanation'
+            "}. "
+            "Keep snippets short but unique. Only propose changes that truly improve clarity or correctness. "
+            f"Never cite or invent pages outside {start}-{end}; drop any content you think is beyond that range."
+        )
+        page_blocks = []
+        for page_num, text in pages:
+            cleaned = text.strip()
+            if not cleaned:
+                continue
+            page_blocks.append(f"[Page {page_num}]\n{cleaned}")
+        content = f"Selected pages: {start}-{end}\n\n" + "\n\n".join(page_blocks)
+        payload = {
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": instructions},
+                {"role": "user", "content": content},
+            ],
+            "stream": False,
+        }
+        return self._add_model_id(payload, self._proof_settings.model_id)
+
+    def _call_llm(self, payload: dict[str, Any]) -> list[Suggestion]:
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {self._proof_settings.api_key}",
+            "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) Prose/1.0",
+        }
+        data = json.dumps(payload).encode("utf-8")
+        req = urllib.request.Request(self._proof_settings.api_url, data=data, headers=headers, method="POST")
+        with urllib.request.urlopen(req, timeout=120) as resp:
+            raw = resp.read().decode("utf-8", errors="ignore")
+        self._last_raw_response = raw
+        suggestions = self._parse_suggestions(raw)
+        return suggestions
+
+    def _filter_suggestions_by_range(
+        self, suggestions: list[Suggestion], start: int, end: int
+    ) -> tuple[list[Suggestion], int]:
+        filtered: list[Suggestion] = []
+        dropped = 0
+        for suggestion in suggestions:
+            if suggestion.page is None or start <= suggestion.page <= end:
+                filtered.append(suggestion)
+            else:
+                dropped += 1
+        return filtered, dropped
+
+    def _sort_suggestions(self, suggestions: list[Suggestion]) -> list[Suggestion]:
+        indexed = list(enumerate(suggestions))
+
+        def _key(item: tuple[int, Suggestion]) -> tuple[int, int, int]:
+            idx, suggestion = item
+            if suggestion.page is None:
+                return (1, 10**9, idx)  # page-less items last
+            return (0, suggestion.page, idx)
+
+        indexed.sort(key=_key)
+        return [suggestion for _, suggestion in indexed]
+
+    def _parse_suggestions(self, raw: str) -> list[Suggestion]:
+        def _load_json(text: str):
+            cleaned = text.strip()
+            if not cleaned:
+                raise ValueError("Empty response from model.")
+            if "```" in cleaned:
+                cleaned = cleaned.split("```", 2)[1]
+                if cleaned.lower().startswith("json"):
+                    cleaned = cleaned[4:].strip()
+            return json.loads(cleaned)
+
+        def _coerce_list(obj: Any) -> list[dict[str, Any]]:
+            if isinstance(obj, list):
+                return [item for item in obj if isinstance(item, dict)]
+            if isinstance(obj, dict):
+                for key in ("suggestions", "edits", "data"):
+                    if isinstance(obj.get(key), list):
+                        return [item for item in obj[key] if isinstance(item, dict)]
+            return []
+
+        try:
+            data = _load_json(raw)
+        except json.JSONDecodeError as exc:
+            # Try to salvage by locating the first JSON-looking block
+            match = re.search(r"\[.*\]", raw, re.DOTALL)
+            if not match:
+                match = re.search(r"\{.*\}", raw, re.DOTALL)
+            if match:
+                try:
+                    data = json.loads(match.group(0))
+                except json.JSONDecodeError as inner_exc:
+                    raise ValueError(f"LLM response was not valid JSON: {inner_exc}") from inner_exc
+            else:
+                raise ValueError(f"LLM response was not valid JSON: {exc}") from exc
+
+        # OpenAI-style shape: {choices: [{message: {content: "...json..."}}]}
+        if isinstance(data, dict) and "choices" in data:
+            content_fragments: list[str] = []
+            for choice in data.get("choices", []):
+                if not isinstance(choice, dict):
+                    continue
+                msg = choice.get("message") or choice.get("delta") or {}
+                if isinstance(msg, dict) and msg.get("content"):
+                    content_fragments.append(str(msg["content"]))
+            content = "".join(content_fragments).strip()
+            if content:
+                try:
+                    data = _load_json(content)
+                except json.JSONDecodeError as exc:
+                    raise ValueError(f"LLM content was not valid JSON: {exc}") from exc
+
+        candidates = _coerce_list(data)
+        suggestions: list[Suggestion] = []
+        for item in candidates:
+            snippet = str(item.get("snippet") or "").strip()
+            replacement = str(item.get("replacement") or "").strip()
+            if not snippet or not replacement:
+                continue  # skip unusable entries
+            suggestions.append(
+                Suggestion(
+                    title=str(item.get("title") or "Suggested change"),
+                    page=int(item.get("page")) if str(item.get("page") or "").isdigit() else None,
+                    snippet=snippet,
+                    replacement=replacement,
+                    reasoning=str(item.get("reasoning") or ""),
+                )
+            )
+        if not suggestions:
+            raise ValueError("No suggestions returned by the model.")
+        return suggestions
+
+    def _on_request_failed(self, message: str) -> bool:
+        self._set_busy(False)
+        self._status_label.set_label(message)
+        return False
+
+    def _on_llm_failed(self, message: str) -> bool:
+        self._set_busy(False)
+        self._notify_llm_error(message)
+        return False
+
+    def _on_request_finished(
+        self, suggestions: list[Suggestion], dropped: int = 0, start: int | None = None, end: int | None = None
+    ) -> bool:
+        self._set_busy(False)
+        extra = ""
+        if dropped and start is not None and end is not None:
+            extra = f" ({dropped} outside {start}-{end} ignored)"
+        elif dropped:
+            extra = f" ({dropped} out-of-range suggestions ignored)"
+        self._status_label.set_label(f"Received {len(suggestions)} suggestions.{extra}")
+        self._suggestions = self._sort_suggestions(suggestions)
+        self._view_json_btn.set_sensitive(bool(self._last_raw_response))
+        self._render_suggestions()
+        self._focus_first_suggestion(notify_success=False)
+        return False
+
+    def _run_spellingstyle(self, doc: XTextDocument, source_text: str) -> None:  # type: ignore[type-arg]
+        try:
+            payload = self._compose_spellingstyle_payload(source_text)
+            stream = self._stream_spellingstyle(payload)
+            for chunk in stream:
+                GLib.idle_add(self._append_editor_text, chunk)
+                GLib.idle_add(self._append_spelling_output_text, chunk)
+        except Exception as exc:  # noqa: BLE001
+            GLib.idle_add(self._on_spellingstyle_failed, str(exc))
+            return
+        GLib.idle_add(self._on_spellingstyle_finished, "SpellingStyle complete.")
+
+    def _run_improve1(self, source_text: str) -> None:
+        payload = self._compose_improve1_payload(source_text)
+        try:
+            for chunk in self._stream_improve1(payload):
+                GLib.idle_add(self._append_improve1_text, chunk)
+        except Exception as exc:  # noqa: BLE001
+            GLib.idle_add(self._on_spellingstyle_failed, str(exc))
+            return
+        GLib.idle_add(self._on_improve1_finished, "Improve 1 complete.")
+
+    def _run_improve2(self, source_text: str) -> None:
+        payload = self._compose_improve2_payload(source_text)
+        try:
+            for chunk in self._stream_improve2(payload):
+                GLib.idle_add(self._append_improve1_text, chunk)
+        except Exception as exc:  # noqa: BLE001
+            GLib.idle_add(self._on_spellingstyle_failed, str(exc))
+            return
+        GLib.idle_add(self._on_improve2_finished, "Improve 2 complete.")
+
+    def _run_improve_selected(self, source_text: str) -> None:
+        payload = self._compose_improve1_payload(source_text)
+        try:
+            for chunk in self._stream_improve1(payload):
+                GLib.idle_add(self._append_improve1_text, chunk)
+        except Exception as exc:  # noqa: BLE001
+            GLib.idle_add(self._on_spellingstyle_failed, str(exc))
+            return
+        GLib.idle_add(self._on_improve_selected_finished, "Improve Selected complete.")
+
+    def _run_shorten(self, source_text: str) -> None:
+        payload = self._compose_shorten_payload(source_text)
+        try:
+            for chunk in self._stream_custom(payload, self._shorten_settings.api_url, self._shorten_settings.api_key):
+                GLib.idle_add(self._append_improve1_text, chunk)
+                GLib.idle_add(self._append_spelling_output_text, chunk)
+        except Exception as exc:  # noqa: BLE001
+            GLib.idle_add(self._on_spellingstyle_failed, str(exc))
+            return
+        GLib.idle_add(self._on_shorten_finished, "Shorten complete.")
+
+    def _run_topic_sentence(self, source_text: str) -> None:
+        payload = self._compose_topic_sentence_payload(source_text)
+        try:
+            for chunk in self._stream_custom(
+                payload, self._topic_sentence_settings.api_url, self._topic_sentence_settings.api_key
+            ):
+                GLib.idle_add(self._append_editor_text, chunk)
+                GLib.idle_add(self._append_spelling_output_text, chunk)
+        except Exception as exc:  # noqa: BLE001
+            GLib.idle_add(self._on_spellingstyle_failed, str(exc))
+            return
+        GLib.idle_add(self._on_topic_sentence_finished, "Topic sentence complete.")
+
+    def _run_introduction(self, source_text: str) -> None:
+        payload = self._compose_introduction_payload(source_text)
+        try:
+            if self._is_gemini_generate_content_url(self._introduction_settings.api_url):
+                prompt = self._introduction_settings.prompt or DEFAULT_INTRO_PROMPT
+                combined = f"{prompt}\n\n{source_text}" if prompt else source_text
+                output = self._call_gemini_generate_content(
+                    self._introduction_settings.api_url,
+                    self._introduction_settings.api_key,
+                    combined,
+                )
+                GLib.idle_add(self._append_editor_text, output)
+                GLib.idle_add(self._append_spelling_output_text, output)
+            else:
+                for chunk in self._stream_custom(
+                    payload, self._introduction_settings.api_url, self._introduction_settings.api_key
+                ):
+                    GLib.idle_add(self._append_editor_text, chunk)
+                    GLib.idle_add(self._append_spelling_output_text, chunk)
+        except Exception as exc:  # noqa: BLE001
+            GLib.idle_add(self._on_spellingstyle_failed, str(exc))
+            return
+        GLib.idle_add(self._on_introduction_finished, "Introduction complete.")
+
+    def _run_conclusion(self, source_text: str) -> None:
+        payload = self._compose_conclusion_payload(source_text)
+        try:
+            if self._is_gemini_generate_content_url(self._conclusion_settings.api_url):
+                prompt = self._conclusion_settings.prompt or DEFAULT_CONCLUSION_PROMPT
+                combined = f"{prompt}\n\n{source_text}" if prompt else source_text
+                output = self._call_gemini_generate_content(
+                    self._conclusion_settings.api_url,
+                    self._conclusion_settings.api_key,
+                    combined,
+                )
+                GLib.idle_add(self._append_editor_text, output)
+                GLib.idle_add(self._append_spelling_output_text, output)
+            else:
+                for chunk in self._stream_custom(
+                    payload, self._conclusion_settings.api_url, self._conclusion_settings.api_key
+                ):
+                    GLib.idle_add(self._append_editor_text, chunk)
+                    GLib.idle_add(self._append_spelling_output_text, chunk)
+        except Exception as exc:  # noqa: BLE001
+            GLib.idle_add(self._on_spellingstyle_failed, str(exc))
+            return
+        GLib.idle_add(self._on_conclusion_finished, "Conclusion complete.")
+
+    def _run_conclusion_no_issues(self, source_text: str) -> None:
+        payload = self._compose_conclusion_no_issues_payload(source_text)
+        try:
+            if self._is_gemini_generate_content_url(self._concl_no_issues_settings.api_url):
+                prompt = self._concl_no_issues_settings.prompt or DEFAULT_CONCL_NO_ISSUES_PROMPT
+                combined = f"{prompt}\n\n{source_text}" if prompt else source_text
+                output = self._call_gemini_generate_content(
+                    self._concl_no_issues_settings.api_url,
+                    self._concl_no_issues_settings.api_key,
+                    combined,
+                )
+                GLib.idle_add(self._append_editor_text, output)
+                GLib.idle_add(self._append_spelling_output_text, output)
+            else:
+                for chunk in self._stream_custom(
+                    payload, self._concl_no_issues_settings.api_url, self._concl_no_issues_settings.api_key
+                ):
+                    GLib.idle_add(self._append_editor_text, chunk)
+                    GLib.idle_add(self._append_spelling_output_text, chunk)
+        except Exception as exc:  # noqa: BLE001
+            GLib.idle_add(self._on_spellingstyle_failed, str(exc))
+            return
+        GLib.idle_add(self._on_conclusion_no_issues_finished, "Conclusion (no issues) complete.")
+
+    def _run_concl_section(self, source_text: str) -> None:
+        payload = self._compose_concl_section_payload(source_text)
+        try:
+            for chunk in self._stream_custom(
+                payload, self._concl_section_settings.api_url, self._concl_section_settings.api_key
+            ):
+                GLib.idle_add(self._append_editor_text, chunk)
+                GLib.idle_add(self._append_spelling_output_text, chunk)
+        except Exception as exc:  # noqa: BLE001
+            GLib.idle_add(self._on_spellingstyle_failed, str(exc))
+            return
+        GLib.idle_add(self._on_concl_section_finished, "Section conclusion complete.")
+
+    def _compose_spellingstyle_payload(self, source_text: str) -> dict[str, Any]:
+        system_prompt = self._spelling_settings.prompt or DEFAULT_SPELLINGSTYLE_PROMPT
+        payload = {
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": source_text},
+            ],
+            "stream": True,
+        }
+        return self._add_model_id(payload, self._spelling_settings.model_id)
+
+    def _compose_improve1_payload(self, source_text: str) -> dict[str, Any]:
+        system_prompt = self._improve1_settings.prompt or DEFAULT_IMPROVE1_PROMPT
+        payload = {
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": source_text},
+            ],
+            "stream": True,
+        }
+        return self._add_model_id(payload, self._improve1_settings.model_id)
+
+    def _compose_improve2_payload(self, source_text: str) -> dict[str, Any]:
+        system_prompt = self._improve2_settings.prompt or DEFAULT_IMPROVE2_PROMPT
+        payload = {
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": source_text},
+            ],
+            "stream": True,
+        }
+        return self._add_model_id(payload, self._improve2_settings.model_id)
+
+    def _compose_shorten_payload(self, source_text: str) -> dict[str, Any]:
+        system_prompt = self._shorten_settings.prompt or DEFAULT_SHORTEN_PROMPT
+        payload = {
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": source_text},
+            ],
+            "stream": True,
+        }
+        return self._add_model_id(payload, self._shorten_settings.model_id)
+
+    def _compose_topic_sentence_payload(self, source_text: str) -> dict[str, Any]:
+        system_prompt = self._topic_sentence_settings.prompt or DEFAULT_TOPIC_SENTENCE_PROMPT
+        payload = {
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": source_text},
+            ],
+            "stream": True,
+        }
+        return self._add_model_id(payload, self._topic_sentence_settings.model_id)
+
+    def _compose_introduction_payload(self, source_text: str) -> dict[str, Any]:
+        system_prompt = self._introduction_settings.prompt or DEFAULT_INTRO_PROMPT
+        payload = {
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": source_text},
+            ],
+            "stream": True,
+        }
+        return self._add_model_id(payload, self._introduction_settings.model_id)
+
+    def _compose_conclusion_payload(self, source_text: str) -> dict[str, Any]:
+        system_prompt = self._conclusion_settings.prompt or DEFAULT_CONCLUSION_PROMPT
+        payload = {
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": source_text},
+            ],
+            "stream": True,
+        }
+        return self._add_model_id(payload, self._conclusion_settings.model_id)
+
+    def _compose_conclusion_no_issues_payload(self, source_text: str) -> dict[str, Any]:
+        system_prompt = self._concl_no_issues_settings.prompt or DEFAULT_CONCL_NO_ISSUES_PROMPT
+        payload = {
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": source_text},
+            ],
+            "stream": True,
+        }
+        return self._add_model_id(payload, self._concl_no_issues_settings.model_id)
+
+    def _compose_concl_section_payload(self, source_text: str) -> dict[str, Any]:
+        system_prompt = self._concl_section_settings.prompt or DEFAULT_CONCL_SECTION_PROMPT
+        payload = {
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": source_text},
+            ],
+            "stream": True,
+        }
+        return self._add_model_id(payload, self._concl_section_settings.model_id)
+
+    def _stream_spellingstyle(self, payload: dict[str, Any]) -> Iterable[str]:
+        headers = {
+            "Content-Type": "application/json",
+            "Accept": "text/event-stream",
+            "Authorization": f"Bearer {self._spelling_settings.api_key}",
+            "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) Prose/1.0",
+        }
+        data = json.dumps(payload).encode("utf-8")
+        req = urllib.request.Request(self._spelling_settings.api_url, data=data, headers=headers, method="POST")
+        try:
+            with urllib.request.urlopen(req, timeout=300) as resp:
+                content_type = resp.headers.get("Content-Type", "")
+                if "text/event-stream" not in content_type:
+                    raw = resp.read().decode("utf-8", errors="ignore")
+                    for chunk in self._extract_response_text(raw):
+                        yield chunk
+                    return
+                for raw_line in resp:
+                    line = raw_line.decode("utf-8", errors="ignore").strip()
+                    if not line or not line.startswith("data:"):
+                        continue
+                    payload_str = line[5:].strip()
+                    if payload_str == "[DONE]":
+                        break
+                    try:
+                        data_obj = json.loads(payload_str)
+                    except json.JSONDecodeError:
+                        continue
+                    chunk = self._extract_stream_delta(data_obj)
+                    if chunk:
+                        yield chunk
+        except urllib.error.HTTPError as exc:
+            detail = ""
+            try:
+                detail = exc.read().decode("utf-8", errors="ignore").strip()
+            except Exception:
+                pass
+            if detail:
+                raise ValueError(f"HTTP {exc.code}: {exc.reason or 'request failed'} - {detail}") from exc
+            raise ValueError(f"HTTP {exc.code}: {exc.reason or 'request failed'}") from exc
+
+    def _stream_improve1(self, payload: dict[str, Any]) -> Iterable[str]:
+        headers = {
+            "Content-Type": "application/json",
+            "Accept": "text/event-stream",
+            "Authorization": f"Bearer {self._improve1_settings.api_key}",
+            "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) Prose/1.0",
+        }
+        data = json.dumps(payload).encode("utf-8")
+        req = urllib.request.Request(self._improve1_settings.api_url, data=data, headers=headers, method="POST")
+        try:
+            with urllib.request.urlopen(req, timeout=300) as resp:
+                content_type = resp.headers.get("Content-Type", "")
+                if "text/event-stream" not in content_type:
+                    raw = resp.read().decode("utf-8", errors="ignore")
+                    for chunk in self._extract_response_text(raw):
+                        yield chunk
+                    return
+                for raw_line in resp:
+                    line = raw_line.decode("utf-8", errors="ignore").strip()
+                    if not line or not line.startswith("data:"):
+                        continue
+                    payload_str = line[5:].strip()
+                    if payload_str == "[DONE]":
+                        break
+                    try:
+                        data_obj = json.loads(payload_str)
+                    except json.JSONDecodeError:
+                        continue
+                    chunk = self._extract_stream_delta(data_obj)
+                    if chunk:
+                        yield chunk
+        except urllib.error.HTTPError as exc:
+            detail = ""
+            try:
+                detail = exc.read().decode("utf-8", errors="ignore").strip()
+            except Exception:
+                pass
+            if detail:
+                raise ValueError(f"HTTP {exc.code}: {exc.reason or 'request failed'} - {detail}") from exc
+            raise ValueError(f"HTTP {exc.code}: {exc.reason or 'request failed'}") from exc
+
+    def _stream_improve2(self, payload: dict[str, Any]) -> Iterable[str]:
+        headers = {
+            "Content-Type": "application/json",
+            "Accept": "text/event-stream",
+            "Authorization": f"Bearer {self._improve2_settings.api_key}",
+            "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) Prose/1.0",
+        }
+        data = json.dumps(payload).encode("utf-8")
+        req = urllib.request.Request(self._improve2_settings.api_url, data=data, headers=headers, method="POST")
+        try:
+            with urllib.request.urlopen(req, timeout=300) as resp:
+                content_type = resp.headers.get("Content-Type", "")
+                if "text/event-stream" not in content_type:
+                    raw = resp.read().decode("utf-8", errors="ignore")
+                    for chunk in self._extract_response_text(raw):
+                        yield chunk
+                    return
+                for raw_line in resp:
+                    line = raw_line.decode("utf-8", errors="ignore").strip()
+                    if not line or not line.startswith("data:"):
+                        continue
+                    payload_str = line[5:].strip()
+                    if payload_str == "[DONE]":
+                        break
+                    try:
+                        data_obj = json.loads(payload_str)
+                    except json.JSONDecodeError:
+                        continue
+                    chunk = self._extract_stream_delta(data_obj)
+                    if chunk:
+                        yield chunk
+        except urllib.error.HTTPError as exc:
+            detail = ""
+            try:
+                detail = exc.read().decode("utf-8", errors="ignore").strip()
+            except Exception:
+                pass
+            if detail:
+                raise ValueError(f"HTTP {exc.code}: {exc.reason or 'request failed'} - {detail}") from exc
+            raise ValueError(f"HTTP {exc.code}: {exc.reason or 'request failed'}") from exc
+
+    def _stream_custom(self, payload: dict[str, Any], api_url: str, api_key: str) -> Iterable[str]:
+        headers = {
+            "Content-Type": "application/json",
+            "Accept": "text/event-stream",
+            "Authorization": f"Bearer {api_key}",
+            "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) Prose/1.0",
+        }
+        data = json.dumps(payload).encode("utf-8")
+        req = urllib.request.Request(api_url, data=data, headers=headers, method="POST")
+        try:
+            with urllib.request.urlopen(req, timeout=300) as resp:
+                content_type = resp.headers.get("Content-Type", "")
+                if "text/event-stream" not in content_type:
+                    raw = resp.read().decode("utf-8", errors="ignore")
+                    for chunk in self._extract_response_text(raw):
+                        yield chunk
+                    return
+                for raw_line in resp:
+                    line = raw_line.decode("utf-8", errors="ignore").strip()
+                    if not line or not line.startswith("data:"):
+                        continue
+                    payload_str = line[5:].strip()
+                    if payload_str == "[DONE]":
+                        break
+                    try:
+                        data_obj = json.loads(payload_str)
+                    except json.JSONDecodeError:
+                        continue
+                    chunk = self._extract_stream_delta(data_obj)
+                    if chunk:
+                        yield chunk
+        except urllib.error.HTTPError as exc:
+            detail = ""
+            try:
+                detail = exc.read().decode("utf-8", errors="ignore").strip()
+            except Exception:
+                pass
+            if detail:
+                raise ValueError(f"HTTP {exc.code}: {exc.reason or 'request failed'} - {detail}") from exc
+            raise ValueError(f"HTTP {exc.code}: {exc.reason or 'request failed'}") from exc
+
+    def _stream_responses(self, payload: dict[str, Any], api_url: str, api_key: str) -> Iterable[str]:
+        headers = {
+            "Content-Type": "application/json",
+            "Accept": "text/event-stream",
+            "Authorization": f"Bearer {api_key}",
+            "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) Prose/1.0",
+        }
+        data = json.dumps(payload).encode("utf-8")
+        req = urllib.request.Request(api_url, data=data, headers=headers, method="POST")
+        try:
+            with urllib.request.urlopen(req, timeout=300) as resp:
+                content_type = resp.headers.get("Content-Type", "")
+                if "text/event-stream" not in content_type:
+                    raw = resp.read().decode("utf-8", errors="ignore")
+                    for chunk in self._extract_responses_text(raw):
+                        yield chunk
+                    return
+                for raw_line in resp:
+                    line = raw_line.decode("utf-8", errors="ignore").strip()
+                    if not line or not line.startswith("data:"):
+                        continue
+                    payload_str = line[5:].strip()
+                    if payload_str == "[DONE]":
+                        break
+                    try:
+                        data_obj = json.loads(payload_str)
+                    except json.JSONDecodeError:
+                        continue
+                    chunk = self._extract_responses_delta(data_obj)
+                    if chunk:
+                        yield chunk
+        except urllib.error.HTTPError as exc:
+            detail = ""
+            try:
+                detail = exc.read().decode("utf-8", errors="ignore").strip()
+            except Exception:
+                pass
+            if detail:
+                raise ValueError(f"HTTP {exc.code}: {exc.reason or 'request failed'} - {detail}") from exc
+            raise ValueError(f"HTTP {exc.code}: {exc.reason or 'request failed'}") from exc
+
+    def _stream_reference_responses(self, payload: dict[str, Any]) -> Iterable[str]:
+        return self._stream_responses(payload, self._reference_settings.api_url, self._reference_settings.api_key)
+
+    def _extract_responses_delta(self, data: dict[str, Any]) -> str:
+        if not isinstance(data, dict):
+            return ""
+        event_type = str(data.get("type") or "")
+        if event_type in ("response.output_text.delta", "response.output_text"):
+            for key in ("delta", "text", "output_text"):
+                if data.get(key):
+                    return str(data[key])
+        if event_type == "response.completed":
+            response_obj = data.get("response")
+            if isinstance(response_obj, dict) and response_obj.get("output_text"):
+                return str(response_obj["output_text"])
+        return ""
+
+    def _extract_responses_text(self, raw: str) -> Iterable[str]:
+        try:
+            data = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"LLM response was not valid JSON: {exc}") from exc
+        if isinstance(data, dict):
+            output_text = data.get("output_text")
+            if output_text:
+                return [str(output_text)]
+            output = data.get("output")
+            if isinstance(output, list):
+                parts: list[str] = []
+                for item in output:
+                    if not isinstance(item, dict):
+                        continue
+                    if item.get("type") != "message":
+                        continue
+                    content = item.get("content", [])
+                    if not isinstance(content, list):
+                        continue
+                    for block in content:
+                        if not isinstance(block, dict):
+                            continue
+                        if block.get("type") == "output_text" and block.get("text"):
+                            parts.append(str(block["text"]))
+                if parts:
+                    return ["".join(parts)]
+        if isinstance(data, str):
+            return [data]
+        raise ValueError("LLM response did not include content.")
+
+    def _extract_stream_delta(self, data: dict[str, Any]) -> str:
+        if not isinstance(data, dict):
+            return ""
+        choices = data.get("choices", [])
+        if not isinstance(choices, list):
+            return ""
+        parts: list[str] = []
+        for choice in choices:
+            if not isinstance(choice, dict):
+                continue
+            delta = choice.get("delta") or choice.get("message") or {}
+            if isinstance(delta, dict) and delta.get("content"):
+                parts.append(str(delta["content"]))
+        return "".join(parts)
+
+    def _extract_response_text(self, raw: str) -> Iterable[str]:
+        try:
+            data = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"LLM response was not valid JSON: {exc}") from exc
+        if isinstance(data, dict) and "choices" in data:
+            parts: list[str] = []
+            for choice in data.get("choices", []):
+                if not isinstance(choice, dict):
+                    continue
+                message = choice.get("message", {})
+                if isinstance(message, dict) and message.get("content"):
+                    parts.append(str(message["content"]))
+            if parts:
+                return ["".join(parts)]
+        if isinstance(data, dict) and data.get("content"):
+            return [str(data["content"])]
+        if isinstance(data, str):
+            return [data]
+        raise ValueError("LLM response did not include content.")
+
+    def _on_spellingstyle_failed(self, message: str) -> bool:
+        self._set_busy(False)
+        self._notify_llm_error(message)
+        return False
+
+    def _on_spellingstyle_finished(self, message: str) -> bool:
+        self._set_busy(False)
+        self._status_label.set_label(message)
+        if self._editor_insert_doc and self._editor_insert_cursor:
+            self._flush_pending_newlines(
+                self._editor_insert_doc,
+                self._editor_insert_cursor,
+                "_editor_pending_newlines",
+            )
+            self._ensure_single_trailing_space(self._editor_insert_doc, self._editor_insert_cursor)
+        self._capture_spellingstyle_range_end()
+        return False
+
+    def _on_improve1_finished(self, message: str) -> bool:
+        self._set_busy(False)
+        self._status_label.set_label(message)
+        if self._improve_insert_doc and self._improve_insert_cursor:
+            self._flush_pending_newlines(
+                self._improve_insert_doc,
+                self._improve_insert_cursor,
+                "_improve_pending_newlines",
+            )
+            self._ensure_single_trailing_space(self._improve_insert_doc, self._improve_insert_cursor)
+        self._capture_improve1_range_end()
+        return False
+
+    def _on_improve_selected_finished(self, message: str) -> bool:
+        self._set_busy(False)
+        self._status_label.set_label(message)
+        if self._improve_insert_doc and self._improve_insert_cursor:
+            self._flush_pending_newlines(
+                self._improve_insert_doc,
+                self._improve_insert_cursor,
+                "_improve_pending_newlines",
+            )
+            self._ensure_single_trailing_space(self._improve_insert_doc, self._improve_insert_cursor)
+        self._capture_improve1_range_end()
+        return False
+
+    def _on_improve2_finished(self, message: str) -> bool:
+        self._set_busy(False)
+        self._status_label.set_label(message)
+        if self._improve_insert_doc and self._improve_insert_cursor:
+            self._flush_pending_newlines(
+                self._improve_insert_doc,
+                self._improve_insert_cursor,
+                "_improve_pending_newlines",
+            )
+            self._ensure_single_trailing_space(self._improve_insert_doc, self._improve_insert_cursor)
+        self._capture_improve2_range_end()
+        return False
+
+    def _on_shorten_finished(self, message: str) -> bool:
+        self._set_busy(False)
+        self._status_label.set_label(message)
+        if self._improve_insert_doc and self._improve_insert_cursor:
+            self._flush_pending_newlines(
+                self._improve_insert_doc,
+                self._improve_insert_cursor,
+                "_improve_pending_newlines",
+            )
+            self._ensure_single_trailing_space(self._improve_insert_doc, self._improve_insert_cursor)
+        self._capture_improve1_range_end()
+        return False
+
+    def _on_topic_sentence_finished(self, message: str) -> bool:
+        self._set_busy(False)
+        self._status_label.set_label(message)
+        if self._editor_insert_doc and self._editor_insert_cursor:
+            self._flush_pending_newlines(
+                self._editor_insert_doc,
+                self._editor_insert_cursor,
+                "_editor_pending_newlines",
+            )
+            self._ensure_single_trailing_space(self._editor_insert_doc, self._editor_insert_cursor)
+        self._capture_spellingstyle_range_end()
+        return False
+
+    def _on_introduction_finished(self, message: str) -> bool:
+        self._set_busy(False)
+        self._status_label.set_label(message)
+        if self._editor_insert_doc and self._editor_insert_cursor:
+            self._flush_pending_newlines(
+                self._editor_insert_doc,
+                self._editor_insert_cursor,
+                "_editor_pending_newlines",
+            )
+            self._ensure_single_trailing_space(self._editor_insert_doc, self._editor_insert_cursor)
+        self._capture_spellingstyle_range_end()
+        return False
+
+    def _on_conclusion_finished(self, message: str) -> bool:
+        self._set_busy(False)
+        self._status_label.set_label(message)
+        if self._editor_insert_doc and self._editor_insert_cursor:
+            self._flush_pending_newlines(
+                self._editor_insert_doc,
+                self._editor_insert_cursor,
+                "_editor_pending_newlines",
+            )
+            self._ensure_single_trailing_space(self._editor_insert_doc, self._editor_insert_cursor)
+        self._capture_spellingstyle_range_end()
+        return False
+
+    def _on_conclusion_no_issues_finished(self, message: str) -> bool:
+        self._set_busy(False)
+        self._status_label.set_label(message)
+        if self._editor_insert_doc and self._editor_insert_cursor:
+            self._flush_pending_newlines(
+                self._editor_insert_doc,
+                self._editor_insert_cursor,
+                "_editor_pending_newlines",
+            )
+            self._ensure_single_trailing_space(self._editor_insert_doc, self._editor_insert_cursor)
+        self._capture_spellingstyle_range_end()
+        return False
+
+    def _on_concl_section_finished(self, message: str) -> bool:
+        self._set_busy(False)
+        self._status_label.set_label(message)
+        if self._editor_insert_doc and self._editor_insert_cursor:
+            self._flush_pending_newlines(
+                self._editor_insert_doc,
+                self._editor_insert_cursor,
+                "_editor_pending_newlines",
+            )
+            self._ensure_single_trailing_space(self._editor_insert_doc, self._editor_insert_cursor)
+        self._capture_spellingstyle_range_end()
+        return False
+
+    def _render_suggestions(self) -> None:
+        for row in self._suggestion_rows:
+            self._list_box.remove(row)
+        self._suggestion_rows.clear()
+        if not self._suggestions:
+            self._empty_label.set_visible(True)
+            return
+        self._empty_label.set_visible(False)
+        for idx, suggestion in enumerate(self._suggestions):
+            row = self._build_suggestion_row(idx, suggestion)
+            self._list_box.append(row)
+            self._suggestion_rows.append(row)
+        self._list_box.set_visible(True)
+
+    def _build_suggestion_row(self, idx: int, suggestion: Suggestion) -> Gtk.Box:
+        card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        card.set_margin_start(6)
+        card.set_margin_end(6)
+        card.set_margin_top(6)
+        card.set_margin_bottom(6)
+
+        content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        content.set_margin_start(8)
+        content.set_margin_end(8)
+        content.set_margin_top(8)
+        content.set_margin_bottom(8)
+        title = suggestion.title
+        if suggestion.page:
+            title = f"Page {suggestion.page}: {title}"
+        label = Gtk.Label(label=title, wrap=True, xalign=0)
+        label.add_css_class("title-3")
+        content.append(label)
+
+        reason = Gtk.Label(label=suggestion.reasoning or "", wrap=True, xalign=0)
+        reason.add_css_class("dim-label")
+        content.append(reason)
+
+        snippet_text = GLib.markup_escape_text(suggestion.snippet)
+        snippet = Gtk.Label(
+            label=f"<b>Replace:</b> {snippet_text}",
+            use_markup=True,
+            wrap=True,
+            xalign=0,
+        )
+        snippet.add_css_class("monospace")
+        content.append(snippet)
+
+        replacement_text = GLib.markup_escape_text(suggestion.replacement)
+        replacement = Gtk.Label(
+            label=f"<b>With:</b> {replacement_text}",
+            use_markup=True,
+            wrap=True,
+            xalign=0,
+        )
+        replacement.add_css_class("monospace")
+        content.append(replacement)
+
+        btn_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        goto = Gtk.Button(label="Go To", icon_name="go-jump-symbolic")
+        goto.add_css_class("flat")
+        goto.set_label("Go To")
+        goto.set_action_name("app.suggestion-goto")
+        goto.set_action_target_value(GLib.Variant("i", idx))
+
+        btn_box.append(goto)
+        accept = Gtk.Button(label="Accept", icon_name="emblem-default-symbolic")
+        accept.add_css_class("suggested-action")
+        accept.add_css_class("flat")
+        accept.set_label("Accept")
+        accept.set_action_name("app.suggestion-accept")
+        accept.set_action_target_value(GLib.Variant("i", idx))
+
+        reject = Gtk.Button(label="Reject", icon_name="edit-delete-symbolic")
+        reject.add_css_class("flat")
+        reject.set_label("Reject")
+        reject.set_action_name("app.suggestion-reject")
+        reject.set_action_target_value(GLib.Variant("i", idx))
+
+        btn_box.append(accept)
+        btn_box.append(reject)
+        content.append(btn_box)
+
+        card.append(content)
+        card.add_css_class("card")
+        return card
+
+    # Suggestion actions --------------------------------------------------
+    def _on_accept_clicked(self, _button: Gtk.Button, idx: int) -> None:
+        suggestion = self._get_suggestion(idx)
+        if not suggestion:
+            return
+        desktop = self._get_desktop()
+        if not desktop:
+            self._show_toast("LibreOffice is not reachable.")
+            return
+        doc = self._get_active_writer(desktop)
+        if not doc:
+            self._show_toast("Open a Writer document first.")
+            return
+        found = self._find_range(doc, suggestion.snippet)
+        if not found:
+            self._show_toast("Snippet not found in document.")
+            return
+        try:
+            found.setString(suggestion.replacement)
+        except Exception:
+            try:
+                found.String = suggestion.replacement  # type: ignore[attr-defined]
+            except Exception as exc:  # noqa: BLE001
+                self._show_toast(f"Unable to apply change: {exc}")
+                return
+        self._save_document(doc)
+        self._remove_suggestion(idx)
+        self._show_toast("Change applied.")
+        self._focus_first_suggestion(notify_success=False)
+
+    def _on_reject_clicked(self, _button: Gtk.Button, idx: int) -> None:
+        self._remove_suggestion(idx)
+        self._focus_first_suggestion(notify_success=False)
+
+    def _on_goto_clicked(self, _button: Gtk.Button, idx: int) -> None:
+        self._focus_suggestion(idx, notify_success=True)
+
+    def _get_suggestion(self, idx: int) -> Suggestion | None:
+        if idx < 0 or idx >= len(self._suggestions):
+            return None
+        return self._suggestions[idx]
+
+    def _remove_suggestion(self, idx: int) -> None:
+        if idx < 0 or idx >= len(self._suggestions):
+            return
+        self._suggestions.pop(idx)
+        self._render_suggestions()
+
+    def _save_document(self, doc: XTextDocument) -> None:  # type: ignore[type-arg]
+        try:
+            if hasattr(doc, "store"):
+                doc.store()
+        except Exception as exc:  # noqa: BLE001
+            self._show_toast(f"Unable to save document: {exc}")
+
+    def _focus_suggestion(
+        self, idx: int, notify_success: bool = True, notify_failure: bool = True
+    ) -> bool:
+        suggestion = self._get_suggestion(idx)
+        if not suggestion:
+            return False
+        desktop = self._get_desktop()
+        if not desktop:
+            if notify_failure:
+                self._show_toast("LibreOffice is not reachable.")
+            return False
+        doc = self._get_active_writer(desktop)
+        if not doc:
+            if notify_failure:
+                self._show_toast("Open a Writer document first.")
+            return False
+        found = self._find_range(doc, suggestion.snippet)
+        if not found:
+            if notify_failure:
+                self._show_toast("Snippet not found in document.")
+            return False
+        try:
+            controller = doc.getCurrentController()
+            view_cursor = controller.getViewCursor()
+            view_cursor.gotoRange(found, False)
+            controller.select(found)
+            if notify_success:
+                self._show_toast("Moved to suggested change.")
+            return True
+        except Exception as exc:  # noqa: BLE001
+            if notify_failure:
+                self._show_toast(f"Unable to move cursor: {exc}")
+            return False
+
+    def _focus_first_suggestion(self, notify_success: bool = False) -> None:
+        if not self._suggestions:
+            return
+        self._focus_suggestion(0, notify_success=notify_success, notify_failure=True)
+
+    def _on_view_json_clicked(self, _button: Gtk.Button) -> None:
+        if not self._last_raw_response:
+            self._show_toast("No model response available yet.")
+            return
+        text = self._format_last_response()
+        if self._json_window:
+            try:
+                self._json_window.destroy()
+            except Exception:
+                pass
+        window = Adw.ApplicationWindow(application=self.get_application(), title="Latest model JSON")
+        window.set_default_size(900, 720)
+        view = Adw.ToolbarView()
+        header = Adw.HeaderBar()
+        header.set_title_widget(Gtk.Label(label="Latest model JSON"))
+        header.set_show_end_title_buttons(True)
+        view.add_top_bar(header)
+        scroller = Gtk.ScrolledWindow()
+        scroller.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
+        scroller.set_vexpand(True)
+        scroller.set_hexpand(True)
+        textview = Gtk.TextView()
+        textview.set_monospace(True)
+        textview.set_wrap_mode(Gtk.WrapMode.WORD_CHAR)
+        textview.get_buffer().set_text(text)
+        scroller.set_child(textview)
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        box.set_margin_top(12)
+        box.set_margin_bottom(12)
+        box.set_margin_start(12)
+        box.set_margin_end(12)
+        box.append(scroller)
+        view.set_content(box)
+        window.set_content(view)
+        window.connect("close-request", self._on_json_window_closed)
+        self._json_window = window
+        window.present()
+
+    def _format_last_response(self) -> str:
+        raw = self._last_raw_response or ""
+        try:
+            loaded = json.loads(raw)
+            return json.dumps(loaded, indent=2, ensure_ascii=False)
+        except Exception:
+            return raw
+
+    def _on_json_window_closed(self, window: Adw.ApplicationWindow, *_args: object) -> bool:
+        self._json_window = None
+        window.destroy()
+        return True
+
+    # Helpers -------------------------------------------------------------
+    def _start_listener(self) -> None:
+        if self._listener_proc and self._listener_proc.poll() is None:
+            return
+        try:
+            LIBREOFFICE_PROFILE.mkdir(parents=True, exist_ok=True)
+        except OSError:
+            pass
+        soffice_bin = SOFFICE_PATH if SOFFICE_PATH.exists() else None
+        cmd = [
+            str(soffice_bin) if soffice_bin else "libreoffice",
+            "--writer",
+            "--nodefault",  # avoid opening a blank document on launch
+            "--nologo",
+            "--nofirststartwizard",
+            f"-env:UserInstallation=file://{LIBREOFFICE_PROFILE.as_posix()}",
+            '--accept=socket,host=127.0.0.1,port=2004;urp;',
+        ]
+        try:
+            self._listener_proc = subprocess.Popen(cmd)
+            self._status_label.set_label("Starting dedicated LibreOffice listener…")
+            time.sleep(2)
+        except Exception as exc:  # noqa: BLE001
+            self._show_toast(f"Unable to start LibreOffice: {exc}")
+
+    def _connect_desktop(self, retries: int = 5, delay: float = 0.6) -> bool:
+        try:
+            local_ctx = uno.getComponentContext()
+            resolver = local_ctx.ServiceManager.createInstanceWithContext(
+                "com.sun.star.bridge.UnoUrlResolver", local_ctx
+            )
+        except Exception:
+            return False
+        for _ in range(retries):
+            try:
+                ctx = resolver.resolve(UNO_BRIDGE_URL)
+                self._ctx = ctx
+                self._desktop = ctx.ServiceManager.createInstanceWithContext("com.sun.star.frame.Desktop", ctx)
+                self._status_label.set_label("LibreOffice UNO connected.")
+                return True
+            except NoConnectException:
+                time.sleep(delay)
+            except Exception:
+                break
+        return False
+
+    def _show_toast(self, message: str) -> None:
+        toast = Adw.Toast.new(message)
+        if hasattr(self, "_overlay") and self._overlay:
+            self._overlay.add_toast(toast)
+
+    def _llm_toast_message(self, message: str) -> str:
+        cleaned = str(message or "").strip()
+        if not cleaned:
+            return "Model error. Try again."
+        lowered = cleaned.lower()
+        if "503" in lowered or "over capacity" in lowered:
+            return "Model is busy. Try again."
+        if lowered.startswith("llm error") or lowered.startswith("http "):
+            return "Model error. Try again."
+        if "empty output" in lowered:
+            return "Model returned empty output."
+        if "no suggestions" in lowered:
+            return "No suggestions returned."
+        if "not valid json" in lowered or "did not include content" in lowered:
+            return "Model returned unreadable output."
+        if len(cleaned) > 80:
+            return "Model error. Try again."
+        return cleaned
+
+    def _notify_llm_error(self, message: str) -> None:
+        self._status_label.set_label("Ready.")
+        self._show_toast(self._llm_toast_message(message))
+
+    def _update_uno_status(self) -> None:
+        if uno is None:
+            self._status_label.set_label("python-uno not available.")
+            return
+        self._get_desktop()
+
+
+class SettingsWindow(Adw.ApplicationWindow):
+    def __init__(
+        self,
+        parent: ProseWindow,
+        proof_settings: ProofreadSettings,
+        spelling_settings: SpellingStyleSettings,
+        improve1_settings: Improve1Settings,
+        improve2_settings: Improve2Settings,
+        combine_cites_settings: CombineCitesSettings,
+        thesaurus_settings: ThesaurusSettings,
+        reference_settings: ReferenceSettings,
+        ask_settings: AskSettings,
+        shorten_settings: ShortenSettings,
+        introduction_settings: IntroductionSettings,
+        conclusion_settings: ConclusionSettings,
+        concl_no_issues_settings: ConclNoIssuesSettings,
+        topic_sentence_settings: TopicSentenceSettings,
+        concl_section_settings: ConclSectionSettings,
+        editor_source_file: Path | None,
+        on_source_change: Callable[[Path | None], None],
+        on_save: Callable[
+            [
+                ProofreadSettings,
+                SpellingStyleSettings,
+                Improve1Settings,
+                Improve2Settings,
+                CombineCitesSettings,
+                ThesaurusSettings,
+                ReferenceSettings,
+                AskSettings,
+                ShortenSettings,
+                IntroductionSettings,
+                ConclusionSettings,
+                ConclNoIssuesSettings,
+                TopicSentenceSettings,
+                ConclSectionSettings,
+            ],
+            None,
+        ],
+    ) -> None:
+        super().__init__(application=parent.get_application(), title="Settings")
+        self._on_save = on_save
+        self._on_source_change = on_source_change
+        self._proof_settings = proof_settings
+        self._spelling_settings = spelling_settings
+        self._improve1_settings = improve1_settings
+        self._improve2_settings = improve2_settings
+        self._combine_cites_settings = combine_cites_settings
+        self._thesaurus_settings = thesaurus_settings
+        self._reference_settings = reference_settings
+        self._ask_settings = ask_settings
+        self._shorten_settings = shorten_settings
+        self._introduction_settings = introduction_settings
+        self._conclusion_settings = conclusion_settings
+        self._concl_no_issues_settings = concl_no_issues_settings
+        self._topic_sentence_settings = topic_sentence_settings
+        self._concl_section_settings = concl_section_settings
+        self._editor_source_file = editor_source_file
+        self._prompt_editors: dict[str, PromptEditorWidgets] = {}
+        self._prompt_row_keys: dict[Gtk.ListBoxRow, str] = {}
+        self._source_row_guard = False
+        self.set_default_size(900, 720)
+        self.set_resizable(True)
+        self._build_ui()
+
+    def _build_ui(self) -> None:
+        view = Adw.ToolbarView()
+        header = Adw.HeaderBar()
+        header.add_css_class("flat")
+        header.set_title_widget(Gtk.Label(label="Settings", xalign=0))
+        view.add_top_bar(header)
+
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+        box.set_margin_top(18)
+        box.set_margin_bottom(12)
+        box.set_margin_start(18)
+        box.set_margin_end(18)
+
+        source_group = Adw.PreferencesGroup(title="Source Text")
+        source_group.add_css_class("list-stack")
+        source_group.set_hexpand(True)
+        box.append(source_group)
+
+        source_row = Adw.EntryRow(title="Source text file")
+        source_row.set_hexpand(True)
+        if self._editor_source_file:
+            source_row.set_text(str(self._editor_source_file))
+        source_row.connect("changed", self._on_source_row_changed)
+        choose_btn = Gtk.Button(label="Choose")
+        choose_btn.add_css_class("flat")
+        choose_btn.connect("clicked", self._on_choose_source_file)
+        source_row.add_suffix(choose_btn)
+        source_group.add(source_row)
+        self._source_row = source_row
+
+        split = Gtk.Paned(orientation=Gtk.Orientation.HORIZONTAL)
+        split.set_hexpand(True)
+        split.set_vexpand(True)
+        split.set_shrink_start_child(False)
+        split.set_shrink_end_child(False)
+        split.set_resize_start_child(False)
+        split.set_resize_end_child(True)
+
+        prompt_list = Gtk.ListBox()
+        prompt_list.set_selection_mode(Gtk.SelectionMode.SINGLE)
+        prompt_list.add_css_class("navigation-sidebar")
+        prompt_list.connect("row-selected", self._on_prompt_row_selected)
+
+        prompt_list_scroller = Gtk.ScrolledWindow()
+        prompt_list_scroller.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        prompt_list_scroller.set_min_content_width(220)
+        prompt_list_scroller.set_child(prompt_list)
+
+        prompt_stack = Gtk.Stack()
+        prompt_stack.set_hexpand(True)
+        prompt_stack.set_vexpand(True)
+        prompt_stack.set_transition_type(Gtk.StackTransitionType.SLIDE_LEFT_RIGHT)
+        self._prompt_stack = prompt_stack
+        self._prompt_list = prompt_list
+
+        prompt_definitions = [
+            ("proof", "Proof Reading", self._proof_settings, DEFAULT_PROMPT),
+            ("spelling", "SpellingStyle", self._spelling_settings, DEFAULT_SPELLINGSTYLE_PROMPT),
+            ("thesaurus", "Thesaurus", self._thesaurus_settings, DEFAULT_THESAURUS_PROMPT),
+            ("reference", "Reference", self._reference_settings, DEFAULT_REFERENCE_PROMPT),
+            ("ask", "Ask Field", self._ask_settings, DEFAULT_ASK_PROMPT),
+            ("improve1", "Improve 1", self._improve1_settings, DEFAULT_IMPROVE1_PROMPT),
+            ("improve2", "Improve 2", self._improve2_settings, DEFAULT_IMPROVE2_PROMPT),
+            ("combine", "Combine Cites", self._combine_cites_settings, DEFAULT_COMBINE_CITES_PROMPT),
+            ("shorten", "Shorten", self._shorten_settings, DEFAULT_SHORTEN_PROMPT),
+            ("intro", "Introduction", self._introduction_settings, DEFAULT_INTRO_PROMPT),
+            ("conclusion", "Conclusion", self._conclusion_settings, DEFAULT_CONCLUSION_PROMPT),
+            ("concl-no-issues", "Concl. No Issues", self._concl_no_issues_settings, DEFAULT_CONCL_NO_ISSUES_PROMPT),
+            ("topic-sentence", "Topic Sentence", self._topic_sentence_settings, DEFAULT_TOPIC_SENTENCE_PROMPT),
+            ("concl-section", "Concl. Section", self._concl_section_settings, DEFAULT_CONCL_SECTION_PROMPT),
+        ]
+        first_row: Gtk.ListBoxRow | None = None
+        for key, title, settings, default_prompt in prompt_definitions:
+            row = Gtk.ListBoxRow()
+            row_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+            row_box.set_margin_top(8)
+            row_box.set_margin_bottom(8)
+            row_box.set_margin_start(12)
+            row_box.set_margin_end(12)
+            label = Gtk.Label(label=title, xalign=0)
+            row_box.append(label)
+            row.set_child(row_box)
+            prompt_list.append(row)
+            self._prompt_row_keys[row] = key
+            if first_row is None:
+                first_row = row
+
+            page = self._build_prompt_page(key, title, settings, default_prompt)
+            prompt_stack.add_named(page, key)
+
+        if first_row is not None:
+            prompt_list.select_row(first_row)
+            prompt_stack.set_visible_child_name(self._prompt_row_keys[first_row])
+
+        split.set_start_child(prompt_list_scroller)
+        split.set_end_child(prompt_stack)
+        box.append(split)
+
+        content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        scrolled = Gtk.ScrolledWindow()
+        scrolled.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        scrolled.set_hexpand(True)
+        scrolled.set_vexpand(True)
+        scrolled.set_child(box)
+        content.append(scrolled)
+
+        buttons = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        buttons.set_margin_top(6)
+        buttons.set_margin_bottom(12)
+        buttons.set_margin_start(12)
+        buttons.set_margin_end(12)
+        buttons.set_halign(Gtk.Align.END)
+        save_btn = Gtk.Button(label="Save Settings")
+        save_btn.add_css_class("suggested-action")
+        save_btn.add_css_class("flat")
+        save_btn.set_action_name("app.save-settings")
+        buttons.append(save_btn)
+        content.append(buttons)
+
+        view.set_content(content)
+        self.set_content(view)
+
+    def set_source_file(self, path: Path | None) -> None:
+        self._set_editor_source_file(path, notify=False)
+
+    def _on_choose_source_file(self, _button: Gtk.Button) -> None:
+        dialog = Gtk.FileDialog(title="Choose a source text file")
+        dialog.open(self, None, self._on_source_file_chosen)
+
+    def _on_source_file_chosen(self, dialog: Gtk.FileDialog, result: Gio.AsyncResult) -> None:  # noqa: D401
+        try:
+            file = dialog.open_finish(result)
+            path = Path(file.get_path() or "")
+        except Exception:
+            return
+        if not path:
+            return
+        self._set_editor_source_file(path, notify=True)
+
+    def _on_source_row_changed(self, row: Adw.EntryRow) -> None:
+        if self._source_row_guard:
+            return
+        raw = row.get_text().strip()
+        if not raw:
+            self._set_editor_source_file(None, notify=True)
+            return
+        self._set_editor_source_file(Path(raw), notify=True)
+
+    def _set_editor_source_file(self, path: Path | None, notify: bool) -> None:
+        self._editor_source_file = path.expanduser().resolve(strict=False) if path else None
+        self._source_row_guard = True
+        self._source_row.set_text(str(self._editor_source_file or ""))
+        self._source_row_guard = False
+        if notify:
+            self._on_source_change(self._editor_source_file)
+
+    def trigger_save(self) -> None:
+        self._on_save_clicked(None)
+
+    def _on_save_clicked(self, _button: Gtk.Button) -> None:
+        proof_widgets = self._prompt_editors.get("proof")
+        spelling_widgets = self._prompt_editors.get("spelling")
+        thesaurus_widgets = self._prompt_editors.get("thesaurus")
+        reference_widgets = self._prompt_editors.get("reference")
+        ask_widgets = self._prompt_editors.get("ask")
+        improve1_widgets = self._prompt_editors.get("improve1")
+        improve2_widgets = self._prompt_editors.get("improve2")
+        combine_widgets = self._prompt_editors.get("combine")
+        shorten_widgets = self._prompt_editors.get("shorten")
+        intro_widgets = self._prompt_editors.get("intro")
+        conclusion_widgets = self._prompt_editors.get("conclusion")
+        concl_no_issues_widgets = self._prompt_editors.get("concl-no-issues")
+        topic_sentence_widgets = self._prompt_editors.get("topic-sentence")
+        concl_section_widgets = self._prompt_editors.get("concl-section")
+        if not all(
+            (
+                proof_widgets,
+                spelling_widgets,
+                thesaurus_widgets,
+                reference_widgets,
+                ask_widgets,
+                improve1_widgets,
+                improve2_widgets,
+                combine_widgets,
+                shorten_widgets,
+                intro_widgets,
+                conclusion_widgets,
+                concl_no_issues_widgets,
+                topic_sentence_widgets,
+                concl_section_widgets,
+            )
+        ):
+            return
+
+        proof_prompt_text = self._prompt_text(proof_widgets.prompt_buffer)
+        spelling_prompt_text = self._prompt_text(spelling_widgets.prompt_buffer)
+        thesaurus_prompt_text = self._prompt_text(thesaurus_widgets.prompt_buffer)
+        reference_prompt_text = self._prompt_text(reference_widgets.prompt_buffer)
+        ask_prompt_text = self._prompt_text(ask_widgets.prompt_buffer)
+        improve1_prompt_text = self._prompt_text(improve1_widgets.prompt_buffer)
+        improve2_prompt_text = self._prompt_text(improve2_widgets.prompt_buffer)
+        combine_prompt_text = self._prompt_text(combine_widgets.prompt_buffer)
+        shorten_prompt_text = self._prompt_text(shorten_widgets.prompt_buffer)
+        intro_prompt_text = self._prompt_text(intro_widgets.prompt_buffer)
+        conclusion_prompt_text = self._prompt_text(conclusion_widgets.prompt_buffer)
+        concl_no_issues_prompt_text = self._prompt_text(concl_no_issues_widgets.prompt_buffer)
+        topic_sentence_prompt_text = self._prompt_text(topic_sentence_widgets.prompt_buffer)
+        concl_section_prompt_text = self._prompt_text(concl_section_widgets.prompt_buffer)
+        proof_settings = ProofreadSettings(
+            api_url=proof_widgets.api_url_row.get_text().strip(),
+            model_id=proof_widgets.model_row.get_text().strip(),
+            api_key=proof_widgets.api_key_row.get_text().strip(),
+            prompt=proof_prompt_text.strip() or DEFAULT_PROMPT,
+        )
+        spelling_settings = SpellingStyleSettings(
+            api_url=spelling_widgets.api_url_row.get_text().strip(),
+            model_id=spelling_widgets.model_row.get_text().strip(),
+            api_key=spelling_widgets.api_key_row.get_text().strip(),
+            prompt=spelling_prompt_text.strip() or DEFAULT_SPELLINGSTYLE_PROMPT,
+        )
+        thesaurus_settings = ThesaurusSettings(
+            api_url=thesaurus_widgets.api_url_row.get_text().strip(),
+            model_id=thesaurus_widgets.model_row.get_text().strip(),
+            api_key=thesaurus_widgets.api_key_row.get_text().strip(),
+            prompt=thesaurus_prompt_text.strip() or DEFAULT_THESAURUS_PROMPT,
+        )
+        reference_settings = ReferenceSettings(
+            api_url=reference_widgets.api_url_row.get_text().strip(),
+            model_id=reference_widgets.model_row.get_text().strip(),
+            api_key=reference_widgets.api_key_row.get_text().strip(),
+            tavily_api_key=(reference_widgets.tavily_api_key_row.get_text().strip() if reference_widgets.tavily_api_key_row else ""),
+            prompt=reference_prompt_text.strip() or DEFAULT_REFERENCE_PROMPT,
+        )
+        ask_settings = AskSettings(
+            api_url=ask_widgets.api_url_row.get_text().strip(),
+            model_id=ask_widgets.model_row.get_text().strip(),
+            api_key=ask_widgets.api_key_row.get_text().strip(),
+            tavily_api_key=(ask_widgets.tavily_api_key_row.get_text().strip() if ask_widgets.tavily_api_key_row else ""),
+            prompt=ask_prompt_text.strip() or DEFAULT_ASK_PROMPT,
+        )
+        improve1_settings = Improve1Settings(
+            api_url=improve1_widgets.api_url_row.get_text().strip(),
+            model_id=improve1_widgets.model_row.get_text().strip(),
+            api_key=improve1_widgets.api_key_row.get_text().strip(),
+            prompt=improve1_prompt_text.strip() or DEFAULT_IMPROVE1_PROMPT,
+        )
+        improve2_settings = Improve2Settings(
+            api_url=improve2_widgets.api_url_row.get_text().strip(),
+            model_id=improve2_widgets.model_row.get_text().strip(),
+            api_key=improve2_widgets.api_key_row.get_text().strip(),
+            prompt=improve2_prompt_text.strip() or DEFAULT_IMPROVE2_PROMPT,
+        )
+        combine_cites_settings = CombineCitesSettings(
+            api_url=combine_widgets.api_url_row.get_text().strip(),
+            model_id=combine_widgets.model_row.get_text().strip(),
+            api_key=combine_widgets.api_key_row.get_text().strip(),
+            prompt=combine_prompt_text.strip() or DEFAULT_COMBINE_CITES_PROMPT,
+        )
+        shorten_settings = ShortenSettings(
+            api_url=shorten_widgets.api_url_row.get_text().strip(),
+            model_id=shorten_widgets.model_row.get_text().strip(),
+            api_key=shorten_widgets.api_key_row.get_text().strip(),
+            prompt=shorten_prompt_text.strip() or DEFAULT_SHORTEN_PROMPT,
+        )
+        introduction_settings = IntroductionSettings(
+            api_url=intro_widgets.api_url_row.get_text().strip(),
+            model_id=intro_widgets.model_row.get_text().strip(),
+            api_key=intro_widgets.api_key_row.get_text().strip(),
+            prompt=intro_prompt_text.strip() or DEFAULT_INTRO_PROMPT,
+        )
+        conclusion_settings = ConclusionSettings(
+            api_url=conclusion_widgets.api_url_row.get_text().strip(),
+            model_id=conclusion_widgets.model_row.get_text().strip(),
+            api_key=conclusion_widgets.api_key_row.get_text().strip(),
+            prompt=conclusion_prompt_text.strip() or DEFAULT_CONCLUSION_PROMPT,
+        )
+        concl_no_issues_settings = ConclNoIssuesSettings(
+            api_url=concl_no_issues_widgets.api_url_row.get_text().strip(),
+            model_id=concl_no_issues_widgets.model_row.get_text().strip(),
+            api_key=concl_no_issues_widgets.api_key_row.get_text().strip(),
+            prompt=concl_no_issues_prompt_text.strip() or DEFAULT_CONCL_NO_ISSUES_PROMPT,
+        )
+        topic_sentence_settings = TopicSentenceSettings(
+            api_url=topic_sentence_widgets.api_url_row.get_text().strip(),
+            model_id=topic_sentence_widgets.model_row.get_text().strip(),
+            api_key=topic_sentence_widgets.api_key_row.get_text().strip(),
+            prompt=topic_sentence_prompt_text.strip() or DEFAULT_TOPIC_SENTENCE_PROMPT,
+        )
+        concl_section_settings = ConclSectionSettings(
+            api_url=concl_section_widgets.api_url_row.get_text().strip(),
+            model_id=concl_section_widgets.model_row.get_text().strip(),
+            api_key=concl_section_widgets.api_key_row.get_text().strip(),
+            prompt=concl_section_prompt_text.strip() or DEFAULT_CONCL_SECTION_PROMPT,
+        )
+        self._on_save(
+            proof_settings,
+            spelling_settings,
+            improve1_settings,
+            improve2_settings,
+            combine_cites_settings,
+            thesaurus_settings,
+            reference_settings,
+            ask_settings,
+            shorten_settings,
+            introduction_settings,
+            conclusion_settings,
+            concl_no_issues_settings,
+            topic_sentence_settings,
+            concl_section_settings,
+        )
+        self.close()
+
+    def _on_prompt_row_selected(self, _listbox: Gtk.ListBox, row: Gtk.ListBoxRow | None) -> None:
+        if not row:
+            return
+        key = self._prompt_row_keys.get(row)
+        if key:
+            self._prompt_stack.set_visible_child_name(key)
+
+    def _build_prompt_page(
+        self,
+        key: str,
+        title: str,
+        settings: (
+            ProofreadSettings
+            | SpellingStyleSettings
+            | Improve1Settings
+            | Improve2Settings
+            | CombineCitesSettings
+            | ThesaurusSettings
+            | ReferenceSettings
+            | AskSettings
+            | ShortenSettings
+            | IntroductionSettings
+            | ConclusionSettings
+            | ConclNoIssuesSettings
+            | TopicSentenceSettings
+            | ConclSectionSettings
+        ),
+        default_prompt: str,
+    ) -> Gtk.Widget:
+        page_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+        page_box.set_margin_top(12)
+        page_box.set_margin_bottom(12)
+        page_box.set_margin_start(12)
+        page_box.set_margin_end(12)
+        page_box.set_vexpand(True)
+
+        title_label = Gtk.Label(label=title, xalign=0)
+        title_label.add_css_class("title-3")
+        page_box.append(title_label)
+
+        credentials_group = Adw.PreferencesGroup(title="Credentials")
+        credentials_group.add_css_class("list-stack")
+        credentials_group.set_hexpand(True)
+        page_box.append(credentials_group)
+
+        api_url_row = Adw.EntryRow(title="API URL")
+        api_url_row.set_text(settings.api_url)
+        credentials_group.add(api_url_row)
+
+        model_row = Adw.EntryRow(title="Model ID (optional)")
+        model_row.set_text(settings.model_id)
+        credentials_group.add(model_row)
+
+        api_key_row = Adw.PasswordEntryRow(title="API Key")
+        api_key_row.set_text(settings.api_key)
+        credentials_group.add(api_key_row)
+
+        tavily_api_key_row = None
+        if isinstance(settings, (ReferenceSettings, AskSettings)):
+            tavily_api_key_row = Adw.PasswordEntryRow(title="Tavily API Key")
+            tavily_api_key_row.set_text(settings.tavily_api_key)
+            credentials_group.add(tavily_api_key_row)
+
+        prompt_section = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        prompt_section.set_hexpand(True)
+        prompt_section.set_vexpand(True)
+        prompt_label = Gtk.Label(label="Prompt", xalign=0)
+        prompt_label.add_css_class("dim-label")
+        prompt_section.append(prompt_label)
+        prompt_scroller, buffer = self._build_prompt_editor(settings.prompt or default_prompt)
+        prompt_section.append(prompt_scroller)
+        page_box.append(prompt_section)
+
+        ask_prompt_buffer = None
+
+        page = Gtk.ScrolledWindow()
+        page.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        page.set_hexpand(True)
+        page.set_vexpand(True)
+        page.set_child(page_box)
+
+        self._prompt_editors[key] = PromptEditorWidgets(
+            api_url_row=api_url_row,
+            model_row=model_row,
+            api_key_row=api_key_row,
+            tavily_api_key_row=tavily_api_key_row,
+            prompt_buffer=buffer,
+            ask_prompt_buffer=ask_prompt_buffer,
+        )
+        return page
+
+    def _build_prompt_editor(self, text: str) -> tuple[Gtk.ScrolledWindow, Gtk.TextBuffer]:
+        scroller = Gtk.ScrolledWindow()
+        scroller.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
+        scroller.set_hexpand(True)
+        scroller.set_vexpand(True)
+        scroller.set_has_frame(False)
+
+        buffer = Gtk.TextBuffer()
+        buffer.set_text(text)
+        prompt_view = Gtk.TextView.new_with_buffer(buffer)
+        prompt_view.set_wrap_mode(Gtk.WrapMode.WORD_CHAR)
+        prompt_view.set_monospace(True)
+        prompt_view.set_vexpand(True)
+        prompt_view.set_hexpand(True)
+        prompt_view.set_top_margin(12)
+        prompt_view.set_bottom_margin(12)
+        prompt_view.set_left_margin(12)
+        prompt_view.set_right_margin(12)
+        scroller.set_child(prompt_view)
+        return scroller, buffer
+
+    def _prompt_text(self, buffer: Gtk.TextBuffer) -> str:
+        start, end = buffer.get_bounds()
+        return buffer.get_text(start, end, True)
+
+
+class EditorCommandsWindow(Adw.ApplicationWindow):
+    def __init__(self, parent: ProseWindow) -> None:
+        super().__init__(application=parent.get_application(), title="Editor Commands")
+        self.set_default_size(900, 720)
+        self.set_resizable(True)
+        self._build_ui()
+
+    def _build_ui(self) -> None:
+        view = Adw.ToolbarView()
+        header = Adw.HeaderBar()
+        header.add_css_class("flat")
+        header.set_title_widget(Adw.WindowTitle(title="Editor Commands", subtitle="Run or copy actions"))
+        view.add_top_bar(header)
+
+        page = Adw.PreferencesPage()
+        intro = Adw.PreferencesGroup(
+            title="How to use",
+            description=(
+                "Use Run to trigger actions inside the open Prose window. "
+                "Use Copy Command to place the GApplication call on your clipboard."
+            ),
+        )
+        page.add(intro)
+
+        commands = [
+            ("Launch Writer", "launch-writer", None, "Open a Writer document via UNO."),
+            ("Direct Input", "direct-input", None, "Insert the source file text into Writer."),
+            (
+                "Direct Input No Trailing Space",
+                "direct-input-no-trailing-space",
+                None,
+                "Insert the source file text into Writer without trailing spaces.",
+            ),
+            ("Combine Cites", "combine-cites", None, "Combine the first run of adjacent citations."),
+            ("SpellingStyle", "spellingstyle", None, "Stream model output into Writer."),
+            ("Improve 1", "improve1", None, "Rewrite SpellingStyle output (pass 1)."),
+            ("Improve 2", "improve2", None, "Rewrite SpellingStyle output (pass 2)."),
+            ("Improve Selected", "improve-selected", None, "Rewrite selected text in Writer."),
+            ("Keep Original", "keep-original", None, "Restore the last SpellingStyle output."),
+            ("Reference Lookup", "reference-lookup", None, "Look up a definition for the selected text."),
+            ("Focus Ask Field", "focus-ask", None, "Focus the Ask question field in the Editor view."),
+            ("Wrap Selection in Quotes", "transform-wrap-quotes", None, "Wrap selected text in curly quotes."),
+            ("Create Topic Sentence", "transform-topic-sentence", None, "Generate a topic sentence from a paragraph."),
+            ("Create Concl. Section", "transform-concl-section", None, "Summarize the current section."),
+            ("Add Case", "add-case", None, "Add selected case citation to concordance and AutoText."),
+        ]
+
+        actions_group = Adw.PreferencesGroup(title="Editor Actions")
+        page.add(actions_group)
+        for title, action_name, param, desc in commands:
+            row = self._build_action_row(title, action_name, param, desc)
+            actions_group.add(row)
+
+        scroller = Gtk.ScrolledWindow()
+        scroller.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        scroller.set_child(page)
+        view.set_content(scroller)
+        self.set_content(view)
+
+    def _build_action_row(
+        self,
+        title: str,
+        action_name: str,
+        param: str | None,
+        desc: str,
+        with_index: bool = False,
+    ) -> Adw.ActionRow:
+        row = Adw.ActionRow(title=title, subtitle=desc)
+        row.set_activatable(False)
+
+        suffix = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        spin = None
+        if with_index:
+            spin = Gtk.SpinButton.new_with_range(0, 9999, 1)
+            spin.set_value(0)
+            spin.set_width_chars(4)
+            suffix.append(spin)
+
+        run_btn = Gtk.Button(label="Run")
+        run_btn.add_css_class("suggested-action")
+        run_btn.add_css_class("flat")
+        run_btn.connect("clicked", self._on_run_clicked, action_name, spin)
+        suffix.append(run_btn)
+
+        copy_btn = Gtk.Button(label="Copy Command")
+        copy_btn.add_css_class("flat")
+        copy_btn.add_css_class("link")
+        copy_btn.connect("clicked", self._on_copy_clicked, action_name, spin, param)
+        suffix.append(copy_btn)
+
+        row.add_suffix(suffix)
+        return row
+
+    def _on_run_clicked(
+        self, _button: Gtk.Button, action_name: str, spin: Gtk.SpinButton | None
+    ) -> None:
+        app = self.get_application()
+        if spin is None:
+            app.activate_action(action_name, None)
+            return
+        value = int(spin.get_value())
+        app.activate_action(action_name, GLib.Variant("i", value))
+
+    def _on_copy_clicked(
+        self,
+        _button: Gtk.Button,
+        action_name: str,
+        spin: Gtk.SpinButton | None,
+        param: str | None,
+    ) -> None:
+        if spin is not None:
+            param = f"<int32 {int(spin.get_value())}>"
+        app = self.get_application()
+        object_path = ACTION_OBJECT_PATH
+        if isinstance(app, Gio.Application):
+            app_path = app.get_dbus_object_path()
+            if app_path:
+                object_path = app_path
+        command = _action_command(action_name, param, object_path)
+        display = Gdk.Display.get_default()
+        if display:
+            display.get_clipboard().set(command)
+
+
+def main() -> None:
+    app = ProseApp()
+    app.run(None)
+
+
+if __name__ == "__main__":
+    main()
