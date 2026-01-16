@@ -1073,6 +1073,11 @@ class ProseWindow(Adw.ApplicationWindow):
         page_box.append(self._start_spin)
         page_box.append(Gtk.Label(label="to"))
         page_box.append(self._end_spin)
+        next_four_btn = Gtk.Button(label="Next 4")
+        next_four_btn.add_css_class("flat")
+        next_four_btn.add_css_class("transform-pill-compact")
+        next_four_btn.connect("clicked", self._on_next_four_clicked)
+        page_box.append(next_four_btn)
         panel.append(page_box)
 
         run_btn = Gtk.Button(label="Request Changes", icon_name="media-playback-start-symbolic")
@@ -1310,6 +1315,17 @@ class ProseWindow(Adw.ApplicationWindow):
         if self._settings_window:
             self._settings_window.set_source_file(self._editor_source_file)
         save_editor_source_file(self._editor_source_file)
+
+    def _on_next_four_clicked(self, _button: Gtk.Button) -> None:
+        start = int(self._start_spin.get_value())
+        end = int(self._end_spin.get_value())
+        if end < start:
+            end = start
+        upper = int(self._end_spin.get_adjustment().get_upper())
+        new_start = min(end + 1, upper)
+        new_end = min(new_start + 3, upper)
+        self._start_spin.set_value(new_start)
+        self._end_spin.set_value(new_end)
 
     def _on_request_clicked(self, _button: Gtk.Button) -> None:
         if self._busy:
