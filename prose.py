@@ -822,6 +822,16 @@ class ProseWindow(Adw.ApplicationWindow):
         status_label.add_css_class("dim-label")
         self._status_label = status_label
 
+        status_spinner = Gtk.Spinner()
+        status_spinner.set_spinning(False)
+        status_spinner.set_visible(False)
+        self._status_spinner = status_spinner
+
+        status_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        status_row.set_halign(Gtk.Align.START)
+        status_row.append(status_spinner)
+        status_row.append(status_label)
+
         mode_switcher = Adw.ViewSwitcher()
         mode_switcher.set_policy(Adw.ViewSwitcherPolicy.WIDE)
 
@@ -843,7 +853,7 @@ class ProseWindow(Adw.ApplicationWindow):
         top_box.set_margin_bottom(6)
         top_box.set_margin_start(18)
         top_box.set_margin_end(18)
-        top_box.append(status_label)
+        top_box.append(status_row)
         top_box.append(mode_switcher)
 
         content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
@@ -3212,6 +3222,9 @@ class ProseWindow(Adw.ApplicationWindow):
 
     def _set_busy(self, busy: bool) -> None:
         self._busy = busy
+        if hasattr(self, "_status_spinner"):
+            self._status_spinner.set_visible(busy)
+            self._status_spinner.set_spinning(busy)
         if hasattr(self, "_run_btn"):
             self._run_btn.set_sensitive(not busy)
         if hasattr(self, "_spell_btn"):
