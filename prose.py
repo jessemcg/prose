@@ -2038,7 +2038,6 @@ class ProseWindow(Adw.ApplicationWindow):
         if not received:
             GLib.idle_add(self._on_reference_failed, "Ask returned empty output.")
             return
-        GLib.idle_add(self._clear_ask_entry)
         GLib.idle_add(self._on_reference_finished, "Answer ready.")
 
     def _compose_reference_payload(self, source_text: str, prompt_override: str | None) -> dict[str, Any]:
@@ -2129,11 +2128,6 @@ class ProseWindow(Adw.ApplicationWindow):
         if hasattr(self, "_reference_label"):
             self._reference_label.add_css_class("dim-label")
             self._reference_label.set_text(text or "")
-
-    def _clear_ask_entry(self) -> bool:
-        if hasattr(self, "_reference_query_entry"):
-            self._reference_query_entry.set_text("")
-        return False
 
     def _set_reference_output_text(self, text: str) -> bool:
         self._reference_output_text = text or ""
