@@ -40,61 +40,89 @@ CONFIG_FILE = Path(__file__).with_name("config.json")
 CONFIG_KEY_PROOFREAD_API_URL = "api_url"
 CONFIG_KEY_PROOFREAD_MODEL_ID = "model_id"
 CONFIG_KEY_PROOFREAD_API_KEY = "api_key"
+CONFIG_KEY_PROOFREAD_KIMI_REASONING = "proofread_kimi_reasoning"
+CONFIG_KEY_PROOFREAD_DEEPSEEK_REASONING = "proofread_deepseek_reasoning"
 CONFIG_KEY_PROOFREAD_PROMPT = "proofread_prompt"
 CONFIG_KEY_SPELLING_API_URL = "spellingstyle_api_url"
 CONFIG_KEY_SPELLING_MODEL_ID = "spellingstyle_model_id"
 CONFIG_KEY_SPELLING_API_KEY = "spellingstyle_api_key"
+CONFIG_KEY_SPELLING_KIMI_REASONING = "spellingstyle_kimi_reasoning"
+CONFIG_KEY_SPELLING_DEEPSEEK_REASONING = "spellingstyle_deepseek_reasoning"
 CONFIG_KEY_SPELLING_PROMPT = "spellingstyle_prompt"
 CONFIG_KEY_IMPROVE1_API_URL = "improve1_api_url"
 CONFIG_KEY_IMPROVE1_MODEL_ID = "improve1_model_id"
 CONFIG_KEY_IMPROVE1_API_KEY = "improve1_api_key"
+CONFIG_KEY_IMPROVE1_KIMI_REASONING = "improve1_kimi_reasoning"
+CONFIG_KEY_IMPROVE1_DEEPSEEK_REASONING = "improve1_deepseek_reasoning"
 CONFIG_KEY_IMPROVE1_PROMPT = "improve1_prompt"
 CONFIG_KEY_IMPROVE2_API_URL = "improve2_api_url"
 CONFIG_KEY_IMPROVE2_MODEL_ID = "improve2_model_id"
 CONFIG_KEY_IMPROVE2_API_KEY = "improve2_api_key"
+CONFIG_KEY_IMPROVE2_KIMI_REASONING = "improve2_kimi_reasoning"
+CONFIG_KEY_IMPROVE2_DEEPSEEK_REASONING = "improve2_deepseek_reasoning"
 CONFIG_KEY_IMPROVE2_PROMPT = "improve2_prompt"
 CONFIG_KEY_COMBINE_CITES_API_URL = "combine_cites_api_url"
 CONFIG_KEY_COMBINE_CITES_MODEL_ID = "combine_cites_model_id"
 CONFIG_KEY_COMBINE_CITES_API_KEY = "combine_cites_api_key"
+CONFIG_KEY_COMBINE_CITES_KIMI_REASONING = "combine_cites_kimi_reasoning"
+CONFIG_KEY_COMBINE_CITES_DEEPSEEK_REASONING = "combine_cites_deepseek_reasoning"
 CONFIG_KEY_COMBINE_CITES_PROMPT = "combine_cites_prompt"
 CONFIG_KEY_THESAURUS_API_URL = "thesaurus_api_url"
 CONFIG_KEY_THESAURUS_MODEL_ID = "thesaurus_model_id"
 CONFIG_KEY_THESAURUS_API_KEY = "thesaurus_api_key"
+CONFIG_KEY_THESAURUS_KIMI_REASONING = "thesaurus_kimi_reasoning"
+CONFIG_KEY_THESAURUS_DEEPSEEK_REASONING = "thesaurus_deepseek_reasoning"
 CONFIG_KEY_THESAURUS_PROMPT = "thesaurus_prompt"
 CONFIG_KEY_REFERENCE_API_URL = "reference_api_url"
 CONFIG_KEY_REFERENCE_MODEL_ID = "reference_model_id"
 CONFIG_KEY_REFERENCE_API_KEY = "reference_api_key"
+CONFIG_KEY_REFERENCE_KIMI_REASONING = "reference_kimi_reasoning"
+CONFIG_KEY_REFERENCE_DEEPSEEK_REASONING = "reference_deepseek_reasoning"
 CONFIG_KEY_REFERENCE_TAVILY_API_KEY = "reference_tavily_api_key"
 CONFIG_KEY_REFERENCE_PROMPT = "reference_prompt"
 CONFIG_KEY_REFERENCE_ASK_PROMPT = "reference_ask_prompt"
 CONFIG_KEY_ASK_API_URL = "ask_api_url"
 CONFIG_KEY_ASK_MODEL_ID = "ask_model_id"
 CONFIG_KEY_ASK_API_KEY = "ask_api_key"
+CONFIG_KEY_ASK_KIMI_REASONING = "ask_kimi_reasoning"
+CONFIG_KEY_ASK_DEEPSEEK_REASONING = "ask_deepseek_reasoning"
 CONFIG_KEY_ASK_TAVILY_API_KEY = "ask_tavily_api_key"
 CONFIG_KEY_ASK_PROMPT = "ask_prompt"
 CONFIG_KEY_SHORTEN_API_URL = "shorten_api_url"
 CONFIG_KEY_SHORTEN_MODEL_ID = "shorten_model_id"
 CONFIG_KEY_SHORTEN_API_KEY = "shorten_api_key"
+CONFIG_KEY_SHORTEN_KIMI_REASONING = "shorten_kimi_reasoning"
+CONFIG_KEY_SHORTEN_DEEPSEEK_REASONING = "shorten_deepseek_reasoning"
 CONFIG_KEY_SHORTEN_PROMPT = "shorten_prompt"
 CONFIG_KEY_INTRO_API_URL = "introduction_api_url"
 CONFIG_KEY_INTRO_MODEL_ID = "introduction_model_id"
 CONFIG_KEY_INTRO_API_KEY = "introduction_api_key"
+CONFIG_KEY_INTRO_KIMI_REASONING = "introduction_kimi_reasoning"
+CONFIG_KEY_INTRO_DEEPSEEK_REASONING = "introduction_deepseek_reasoning"
 CONFIG_KEY_INTRO_PROMPT = "introduction_prompt"
 CONFIG_KEY_CONCLUSION_API_URL = "conclusion_api_url"
 CONFIG_KEY_CONCLUSION_MODEL_ID = "conclusion_model_id"
 CONFIG_KEY_CONCLUSION_API_KEY = "conclusion_api_key"
+CONFIG_KEY_CONCLUSION_KIMI_REASONING = "conclusion_kimi_reasoning"
+CONFIG_KEY_CONCLUSION_DEEPSEEK_REASONING = "conclusion_deepseek_reasoning"
 CONFIG_KEY_CONCLUSION_PROMPT = "conclusion_prompt"
 CONFIG_KEY_CONCL_NO_ISSUES_API_URL = "concl_no_issues_api_url"
 CONFIG_KEY_CONCL_NO_ISSUES_MODEL_ID = "concl_no_issues_model_id"
 CONFIG_KEY_CONCL_NO_ISSUES_API_KEY = "concl_no_issues_api_key"
+CONFIG_KEY_CONCL_NO_ISSUES_KIMI_REASONING = "concl_no_issues_kimi_reasoning"
+CONFIG_KEY_CONCL_NO_ISSUES_DEEPSEEK_REASONING = "concl_no_issues_deepseek_reasoning"
 CONFIG_KEY_CONCL_NO_ISSUES_PROMPT = "concl_no_issues_prompt"
 CONFIG_KEY_TOPIC_SENTENCE_API_URL = "topic_sentence_api_url"
 CONFIG_KEY_TOPIC_SENTENCE_MODEL_ID = "topic_sentence_model_id"
 CONFIG_KEY_TOPIC_SENTENCE_API_KEY = "topic_sentence_api_key"
+CONFIG_KEY_TOPIC_SENTENCE_KIMI_REASONING = "topic_sentence_kimi_reasoning"
+CONFIG_KEY_TOPIC_SENTENCE_DEEPSEEK_REASONING = "topic_sentence_deepseek_reasoning"
 CONFIG_KEY_TOPIC_SENTENCE_PROMPT = "topic_sentence_prompt"
 CONFIG_KEY_CONCL_SECTION_API_URL = "concl_section_api_url"
 CONFIG_KEY_CONCL_SECTION_MODEL_ID = "concl_section_model_id"
 CONFIG_KEY_CONCL_SECTION_API_KEY = "concl_section_api_key"
+CONFIG_KEY_CONCL_SECTION_KIMI_REASONING = "concl_section_kimi_reasoning"
+CONFIG_KEY_CONCL_SECTION_DEEPSEEK_REASONING = "concl_section_deepseek_reasoning"
 CONFIG_KEY_CONCL_SECTION_PROMPT = "concl_section_prompt"
 CONFIG_KEY_EDITOR_SOURCE_FILE = "editor_source_file"
 CONFIG_KEY_LAST_ODT_FILE = "last_odt_file"
@@ -156,6 +184,8 @@ REFERENCE_OUTPUT_FONT_SIZE_PX = SPELLING_OUTPUT_FONT_SIZE_PX
 TAVILY_MCP_SERVER_URL = "https://mcp.tavily.com/mcp"
 REFERENCE_URL_RE = re.compile(r"https?://[^\s)\]]+")
 CONCORDANCE_FILE = Path("/home/jesse/Dropbox/MCGLAW/CONCORDANCE/Concordance_File.sdi")
+DEFAULT_KIMI_REASONING_ENABLED = True
+DEFAULT_DEEPSEEK_REASONING_ENABLED = True
 
 
 def _read_config() -> dict[str, Any]:
@@ -172,6 +202,30 @@ def _write_config(data: dict[str, Any]) -> None:
         CONFIG_FILE.write_text(json.dumps(data, indent=2), encoding="utf-8")
     except OSError:
         pass
+
+
+def _coerce_bool_config(value: Any, default: bool) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"1", "true", "yes", "on"}:
+            return True
+        if normalized in {"0", "false", "no", "off"}:
+            return False
+    if isinstance(value, (int, float)):
+        return bool(value)
+    return default
+
+
+def _model_looks_kimi(model_id: str) -> bool:
+    normalized = (model_id or "").strip().lower()
+    return "kimi" in normalized or "moonshot" in normalized
+
+
+def _model_looks_deepseek(model_id: str) -> bool:
+    normalized = (model_id or "").strip().lower()
+    return "deepseek" in normalized
 
 
 def _action_command(
@@ -191,6 +245,8 @@ class ProofreadSettings:
     api_url: str
     model_id: str
     api_key: str
+    kimi_reasoning: bool
+    deepseek_reasoning: bool
     prompt: str
 
     def is_configured(self) -> bool:
@@ -205,6 +261,8 @@ class SpellingStyleSettings:
     api_url: str
     model_id: str
     api_key: str
+    kimi_reasoning: bool
+    deepseek_reasoning: bool
     prompt: str
 
     def is_configured(self) -> bool:
@@ -219,6 +277,8 @@ class Improve1Settings:
     api_url: str
     model_id: str
     api_key: str
+    kimi_reasoning: bool
+    deepseek_reasoning: bool
     prompt: str
 
     def is_configured(self) -> bool:
@@ -233,6 +293,8 @@ class Improve2Settings:
     api_url: str
     model_id: str
     api_key: str
+    kimi_reasoning: bool
+    deepseek_reasoning: bool
     prompt: str
 
     def is_configured(self) -> bool:
@@ -247,6 +309,8 @@ class CombineCitesSettings:
     api_url: str
     model_id: str
     api_key: str
+    kimi_reasoning: bool
+    deepseek_reasoning: bool
     prompt: str
 
     def is_configured(self) -> bool:
@@ -261,6 +325,8 @@ class ThesaurusSettings:
     api_url: str
     model_id: str
     api_key: str
+    kimi_reasoning: bool
+    deepseek_reasoning: bool
     prompt: str
 
     def is_configured(self) -> bool:
@@ -275,6 +341,8 @@ class ReferenceSettings:
     api_url: str
     model_id: str
     api_key: str
+    kimi_reasoning: bool
+    deepseek_reasoning: bool
     tavily_api_key: str
     prompt: str
 
@@ -295,6 +363,8 @@ class AskSettings:
     api_url: str
     model_id: str
     api_key: str
+    kimi_reasoning: bool
+    deepseek_reasoning: bool
     tavily_api_key: str
     prompt: str
 
@@ -315,6 +385,8 @@ class ShortenSettings:
     api_url: str
     model_id: str
     api_key: str
+    kimi_reasoning: bool
+    deepseek_reasoning: bool
     prompt: str
 
     def is_configured(self) -> bool:
@@ -329,6 +401,8 @@ class IntroductionSettings:
     api_url: str
     model_id: str
     api_key: str
+    kimi_reasoning: bool
+    deepseek_reasoning: bool
     prompt: str
 
     def is_configured(self) -> bool:
@@ -343,6 +417,8 @@ class ConclusionSettings:
     api_url: str
     model_id: str
     api_key: str
+    kimi_reasoning: bool
+    deepseek_reasoning: bool
     prompt: str
 
     def is_configured(self) -> bool:
@@ -357,6 +433,8 @@ class ConclNoIssuesSettings:
     api_url: str
     model_id: str
     api_key: str
+    kimi_reasoning: bool
+    deepseek_reasoning: bool
     prompt: str
 
     def is_configured(self) -> bool:
@@ -371,6 +449,8 @@ class TopicSentenceSettings:
     api_url: str
     model_id: str
     api_key: str
+    kimi_reasoning: bool
+    deepseek_reasoning: bool
     prompt: str
 
     def is_configured(self) -> bool:
@@ -385,6 +465,8 @@ class ConclSectionSettings:
     api_url: str
     model_id: str
     api_key: str
+    kimi_reasoning: bool
+    deepseek_reasoning: bool
     prompt: str
 
     def is_configured(self) -> bool:
@@ -399,6 +481,8 @@ class PromptEditorWidgets:
     api_url_row: Adw.EntryRow
     model_row: Adw.EntryRow
     api_key_row: Adw.PasswordEntryRow
+    kimi_reasoning_row: Adw.SwitchRow | None
+    deepseek_reasoning_row: Adw.SwitchRow | None
     tavily_api_key_row: Adw.PasswordEntryRow | None
     prompt_buffer: Gtk.TextBuffer
     ask_prompt_buffer: Gtk.TextBuffer | None
@@ -410,6 +494,14 @@ def load_proofread_settings() -> ProofreadSettings:
         api_url=str(raw.get(CONFIG_KEY_PROOFREAD_API_URL, "") or "").strip(),
         model_id=str(raw.get(CONFIG_KEY_PROOFREAD_MODEL_ID, "") or "").strip(),
         api_key=str(raw.get(CONFIG_KEY_PROOFREAD_API_KEY, "") or "").strip(),
+        kimi_reasoning=_coerce_bool_config(
+            raw.get(CONFIG_KEY_PROOFREAD_KIMI_REASONING),
+            DEFAULT_KIMI_REASONING_ENABLED,
+        ),
+        deepseek_reasoning=_coerce_bool_config(
+            raw.get(CONFIG_KEY_PROOFREAD_DEEPSEEK_REASONING),
+            DEFAULT_DEEPSEEK_REASONING_ENABLED,
+        ),
         prompt=str(raw.get(CONFIG_KEY_PROOFREAD_PROMPT, DEFAULT_PROMPT) or DEFAULT_PROMPT).strip(),
     )
 
@@ -419,6 +511,8 @@ def save_proofread_settings(settings: ProofreadSettings) -> None:
     data[CONFIG_KEY_PROOFREAD_API_URL] = settings.api_url
     data[CONFIG_KEY_PROOFREAD_MODEL_ID] = settings.model_id
     data[CONFIG_KEY_PROOFREAD_API_KEY] = settings.api_key
+    data[CONFIG_KEY_PROOFREAD_KIMI_REASONING] = bool(settings.kimi_reasoning)
+    data[CONFIG_KEY_PROOFREAD_DEEPSEEK_REASONING] = bool(settings.deepseek_reasoning)
     data[CONFIG_KEY_PROOFREAD_PROMPT] = settings.prompt or DEFAULT_PROMPT
     _write_config(data)
 
@@ -429,6 +523,14 @@ def load_spellingstyle_settings() -> SpellingStyleSettings:
         api_url=str(raw.get(CONFIG_KEY_SPELLING_API_URL, "") or "").strip(),
         model_id=str(raw.get(CONFIG_KEY_SPELLING_MODEL_ID, "") or "").strip(),
         api_key=str(raw.get(CONFIG_KEY_SPELLING_API_KEY, "") or "").strip(),
+        kimi_reasoning=_coerce_bool_config(
+            raw.get(CONFIG_KEY_SPELLING_KIMI_REASONING),
+            DEFAULT_KIMI_REASONING_ENABLED,
+        ),
+        deepseek_reasoning=_coerce_bool_config(
+            raw.get(CONFIG_KEY_SPELLING_DEEPSEEK_REASONING),
+            DEFAULT_DEEPSEEK_REASONING_ENABLED,
+        ),
         prompt=str(raw.get(CONFIG_KEY_SPELLING_PROMPT, DEFAULT_SPELLINGSTYLE_PROMPT) or DEFAULT_SPELLINGSTYLE_PROMPT)
         .strip(),
     )
@@ -439,6 +541,8 @@ def save_spellingstyle_settings(settings: SpellingStyleSettings) -> None:
     data[CONFIG_KEY_SPELLING_API_URL] = settings.api_url
     data[CONFIG_KEY_SPELLING_MODEL_ID] = settings.model_id
     data[CONFIG_KEY_SPELLING_API_KEY] = settings.api_key
+    data[CONFIG_KEY_SPELLING_KIMI_REASONING] = bool(settings.kimi_reasoning)
+    data[CONFIG_KEY_SPELLING_DEEPSEEK_REASONING] = bool(settings.deepseek_reasoning)
     data[CONFIG_KEY_SPELLING_PROMPT] = settings.prompt or DEFAULT_SPELLINGSTYLE_PROMPT
     _write_config(data)
 
@@ -449,6 +553,14 @@ def load_improve1_settings() -> Improve1Settings:
         api_url=str(raw.get(CONFIG_KEY_IMPROVE1_API_URL, "") or "").strip(),
         model_id=str(raw.get(CONFIG_KEY_IMPROVE1_MODEL_ID, "") or "").strip(),
         api_key=str(raw.get(CONFIG_KEY_IMPROVE1_API_KEY, "") or "").strip(),
+        kimi_reasoning=_coerce_bool_config(
+            raw.get(CONFIG_KEY_IMPROVE1_KIMI_REASONING),
+            DEFAULT_KIMI_REASONING_ENABLED,
+        ),
+        deepseek_reasoning=_coerce_bool_config(
+            raw.get(CONFIG_KEY_IMPROVE1_DEEPSEEK_REASONING),
+            DEFAULT_DEEPSEEK_REASONING_ENABLED,
+        ),
         prompt=str(raw.get(CONFIG_KEY_IMPROVE1_PROMPT, DEFAULT_IMPROVE1_PROMPT) or DEFAULT_IMPROVE1_PROMPT).strip(),
     )
 
@@ -458,6 +570,8 @@ def save_improve1_settings(settings: Improve1Settings) -> None:
     data[CONFIG_KEY_IMPROVE1_API_URL] = settings.api_url
     data[CONFIG_KEY_IMPROVE1_MODEL_ID] = settings.model_id
     data[CONFIG_KEY_IMPROVE1_API_KEY] = settings.api_key
+    data[CONFIG_KEY_IMPROVE1_KIMI_REASONING] = bool(settings.kimi_reasoning)
+    data[CONFIG_KEY_IMPROVE1_DEEPSEEK_REASONING] = bool(settings.deepseek_reasoning)
     data[CONFIG_KEY_IMPROVE1_PROMPT] = settings.prompt or DEFAULT_IMPROVE1_PROMPT
     _write_config(data)
 
@@ -468,6 +582,14 @@ def load_improve2_settings() -> Improve2Settings:
         api_url=str(raw.get(CONFIG_KEY_IMPROVE2_API_URL, "") or "").strip(),
         model_id=str(raw.get(CONFIG_KEY_IMPROVE2_MODEL_ID, "") or "").strip(),
         api_key=str(raw.get(CONFIG_KEY_IMPROVE2_API_KEY, "") or "").strip(),
+        kimi_reasoning=_coerce_bool_config(
+            raw.get(CONFIG_KEY_IMPROVE2_KIMI_REASONING),
+            DEFAULT_KIMI_REASONING_ENABLED,
+        ),
+        deepseek_reasoning=_coerce_bool_config(
+            raw.get(CONFIG_KEY_IMPROVE2_DEEPSEEK_REASONING),
+            DEFAULT_DEEPSEEK_REASONING_ENABLED,
+        ),
         prompt=str(raw.get(CONFIG_KEY_IMPROVE2_PROMPT, DEFAULT_IMPROVE2_PROMPT) or DEFAULT_IMPROVE2_PROMPT).strip(),
     )
 
@@ -477,6 +599,8 @@ def save_improve2_settings(settings: Improve2Settings) -> None:
     data[CONFIG_KEY_IMPROVE2_API_URL] = settings.api_url
     data[CONFIG_KEY_IMPROVE2_MODEL_ID] = settings.model_id
     data[CONFIG_KEY_IMPROVE2_API_KEY] = settings.api_key
+    data[CONFIG_KEY_IMPROVE2_KIMI_REASONING] = bool(settings.kimi_reasoning)
+    data[CONFIG_KEY_IMPROVE2_DEEPSEEK_REASONING] = bool(settings.deepseek_reasoning)
     data[CONFIG_KEY_IMPROVE2_PROMPT] = settings.prompt or DEFAULT_IMPROVE2_PROMPT
     _write_config(data)
 
@@ -487,6 +611,14 @@ def load_combine_cites_settings() -> CombineCitesSettings:
         api_url=str(raw.get(CONFIG_KEY_COMBINE_CITES_API_URL, "") or "").strip(),
         model_id=str(raw.get(CONFIG_KEY_COMBINE_CITES_MODEL_ID, "") or "").strip(),
         api_key=str(raw.get(CONFIG_KEY_COMBINE_CITES_API_KEY, "") or "").strip(),
+        kimi_reasoning=_coerce_bool_config(
+            raw.get(CONFIG_KEY_COMBINE_CITES_KIMI_REASONING),
+            DEFAULT_KIMI_REASONING_ENABLED,
+        ),
+        deepseek_reasoning=_coerce_bool_config(
+            raw.get(CONFIG_KEY_COMBINE_CITES_DEEPSEEK_REASONING),
+            DEFAULT_DEEPSEEK_REASONING_ENABLED,
+        ),
         prompt=str(raw.get(CONFIG_KEY_COMBINE_CITES_PROMPT, DEFAULT_COMBINE_CITES_PROMPT) or DEFAULT_COMBINE_CITES_PROMPT)
         .strip(),
     )
@@ -497,6 +629,8 @@ def save_combine_cites_settings(settings: CombineCitesSettings) -> None:
     data[CONFIG_KEY_COMBINE_CITES_API_URL] = settings.api_url
     data[CONFIG_KEY_COMBINE_CITES_MODEL_ID] = settings.model_id
     data[CONFIG_KEY_COMBINE_CITES_API_KEY] = settings.api_key
+    data[CONFIG_KEY_COMBINE_CITES_KIMI_REASONING] = bool(settings.kimi_reasoning)
+    data[CONFIG_KEY_COMBINE_CITES_DEEPSEEK_REASONING] = bool(settings.deepseek_reasoning)
     data[CONFIG_KEY_COMBINE_CITES_PROMPT] = settings.prompt or DEFAULT_COMBINE_CITES_PROMPT
     _write_config(data)
 
@@ -507,6 +641,14 @@ def load_thesaurus_settings() -> ThesaurusSettings:
         api_url=str(raw.get(CONFIG_KEY_THESAURUS_API_URL, "") or "").strip(),
         model_id=str(raw.get(CONFIG_KEY_THESAURUS_MODEL_ID, "") or "").strip(),
         api_key=str(raw.get(CONFIG_KEY_THESAURUS_API_KEY, "") or "").strip(),
+        kimi_reasoning=_coerce_bool_config(
+            raw.get(CONFIG_KEY_THESAURUS_KIMI_REASONING),
+            DEFAULT_KIMI_REASONING_ENABLED,
+        ),
+        deepseek_reasoning=_coerce_bool_config(
+            raw.get(CONFIG_KEY_THESAURUS_DEEPSEEK_REASONING),
+            DEFAULT_DEEPSEEK_REASONING_ENABLED,
+        ),
         prompt=str(raw.get(CONFIG_KEY_THESAURUS_PROMPT, DEFAULT_THESAURUS_PROMPT) or DEFAULT_THESAURUS_PROMPT).strip(),
     )
 
@@ -516,6 +658,8 @@ def save_thesaurus_settings(settings: ThesaurusSettings) -> None:
     data[CONFIG_KEY_THESAURUS_API_URL] = settings.api_url
     data[CONFIG_KEY_THESAURUS_MODEL_ID] = settings.model_id
     data[CONFIG_KEY_THESAURUS_API_KEY] = settings.api_key
+    data[CONFIG_KEY_THESAURUS_KIMI_REASONING] = bool(settings.kimi_reasoning)
+    data[CONFIG_KEY_THESAURUS_DEEPSEEK_REASONING] = bool(settings.deepseek_reasoning)
     data[CONFIG_KEY_THESAURUS_PROMPT] = settings.prompt or DEFAULT_THESAURUS_PROMPT
     _write_config(data)
 
@@ -526,6 +670,14 @@ def load_reference_settings() -> ReferenceSettings:
         api_url=str(raw.get(CONFIG_KEY_REFERENCE_API_URL, "") or "").strip(),
         model_id=str(raw.get(CONFIG_KEY_REFERENCE_MODEL_ID, "") or "").strip(),
         api_key=str(raw.get(CONFIG_KEY_REFERENCE_API_KEY, "") or "").strip(),
+        kimi_reasoning=_coerce_bool_config(
+            raw.get(CONFIG_KEY_REFERENCE_KIMI_REASONING),
+            DEFAULT_KIMI_REASONING_ENABLED,
+        ),
+        deepseek_reasoning=_coerce_bool_config(
+            raw.get(CONFIG_KEY_REFERENCE_DEEPSEEK_REASONING),
+            DEFAULT_DEEPSEEK_REASONING_ENABLED,
+        ),
         tavily_api_key=str(raw.get(CONFIG_KEY_REFERENCE_TAVILY_API_KEY, "") or "").strip(),
         prompt=str(raw.get(CONFIG_KEY_REFERENCE_PROMPT, DEFAULT_REFERENCE_PROMPT) or DEFAULT_REFERENCE_PROMPT).strip(),
     )
@@ -536,6 +688,8 @@ def save_reference_settings(settings: ReferenceSettings) -> None:
     data[CONFIG_KEY_REFERENCE_API_URL] = settings.api_url
     data[CONFIG_KEY_REFERENCE_MODEL_ID] = settings.model_id
     data[CONFIG_KEY_REFERENCE_API_KEY] = settings.api_key
+    data[CONFIG_KEY_REFERENCE_KIMI_REASONING] = bool(settings.kimi_reasoning)
+    data[CONFIG_KEY_REFERENCE_DEEPSEEK_REASONING] = bool(settings.deepseek_reasoning)
     data[CONFIG_KEY_REFERENCE_TAVILY_API_KEY] = settings.tavily_api_key
     data[CONFIG_KEY_REFERENCE_PROMPT] = settings.prompt or DEFAULT_REFERENCE_PROMPT
     _write_config(data)
@@ -550,6 +704,14 @@ def load_ask_settings() -> AskSettings:
         api_url=str(raw.get(CONFIG_KEY_ASK_API_URL, "") or "").strip(),
         model_id=str(raw.get(CONFIG_KEY_ASK_MODEL_ID, "") or "").strip(),
         api_key=str(raw.get(CONFIG_KEY_ASK_API_KEY, "") or "").strip(),
+        kimi_reasoning=_coerce_bool_config(
+            raw.get(CONFIG_KEY_ASK_KIMI_REASONING),
+            DEFAULT_KIMI_REASONING_ENABLED,
+        ),
+        deepseek_reasoning=_coerce_bool_config(
+            raw.get(CONFIG_KEY_ASK_DEEPSEEK_REASONING),
+            DEFAULT_DEEPSEEK_REASONING_ENABLED,
+        ),
         tavily_api_key=str(raw.get(CONFIG_KEY_ASK_TAVILY_API_KEY, "") or "").strip(),
         prompt=prompt,
     )
@@ -560,6 +722,8 @@ def save_ask_settings(settings: AskSettings) -> None:
     data[CONFIG_KEY_ASK_API_URL] = settings.api_url
     data[CONFIG_KEY_ASK_MODEL_ID] = settings.model_id
     data[CONFIG_KEY_ASK_API_KEY] = settings.api_key
+    data[CONFIG_KEY_ASK_KIMI_REASONING] = bool(settings.kimi_reasoning)
+    data[CONFIG_KEY_ASK_DEEPSEEK_REASONING] = bool(settings.deepseek_reasoning)
     data[CONFIG_KEY_ASK_TAVILY_API_KEY] = settings.tavily_api_key
     data[CONFIG_KEY_ASK_PROMPT] = settings.prompt or DEFAULT_ASK_PROMPT
     _write_config(data)
@@ -571,6 +735,14 @@ def load_shorten_settings() -> ShortenSettings:
         api_url=str(raw.get(CONFIG_KEY_SHORTEN_API_URL, "") or "").strip(),
         model_id=str(raw.get(CONFIG_KEY_SHORTEN_MODEL_ID, "") or "").strip(),
         api_key=str(raw.get(CONFIG_KEY_SHORTEN_API_KEY, "") or "").strip(),
+        kimi_reasoning=_coerce_bool_config(
+            raw.get(CONFIG_KEY_SHORTEN_KIMI_REASONING),
+            DEFAULT_KIMI_REASONING_ENABLED,
+        ),
+        deepseek_reasoning=_coerce_bool_config(
+            raw.get(CONFIG_KEY_SHORTEN_DEEPSEEK_REASONING),
+            DEFAULT_DEEPSEEK_REASONING_ENABLED,
+        ),
         prompt=str(raw.get(CONFIG_KEY_SHORTEN_PROMPT, DEFAULT_SHORTEN_PROMPT) or DEFAULT_SHORTEN_PROMPT).strip(),
     )
 
@@ -580,6 +752,8 @@ def save_shorten_settings(settings: ShortenSettings) -> None:
     data[CONFIG_KEY_SHORTEN_API_URL] = settings.api_url
     data[CONFIG_KEY_SHORTEN_MODEL_ID] = settings.model_id
     data[CONFIG_KEY_SHORTEN_API_KEY] = settings.api_key
+    data[CONFIG_KEY_SHORTEN_KIMI_REASONING] = bool(settings.kimi_reasoning)
+    data[CONFIG_KEY_SHORTEN_DEEPSEEK_REASONING] = bool(settings.deepseek_reasoning)
     data[CONFIG_KEY_SHORTEN_PROMPT] = settings.prompt or DEFAULT_SHORTEN_PROMPT
     _write_config(data)
 
@@ -590,6 +764,14 @@ def load_introduction_settings() -> IntroductionSettings:
         api_url=str(raw.get(CONFIG_KEY_INTRO_API_URL, "") or "").strip(),
         model_id=str(raw.get(CONFIG_KEY_INTRO_MODEL_ID, "") or "").strip(),
         api_key=str(raw.get(CONFIG_KEY_INTRO_API_KEY, "") or "").strip(),
+        kimi_reasoning=_coerce_bool_config(
+            raw.get(CONFIG_KEY_INTRO_KIMI_REASONING),
+            DEFAULT_KIMI_REASONING_ENABLED,
+        ),
+        deepseek_reasoning=_coerce_bool_config(
+            raw.get(CONFIG_KEY_INTRO_DEEPSEEK_REASONING),
+            DEFAULT_DEEPSEEK_REASONING_ENABLED,
+        ),
         prompt=str(raw.get(CONFIG_KEY_INTRO_PROMPT, DEFAULT_INTRO_PROMPT) or DEFAULT_INTRO_PROMPT).strip(),
     )
 
@@ -599,6 +781,8 @@ def save_introduction_settings(settings: IntroductionSettings) -> None:
     data[CONFIG_KEY_INTRO_API_URL] = settings.api_url
     data[CONFIG_KEY_INTRO_MODEL_ID] = settings.model_id
     data[CONFIG_KEY_INTRO_API_KEY] = settings.api_key
+    data[CONFIG_KEY_INTRO_KIMI_REASONING] = bool(settings.kimi_reasoning)
+    data[CONFIG_KEY_INTRO_DEEPSEEK_REASONING] = bool(settings.deepseek_reasoning)
     data[CONFIG_KEY_INTRO_PROMPT] = settings.prompt or DEFAULT_INTRO_PROMPT
     _write_config(data)
 
@@ -609,6 +793,14 @@ def load_conclusion_settings() -> ConclusionSettings:
         api_url=str(raw.get(CONFIG_KEY_CONCLUSION_API_URL, "") or "").strip(),
         model_id=str(raw.get(CONFIG_KEY_CONCLUSION_MODEL_ID, "") or "").strip(),
         api_key=str(raw.get(CONFIG_KEY_CONCLUSION_API_KEY, "") or "").strip(),
+        kimi_reasoning=_coerce_bool_config(
+            raw.get(CONFIG_KEY_CONCLUSION_KIMI_REASONING),
+            DEFAULT_KIMI_REASONING_ENABLED,
+        ),
+        deepseek_reasoning=_coerce_bool_config(
+            raw.get(CONFIG_KEY_CONCLUSION_DEEPSEEK_REASONING),
+            DEFAULT_DEEPSEEK_REASONING_ENABLED,
+        ),
         prompt=str(raw.get(CONFIG_KEY_CONCLUSION_PROMPT, DEFAULT_CONCLUSION_PROMPT) or DEFAULT_CONCLUSION_PROMPT).strip(),
     )
 
@@ -618,6 +810,8 @@ def save_conclusion_settings(settings: ConclusionSettings) -> None:
     data[CONFIG_KEY_CONCLUSION_API_URL] = settings.api_url
     data[CONFIG_KEY_CONCLUSION_MODEL_ID] = settings.model_id
     data[CONFIG_KEY_CONCLUSION_API_KEY] = settings.api_key
+    data[CONFIG_KEY_CONCLUSION_KIMI_REASONING] = bool(settings.kimi_reasoning)
+    data[CONFIG_KEY_CONCLUSION_DEEPSEEK_REASONING] = bool(settings.deepseek_reasoning)
     data[CONFIG_KEY_CONCLUSION_PROMPT] = settings.prompt or DEFAULT_CONCLUSION_PROMPT
     _write_config(data)
 
@@ -628,6 +822,14 @@ def load_concl_no_issues_settings() -> ConclNoIssuesSettings:
         api_url=str(raw.get(CONFIG_KEY_CONCL_NO_ISSUES_API_URL, "") or "").strip(),
         model_id=str(raw.get(CONFIG_KEY_CONCL_NO_ISSUES_MODEL_ID, "") or "").strip(),
         api_key=str(raw.get(CONFIG_KEY_CONCL_NO_ISSUES_API_KEY, "") or "").strip(),
+        kimi_reasoning=_coerce_bool_config(
+            raw.get(CONFIG_KEY_CONCL_NO_ISSUES_KIMI_REASONING),
+            DEFAULT_KIMI_REASONING_ENABLED,
+        ),
+        deepseek_reasoning=_coerce_bool_config(
+            raw.get(CONFIG_KEY_CONCL_NO_ISSUES_DEEPSEEK_REASONING),
+            DEFAULT_DEEPSEEK_REASONING_ENABLED,
+        ),
         prompt=str(raw.get(CONFIG_KEY_CONCL_NO_ISSUES_PROMPT, DEFAULT_CONCL_NO_ISSUES_PROMPT) or DEFAULT_CONCL_NO_ISSUES_PROMPT)
         .strip(),
     )
@@ -638,6 +840,8 @@ def save_concl_no_issues_settings(settings: ConclNoIssuesSettings) -> None:
     data[CONFIG_KEY_CONCL_NO_ISSUES_API_URL] = settings.api_url
     data[CONFIG_KEY_CONCL_NO_ISSUES_MODEL_ID] = settings.model_id
     data[CONFIG_KEY_CONCL_NO_ISSUES_API_KEY] = settings.api_key
+    data[CONFIG_KEY_CONCL_NO_ISSUES_KIMI_REASONING] = bool(settings.kimi_reasoning)
+    data[CONFIG_KEY_CONCL_NO_ISSUES_DEEPSEEK_REASONING] = bool(settings.deepseek_reasoning)
     data[CONFIG_KEY_CONCL_NO_ISSUES_PROMPT] = settings.prompt or DEFAULT_CONCL_NO_ISSUES_PROMPT
     _write_config(data)
 
@@ -648,6 +852,14 @@ def load_topic_sentence_settings() -> TopicSentenceSettings:
         api_url=str(raw.get(CONFIG_KEY_TOPIC_SENTENCE_API_URL, "") or "").strip(),
         model_id=str(raw.get(CONFIG_KEY_TOPIC_SENTENCE_MODEL_ID, "") or "").strip(),
         api_key=str(raw.get(CONFIG_KEY_TOPIC_SENTENCE_API_KEY, "") or "").strip(),
+        kimi_reasoning=_coerce_bool_config(
+            raw.get(CONFIG_KEY_TOPIC_SENTENCE_KIMI_REASONING),
+            DEFAULT_KIMI_REASONING_ENABLED,
+        ),
+        deepseek_reasoning=_coerce_bool_config(
+            raw.get(CONFIG_KEY_TOPIC_SENTENCE_DEEPSEEK_REASONING),
+            DEFAULT_DEEPSEEK_REASONING_ENABLED,
+        ),
         prompt=str(raw.get(CONFIG_KEY_TOPIC_SENTENCE_PROMPT, DEFAULT_TOPIC_SENTENCE_PROMPT) or DEFAULT_TOPIC_SENTENCE_PROMPT)
         .strip(),
     )
@@ -658,6 +870,8 @@ def save_topic_sentence_settings(settings: TopicSentenceSettings) -> None:
     data[CONFIG_KEY_TOPIC_SENTENCE_API_URL] = settings.api_url
     data[CONFIG_KEY_TOPIC_SENTENCE_MODEL_ID] = settings.model_id
     data[CONFIG_KEY_TOPIC_SENTENCE_API_KEY] = settings.api_key
+    data[CONFIG_KEY_TOPIC_SENTENCE_KIMI_REASONING] = bool(settings.kimi_reasoning)
+    data[CONFIG_KEY_TOPIC_SENTENCE_DEEPSEEK_REASONING] = bool(settings.deepseek_reasoning)
     data[CONFIG_KEY_TOPIC_SENTENCE_PROMPT] = settings.prompt or DEFAULT_TOPIC_SENTENCE_PROMPT
     _write_config(data)
 
@@ -668,6 +882,14 @@ def load_concl_section_settings() -> ConclSectionSettings:
         api_url=str(raw.get(CONFIG_KEY_CONCL_SECTION_API_URL, "") or "").strip(),
         model_id=str(raw.get(CONFIG_KEY_CONCL_SECTION_MODEL_ID, "") or "").strip(),
         api_key=str(raw.get(CONFIG_KEY_CONCL_SECTION_API_KEY, "") or "").strip(),
+        kimi_reasoning=_coerce_bool_config(
+            raw.get(CONFIG_KEY_CONCL_SECTION_KIMI_REASONING),
+            DEFAULT_KIMI_REASONING_ENABLED,
+        ),
+        deepseek_reasoning=_coerce_bool_config(
+            raw.get(CONFIG_KEY_CONCL_SECTION_DEEPSEEK_REASONING),
+            DEFAULT_DEEPSEEK_REASONING_ENABLED,
+        ),
         prompt=str(raw.get(CONFIG_KEY_CONCL_SECTION_PROMPT, DEFAULT_CONCL_SECTION_PROMPT) or DEFAULT_CONCL_SECTION_PROMPT)
         .strip(),
     )
@@ -678,6 +900,8 @@ def save_concl_section_settings(settings: ConclSectionSettings) -> None:
     data[CONFIG_KEY_CONCL_SECTION_API_URL] = settings.api_url
     data[CONFIG_KEY_CONCL_SECTION_MODEL_ID] = settings.model_id
     data[CONFIG_KEY_CONCL_SECTION_API_KEY] = settings.api_key
+    data[CONFIG_KEY_CONCL_SECTION_KIMI_REASONING] = bool(settings.kimi_reasoning)
+    data[CONFIG_KEY_CONCL_SECTION_DEEPSEEK_REASONING] = bool(settings.deepseek_reasoning)
     data[CONFIG_KEY_CONCL_SECTION_PROMPT] = settings.prompt or DEFAULT_CONCL_SECTION_PROMPT
     _write_config(data)
 
@@ -1940,7 +2164,12 @@ class ProseWindow(Adw.ApplicationWindow):
             ],
             "stream": False,
         }
-        return self._add_model_id(payload, self._thesaurus_settings.model_id)
+        return self._add_model_id(
+            payload,
+            self._thesaurus_settings.model_id,
+            self._thesaurus_settings.kimi_reasoning,
+            self._thesaurus_settings.deepseek_reasoning,
+        )
 
     def _call_thesaurus(self, payload: dict[str, Any]) -> list[str]:
         headers = {
@@ -1950,7 +2179,7 @@ class ProseWindow(Adw.ApplicationWindow):
         }
         data = json.dumps(payload).encode("utf-8")
         req = urllib.request.Request(self._thesaurus_settings.api_url, data=data, headers=headers, method="POST")
-        with urllib.request.urlopen(req, timeout=120) as resp:
+        with urllib.request.urlopen(req) as resp:
             raw = resp.read().decode("utf-8", errors="ignore")
         parts = list(self._extract_response_text(raw))
         if not parts:
@@ -2059,7 +2288,13 @@ class ProseWindow(Adw.ApplicationWindow):
             ],
             "tool_choice": "auto",
         }
-        return self._add_model_id(payload, self._reference_settings.model_id)
+        return self._add_model_id(
+            payload,
+            self._reference_settings.model_id,
+            self._reference_settings.kimi_reasoning,
+            self._reference_settings.deepseek_reasoning,
+            apply_reasoning_switches=False,
+        )
 
     def _compose_ask_payload(self, question: str) -> dict[str, Any]:
         prompt = self._ask_settings.prompt or DEFAULT_ASK_PROMPT
@@ -2085,7 +2320,13 @@ class ProseWindow(Adw.ApplicationWindow):
             ],
             "tool_choice": "auto",
         }
-        return self._add_model_id(payload, self._ask_settings.model_id)
+        return self._add_model_id(
+            payload,
+            self._ask_settings.model_id,
+            self._ask_settings.kimi_reasoning,
+            self._ask_settings.deepseek_reasoning,
+            apply_reasoning_switches=False,
+        )
 
     def _on_reference_finished(self, message: str) -> bool:
         self._set_busy(False)
@@ -2629,7 +2870,12 @@ class ProseWindow(Adw.ApplicationWindow):
             ],
             "stream": False,
         }
-        return self._add_model_id(payload, self._combine_cites_settings.model_id)
+        return self._add_model_id(
+            payload,
+            self._combine_cites_settings.model_id,
+            self._combine_cites_settings.kimi_reasoning,
+            self._combine_cites_settings.deepseek_reasoning,
+        )
 
     def _call_combine_cites(self, payload: dict[str, Any]) -> str:
         headers = {
@@ -2639,7 +2885,7 @@ class ProseWindow(Adw.ApplicationWindow):
         }
         data = json.dumps(payload).encode("utf-8")
         req = urllib.request.Request(self._combine_cites_settings.api_url, data=data, headers=headers, method="POST")
-        with urllib.request.urlopen(req, timeout=120) as resp:
+        with urllib.request.urlopen(req) as resp:
             raw = resp.read().decode("utf-8", errors="ignore")
         parts = list(self._extract_response_text(raw))
         combined_text = "".join(parts).strip()
@@ -3264,10 +3510,23 @@ class ProseWindow(Adw.ApplicationWindow):
             return
         GLib.idle_add(self._on_request_finished, filtered, dropped, start, end)
 
-    def _add_model_id(self, payload: dict[str, Any], model_id: str) -> dict[str, Any]:
+    def _add_model_id(
+        self,
+        payload: dict[str, Any],
+        model_id: str,
+        kimi_reasoning: bool = DEFAULT_KIMI_REASONING_ENABLED,
+        deepseek_reasoning: bool = DEFAULT_DEEPSEEK_REASONING_ENABLED,
+        apply_reasoning_switches: bool = True,
+    ) -> dict[str, Any]:
         cleaned = model_id.strip()
         if cleaned:
             payload["model"] = cleaned
+            if apply_reasoning_switches:
+                if _model_looks_deepseek(cleaned):
+                    payload["thinking"] = {"type": "enabled" if deepseek_reasoning else "disabled"}
+                elif _model_looks_kimi(cleaned):
+                    if not kimi_reasoning:
+                        payload["thinking"] = {"type": "disabled"}
         return payload
 
     def _is_gemini_generate_content_url(self, api_url: str) -> bool:
@@ -3292,7 +3551,7 @@ class ProseWindow(Adw.ApplicationWindow):
         data = json.dumps(payload).encode("utf-8")
         req = urllib.request.Request(api_url, data=data, headers=headers, method="POST")
         try:
-            with urllib.request.urlopen(req, timeout=300) as resp:
+            with urllib.request.urlopen(req) as resp:
                 raw = resp.read().decode("utf-8", errors="ignore")
         except urllib.error.HTTPError as exc:
             detail = ""
@@ -3351,7 +3610,12 @@ class ProseWindow(Adw.ApplicationWindow):
             ],
             "stream": False,
         }
-        return self._add_model_id(payload, self._proof_settings.model_id)
+        return self._add_model_id(
+            payload,
+            self._proof_settings.model_id,
+            self._proof_settings.kimi_reasoning,
+            self._proof_settings.deepseek_reasoning,
+        )
 
     def _call_llm(self, payload: dict[str, Any]) -> list[Suggestion]:
         headers = {
@@ -3361,7 +3625,7 @@ class ProseWindow(Adw.ApplicationWindow):
         }
         data = json.dumps(payload).encode("utf-8")
         req = urllib.request.Request(self._proof_settings.api_url, data=data, headers=headers, method="POST")
-        with urllib.request.urlopen(req, timeout=120) as resp:
+        with urllib.request.urlopen(req) as resp:
             raw = resp.read().decode("utf-8", errors="ignore")
         self._last_raw_response = raw
         suggestions = self._parse_suggestions(raw)
@@ -3648,7 +3912,12 @@ class ProseWindow(Adw.ApplicationWindow):
             ],
             "stream": True,
         }
-        return self._add_model_id(payload, self._spelling_settings.model_id)
+        return self._add_model_id(
+            payload,
+            self._spelling_settings.model_id,
+            self._spelling_settings.kimi_reasoning,
+            self._spelling_settings.deepseek_reasoning,
+        )
 
     def _compose_improve1_payload(self, source_text: str) -> dict[str, Any]:
         system_prompt = self._improve1_settings.prompt or DEFAULT_IMPROVE1_PROMPT
@@ -3659,7 +3928,12 @@ class ProseWindow(Adw.ApplicationWindow):
             ],
             "stream": True,
         }
-        return self._add_model_id(payload, self._improve1_settings.model_id)
+        return self._add_model_id(
+            payload,
+            self._improve1_settings.model_id,
+            self._improve1_settings.kimi_reasoning,
+            self._improve1_settings.deepseek_reasoning,
+        )
 
     def _compose_improve2_payload(self, source_text: str) -> dict[str, Any]:
         system_prompt = self._improve2_settings.prompt or DEFAULT_IMPROVE2_PROMPT
@@ -3670,7 +3944,12 @@ class ProseWindow(Adw.ApplicationWindow):
             ],
             "stream": True,
         }
-        return self._add_model_id(payload, self._improve2_settings.model_id)
+        return self._add_model_id(
+            payload,
+            self._improve2_settings.model_id,
+            self._improve2_settings.kimi_reasoning,
+            self._improve2_settings.deepseek_reasoning,
+        )
 
     def _compose_shorten_payload(self, source_text: str) -> dict[str, Any]:
         system_prompt = self._shorten_settings.prompt or DEFAULT_SHORTEN_PROMPT
@@ -3681,7 +3960,12 @@ class ProseWindow(Adw.ApplicationWindow):
             ],
             "stream": True,
         }
-        return self._add_model_id(payload, self._shorten_settings.model_id)
+        return self._add_model_id(
+            payload,
+            self._shorten_settings.model_id,
+            self._shorten_settings.kimi_reasoning,
+            self._shorten_settings.deepseek_reasoning,
+        )
 
     def _compose_topic_sentence_payload(self, source_text: str) -> dict[str, Any]:
         system_prompt = self._topic_sentence_settings.prompt or DEFAULT_TOPIC_SENTENCE_PROMPT
@@ -3692,7 +3976,12 @@ class ProseWindow(Adw.ApplicationWindow):
             ],
             "stream": True,
         }
-        return self._add_model_id(payload, self._topic_sentence_settings.model_id)
+        return self._add_model_id(
+            payload,
+            self._topic_sentence_settings.model_id,
+            self._topic_sentence_settings.kimi_reasoning,
+            self._topic_sentence_settings.deepseek_reasoning,
+        )
 
     def _compose_introduction_payload(self, source_text: str) -> dict[str, Any]:
         system_prompt = self._introduction_settings.prompt or DEFAULT_INTRO_PROMPT
@@ -3703,7 +3992,12 @@ class ProseWindow(Adw.ApplicationWindow):
             ],
             "stream": True,
         }
-        return self._add_model_id(payload, self._introduction_settings.model_id)
+        return self._add_model_id(
+            payload,
+            self._introduction_settings.model_id,
+            self._introduction_settings.kimi_reasoning,
+            self._introduction_settings.deepseek_reasoning,
+        )
 
     def _compose_conclusion_payload(self, source_text: str) -> dict[str, Any]:
         system_prompt = self._conclusion_settings.prompt or DEFAULT_CONCLUSION_PROMPT
@@ -3714,7 +4008,12 @@ class ProseWindow(Adw.ApplicationWindow):
             ],
             "stream": True,
         }
-        return self._add_model_id(payload, self._conclusion_settings.model_id)
+        return self._add_model_id(
+            payload,
+            self._conclusion_settings.model_id,
+            self._conclusion_settings.kimi_reasoning,
+            self._conclusion_settings.deepseek_reasoning,
+        )
 
     def _compose_conclusion_no_issues_payload(self, source_text: str) -> dict[str, Any]:
         system_prompt = self._concl_no_issues_settings.prompt or DEFAULT_CONCL_NO_ISSUES_PROMPT
@@ -3725,7 +4024,12 @@ class ProseWindow(Adw.ApplicationWindow):
             ],
             "stream": True,
         }
-        return self._add_model_id(payload, self._concl_no_issues_settings.model_id)
+        return self._add_model_id(
+            payload,
+            self._concl_no_issues_settings.model_id,
+            self._concl_no_issues_settings.kimi_reasoning,
+            self._concl_no_issues_settings.deepseek_reasoning,
+        )
 
     def _compose_concl_section_payload(self, source_text: str) -> dict[str, Any]:
         system_prompt = self._concl_section_settings.prompt or DEFAULT_CONCL_SECTION_PROMPT
@@ -3736,7 +4040,12 @@ class ProseWindow(Adw.ApplicationWindow):
             ],
             "stream": True,
         }
-        return self._add_model_id(payload, self._concl_section_settings.model_id)
+        return self._add_model_id(
+            payload,
+            self._concl_section_settings.model_id,
+            self._concl_section_settings.kimi_reasoning,
+            self._concl_section_settings.deepseek_reasoning,
+        )
 
     def _stream_spellingstyle(self, payload: dict[str, Any]) -> Iterable[str]:
         headers = {
@@ -3748,7 +4057,7 @@ class ProseWindow(Adw.ApplicationWindow):
         data = json.dumps(payload).encode("utf-8")
         req = urllib.request.Request(self._spelling_settings.api_url, data=data, headers=headers, method="POST")
         try:
-            with urllib.request.urlopen(req, timeout=300) as resp:
+            with urllib.request.urlopen(req) as resp:
                 content_type = resp.headers.get("Content-Type", "")
                 if "text/event-stream" not in content_type:
                     raw = resp.read().decode("utf-8", errors="ignore")
@@ -3789,7 +4098,7 @@ class ProseWindow(Adw.ApplicationWindow):
         data = json.dumps(payload).encode("utf-8")
         req = urllib.request.Request(self._improve1_settings.api_url, data=data, headers=headers, method="POST")
         try:
-            with urllib.request.urlopen(req, timeout=300) as resp:
+            with urllib.request.urlopen(req) as resp:
                 content_type = resp.headers.get("Content-Type", "")
                 if "text/event-stream" not in content_type:
                     raw = resp.read().decode("utf-8", errors="ignore")
@@ -3830,7 +4139,7 @@ class ProseWindow(Adw.ApplicationWindow):
         data = json.dumps(payload).encode("utf-8")
         req = urllib.request.Request(self._improve2_settings.api_url, data=data, headers=headers, method="POST")
         try:
-            with urllib.request.urlopen(req, timeout=300) as resp:
+            with urllib.request.urlopen(req) as resp:
                 content_type = resp.headers.get("Content-Type", "")
                 if "text/event-stream" not in content_type:
                     raw = resp.read().decode("utf-8", errors="ignore")
@@ -3871,7 +4180,7 @@ class ProseWindow(Adw.ApplicationWindow):
         data = json.dumps(payload).encode("utf-8")
         req = urllib.request.Request(api_url, data=data, headers=headers, method="POST")
         try:
-            with urllib.request.urlopen(req, timeout=300) as resp:
+            with urllib.request.urlopen(req) as resp:
                 content_type = resp.headers.get("Content-Type", "")
                 if "text/event-stream" not in content_type:
                     raw = resp.read().decode("utf-8", errors="ignore")
@@ -3912,7 +4221,7 @@ class ProseWindow(Adw.ApplicationWindow):
         data = json.dumps(payload).encode("utf-8")
         req = urllib.request.Request(api_url, data=data, headers=headers, method="POST")
         try:
-            with urllib.request.urlopen(req, timeout=300) as resp:
+            with urllib.request.urlopen(req) as resp:
                 content_type = resp.headers.get("Content-Type", "")
                 if "text/event-stream" not in content_type:
                     raw = resp.read().decode("utf-8", errors="ignore")
@@ -4751,24 +5060,32 @@ class SettingsWindow(Adw.ApplicationWindow):
             api_url=proof_widgets.api_url_row.get_text().strip(),
             model_id=proof_widgets.model_row.get_text().strip(),
             api_key=proof_widgets.api_key_row.get_text().strip(),
+            kimi_reasoning=bool(proof_widgets.kimi_reasoning_row.get_active()),
+            deepseek_reasoning=bool(proof_widgets.deepseek_reasoning_row.get_active()),
             prompt=proof_prompt_text.strip() or DEFAULT_PROMPT,
         )
         spelling_settings = SpellingStyleSettings(
             api_url=spelling_widgets.api_url_row.get_text().strip(),
             model_id=spelling_widgets.model_row.get_text().strip(),
             api_key=spelling_widgets.api_key_row.get_text().strip(),
+            kimi_reasoning=bool(spelling_widgets.kimi_reasoning_row.get_active()),
+            deepseek_reasoning=bool(spelling_widgets.deepseek_reasoning_row.get_active()),
             prompt=spelling_prompt_text.strip() or DEFAULT_SPELLINGSTYLE_PROMPT,
         )
         thesaurus_settings = ThesaurusSettings(
             api_url=thesaurus_widgets.api_url_row.get_text().strip(),
             model_id=thesaurus_widgets.model_row.get_text().strip(),
             api_key=thesaurus_widgets.api_key_row.get_text().strip(),
+            kimi_reasoning=bool(thesaurus_widgets.kimi_reasoning_row.get_active()),
+            deepseek_reasoning=bool(thesaurus_widgets.deepseek_reasoning_row.get_active()),
             prompt=thesaurus_prompt_text.strip() or DEFAULT_THESAURUS_PROMPT,
         )
         reference_settings = ReferenceSettings(
             api_url=reference_widgets.api_url_row.get_text().strip(),
             model_id=reference_widgets.model_row.get_text().strip(),
             api_key=reference_widgets.api_key_row.get_text().strip(),
+            kimi_reasoning=self._reference_settings.kimi_reasoning,
+            deepseek_reasoning=self._reference_settings.deepseek_reasoning,
             tavily_api_key=(reference_widgets.tavily_api_key_row.get_text().strip() if reference_widgets.tavily_api_key_row else ""),
             prompt=reference_prompt_text.strip() or DEFAULT_REFERENCE_PROMPT,
         )
@@ -4776,6 +5093,8 @@ class SettingsWindow(Adw.ApplicationWindow):
             api_url=ask_widgets.api_url_row.get_text().strip(),
             model_id=ask_widgets.model_row.get_text().strip(),
             api_key=ask_widgets.api_key_row.get_text().strip(),
+            kimi_reasoning=self._ask_settings.kimi_reasoning,
+            deepseek_reasoning=self._ask_settings.deepseek_reasoning,
             tavily_api_key=(ask_widgets.tavily_api_key_row.get_text().strip() if ask_widgets.tavily_api_key_row else ""),
             prompt=ask_prompt_text.strip() or DEFAULT_ASK_PROMPT,
         )
@@ -4783,54 +5102,72 @@ class SettingsWindow(Adw.ApplicationWindow):
             api_url=improve1_widgets.api_url_row.get_text().strip(),
             model_id=improve1_widgets.model_row.get_text().strip(),
             api_key=improve1_widgets.api_key_row.get_text().strip(),
+            kimi_reasoning=bool(improve1_widgets.kimi_reasoning_row.get_active()),
+            deepseek_reasoning=bool(improve1_widgets.deepseek_reasoning_row.get_active()),
             prompt=improve1_prompt_text.strip() or DEFAULT_IMPROVE1_PROMPT,
         )
         improve2_settings = Improve2Settings(
             api_url=improve2_widgets.api_url_row.get_text().strip(),
             model_id=improve2_widgets.model_row.get_text().strip(),
             api_key=improve2_widgets.api_key_row.get_text().strip(),
+            kimi_reasoning=bool(improve2_widgets.kimi_reasoning_row.get_active()),
+            deepseek_reasoning=bool(improve2_widgets.deepseek_reasoning_row.get_active()),
             prompt=improve2_prompt_text.strip() or DEFAULT_IMPROVE2_PROMPT,
         )
         combine_cites_settings = CombineCitesSettings(
             api_url=combine_widgets.api_url_row.get_text().strip(),
             model_id=combine_widgets.model_row.get_text().strip(),
             api_key=combine_widgets.api_key_row.get_text().strip(),
+            kimi_reasoning=bool(combine_widgets.kimi_reasoning_row.get_active()),
+            deepseek_reasoning=bool(combine_widgets.deepseek_reasoning_row.get_active()),
             prompt=combine_prompt_text.strip() or DEFAULT_COMBINE_CITES_PROMPT,
         )
         shorten_settings = ShortenSettings(
             api_url=shorten_widgets.api_url_row.get_text().strip(),
             model_id=shorten_widgets.model_row.get_text().strip(),
             api_key=shorten_widgets.api_key_row.get_text().strip(),
+            kimi_reasoning=bool(shorten_widgets.kimi_reasoning_row.get_active()),
+            deepseek_reasoning=bool(shorten_widgets.deepseek_reasoning_row.get_active()),
             prompt=shorten_prompt_text.strip() or DEFAULT_SHORTEN_PROMPT,
         )
         introduction_settings = IntroductionSettings(
             api_url=intro_widgets.api_url_row.get_text().strip(),
             model_id=intro_widgets.model_row.get_text().strip(),
             api_key=intro_widgets.api_key_row.get_text().strip(),
+            kimi_reasoning=bool(intro_widgets.kimi_reasoning_row.get_active()),
+            deepseek_reasoning=bool(intro_widgets.deepseek_reasoning_row.get_active()),
             prompt=intro_prompt_text.strip() or DEFAULT_INTRO_PROMPT,
         )
         conclusion_settings = ConclusionSettings(
             api_url=conclusion_widgets.api_url_row.get_text().strip(),
             model_id=conclusion_widgets.model_row.get_text().strip(),
             api_key=conclusion_widgets.api_key_row.get_text().strip(),
+            kimi_reasoning=bool(conclusion_widgets.kimi_reasoning_row.get_active()),
+            deepseek_reasoning=bool(conclusion_widgets.deepseek_reasoning_row.get_active()),
             prompt=conclusion_prompt_text.strip() or DEFAULT_CONCLUSION_PROMPT,
         )
         concl_no_issues_settings = ConclNoIssuesSettings(
             api_url=concl_no_issues_widgets.api_url_row.get_text().strip(),
             model_id=concl_no_issues_widgets.model_row.get_text().strip(),
             api_key=concl_no_issues_widgets.api_key_row.get_text().strip(),
+            kimi_reasoning=bool(concl_no_issues_widgets.kimi_reasoning_row.get_active()),
+            deepseek_reasoning=bool(concl_no_issues_widgets.deepseek_reasoning_row.get_active()),
             prompt=concl_no_issues_prompt_text.strip() or DEFAULT_CONCL_NO_ISSUES_PROMPT,
         )
         topic_sentence_settings = TopicSentenceSettings(
             api_url=topic_sentence_widgets.api_url_row.get_text().strip(),
             model_id=topic_sentence_widgets.model_row.get_text().strip(),
             api_key=topic_sentence_widgets.api_key_row.get_text().strip(),
+            kimi_reasoning=bool(topic_sentence_widgets.kimi_reasoning_row.get_active()),
+            deepseek_reasoning=bool(topic_sentence_widgets.deepseek_reasoning_row.get_active()),
             prompt=topic_sentence_prompt_text.strip() or DEFAULT_TOPIC_SENTENCE_PROMPT,
         )
         concl_section_settings = ConclSectionSettings(
             api_url=concl_section_widgets.api_url_row.get_text().strip(),
             model_id=concl_section_widgets.model_row.get_text().strip(),
             api_key=concl_section_widgets.api_key_row.get_text().strip(),
+            kimi_reasoning=bool(concl_section_widgets.kimi_reasoning_row.get_active()),
+            deepseek_reasoning=bool(concl_section_widgets.deepseek_reasoning_row.get_active()),
             prompt=concl_section_prompt_text.strip() or DEFAULT_CONCL_SECTION_PROMPT,
         )
         self._on_save(
@@ -4908,6 +5245,23 @@ class SettingsWindow(Adw.ApplicationWindow):
         api_key_row.set_text(settings.api_key)
         credentials_group.add(api_key_row)
 
+        kimi_reasoning_row: Adw.SwitchRow | None = None
+        deepseek_reasoning_row: Adw.SwitchRow | None = None
+        if not isinstance(settings, (ReferenceSettings, AskSettings)):
+            kimi_reasoning_row = Adw.SwitchRow(
+                title="Kimi Reasoning",
+                subtitle="Enable reasoning mode for Kimi models.",
+            )
+            kimi_reasoning_row.set_active(bool(settings.kimi_reasoning))
+            credentials_group.add(kimi_reasoning_row)
+
+            deepseek_reasoning_row = Adw.SwitchRow(
+                title="Deepseek Reasoning",
+                subtitle="Enable thinking mode for Deepseek models.",
+            )
+            deepseek_reasoning_row.set_active(bool(settings.deepseek_reasoning))
+            credentials_group.add(deepseek_reasoning_row)
+
         tavily_api_key_row = None
         if isinstance(settings, (ReferenceSettings, AskSettings)):
             tavily_api_key_row = Adw.PasswordEntryRow(title="Tavily API Key")
@@ -4936,6 +5290,8 @@ class SettingsWindow(Adw.ApplicationWindow):
             api_url_row=api_url_row,
             model_row=model_row,
             api_key_row=api_key_row,
+            kimi_reasoning_row=kimi_reasoning_row,
+            deepseek_reasoning_row=deepseek_reasoning_row,
             tavily_api_key_row=tavily_api_key_row,
             prompt_buffer=buffer,
             ask_prompt_buffer=ask_prompt_buffer,
