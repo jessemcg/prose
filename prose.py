@@ -4463,6 +4463,20 @@ class ProseWindow(Adw.ApplicationWindow):
 
     def _on_spellingstyle_failed(self, message: str) -> bool:
         self._set_busy(False)
+        if self._editor_insert_doc and self._editor_insert_cursor:
+            self._flush_pending_newlines(
+                self._editor_insert_doc,
+                self._editor_insert_cursor,
+                "_editor_pending_newlines",
+            )
+            self._ensure_single_trailing_space(self._editor_insert_doc, self._editor_insert_cursor)
+        if self._improve_insert_doc and self._improve_insert_cursor:
+            self._flush_pending_newlines(
+                self._improve_insert_doc,
+                self._improve_insert_cursor,
+                "_improve_pending_newlines",
+            )
+            self._ensure_single_trailing_space(self._improve_insert_doc, self._improve_insert_cursor)
         self._notify_llm_error(message)
         return False
 
