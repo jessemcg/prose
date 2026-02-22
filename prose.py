@@ -993,6 +993,7 @@ class ProseWindow(Adw.ApplicationWindow):
         self._editor_insert_end = None
         self._improve_insert_cursor = None
         self._improve_insert_doc = None
+        self._improve_started = False
         self._last_insert_len = 0
         self._editor_pending_newlines = 0
         self._improve_pending_newlines = 0
@@ -3206,6 +3207,7 @@ class ProseWindow(Adw.ApplicationWindow):
             self._editor_insert_end = None
             self._last_insert_len = 0
             self._improve_pending_newlines = 0
+            self._improve_started = False
             return True
         except Exception:
             return False
@@ -3228,6 +3230,7 @@ class ProseWindow(Adw.ApplicationWindow):
             self._editor_insert_end = None
             self._last_insert_len = 0
             self._improve_pending_newlines = 0
+            self._improve_started = False
             return True
         except Exception:
             return False
@@ -3235,6 +3238,10 @@ class ProseWindow(Adw.ApplicationWindow):
     def _append_improve1_text(self, text: str) -> bool:
         if not text or not self._improve_insert_cursor or not self._improve_insert_doc:
             return False
+        if not self._improve_started:
+            text = text.lstrip()
+            if not text:
+                return False
         try:
             self._append_writer_text(
                 text,
@@ -3242,6 +3249,7 @@ class ProseWindow(Adw.ApplicationWindow):
                 self._improve_insert_cursor,
                 "_improve_pending_newlines",
             )
+            self._improve_started = True
         except Exception as exc:  # noqa: BLE001
             self._show_toast(f"Unable to insert improved text: {exc}")
         return False
