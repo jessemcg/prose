@@ -3600,6 +3600,7 @@ class ProseWindow(Adw.ApplicationWindow):
             '"replacement": improved text, '
             '"reasoning": short explanation'
             "}. "
+            "Use standard JSON syntax (double quotes for keys and string values). "
             "Keep snippets short but unique. Only propose changes that truly improve clarity or correctness. "
             f"Never cite or invent pages outside {start}-{end}; drop any content you think is beyond that range."
         )
@@ -3664,38 +3665,123 @@ class ProseWindow(Adw.ApplicationWindow):
         return [suggestion for _, suggestion in indexed]
 
     def _parse_suggestions(self, raw: str) -> list[Suggestion]:
+        def _normalize_json_punctuation(text: str) -> str:
+            # Some models return JSON-like text with curly quotes; normalize for JSON parsing.
+            return text.translate(
+                {
+                    ord("“"): '"',
+                    ord("”"): '"',
+                    ord("‘"): "'",
+                    ord("’"): "'",
+                }
+            )
+
+        def _extract_message_content(message: Any) -> str:
+            if not isinstance(message, dict):
+                return ""
+            content = message.get("content")
+            if isinstance(content, str):
+                return content
+            if isinstance(content, dict):
+                text = content.get("text")
+                if isinstance(text, str):
+                    return text
+                if isinstance(text, dict):
+                    value = text.get("value")
+                    if isinstance(value, str):
+                        return value
+            if isinstance(content, list):
+                parts: list[str] = []
+                for block in content:
+                    if not isinstance(block, dict):
+                        continue
+                    block_type = str(block.get("type") or "").lower()
+                    if block_type and ("reason" in block_type or "think" in block_type):
+                        continue
+                    text = block.get("text")
+                    if isinstance(text, str) and text:
+                        parts.append(text)
+                    elif isinstance(text, dict):
+                        value = text.get("value")
+                        if isinstance(value, str) and value:
+                            parts.append(value)
+                    elif block.get("output_text"):
+                        parts.append(str(block.get("output_text")))
+                return "".join(parts)
+            return ""
+
+        def _extract_function_arguments(message: Any) -> str:
+            if not isinstance(message, dict):
+                return ""
+            tool_calls = message.get("tool_calls")
+            if not isinstance(tool_calls, list):
+                return ""
+            for tool_call in tool_calls:
+                if not isinstance(tool_call, dict):
+                    continue
+                function_obj = tool_call.get("function")
+                if not isinstance(function_obj, dict):
+                    continue
+                arguments = function_obj.get("arguments")
+                if isinstance(arguments, str) and arguments.strip():
+                    return arguments
+            return ""
+
         def _load_json(text: str):
             cleaned = text.strip()
             if not cleaned:
                 raise ValueError("Empty response from model.")
-            if "```" in cleaned:
-                cleaned = cleaned.split("```", 2)[1]
-                if cleaned.lower().startswith("json"):
-                    cleaned = cleaned[4:].strip()
-            return json.loads(cleaned)
+            candidate = cleaned
+            if cleaned.startswith("```"):
+                fence_match = re.match(r"^```(?:json)?\s*([\s\S]*?)\s*```$", cleaned, flags=re.IGNORECASE)
+                if fence_match:
+                    candidate = fence_match.group(1).strip()
+            try:
+                return json.loads(candidate)
+            except json.JSONDecodeError:
+                return json.loads(_normalize_json_punctuation(candidate))
 
         def _coerce_list(obj: Any) -> list[dict[str, Any]]:
             if isinstance(obj, list):
                 return [item for item in obj if isinstance(item, dict)]
             if isinstance(obj, dict):
-                for key in ("suggestions", "edits", "data"):
+                if any(key in obj for key in ("snippet", "replacement", "source", "original", "suggestion", "corrected")):
+                    return [obj]
+                for key in ("suggestions", "edits", "data", "changes", "corrections"):
                     if isinstance(obj.get(key), list):
                         return [item for item in obj[key] if isinstance(item, dict)]
             return []
 
+        def _try_extract_embedded_json(text: str) -> Any:
+            # Try fenced JSON first.
+            fenced = re.findall(r"```(?:json)?\s*([\s\S]*?)```", text, flags=re.IGNORECASE)
+            for candidate in fenced:
+                candidate = candidate.strip()
+                if not candidate:
+                    continue
+                try:
+                    return _load_json(candidate)
+                except Exception:
+                    continue
+
+            # Then try non-greedy array/object candidates.
+            for pattern in (r"\[[\s\S]*?\]", r"\{[\s\S]*?\}"):
+                for match in re.finditer(pattern, text):
+                    candidate = match.group(0).strip()
+                    if not candidate:
+                        continue
+                    try:
+                        return _load_json(candidate)
+                    except Exception:
+                        continue
+            raise ValueError("LLM response was not valid JSON.")
+
         try:
             data = _load_json(raw)
         except json.JSONDecodeError as exc:
-            # Try to salvage by locating the first JSON-looking block
-            match = re.search(r"\[.*\]", raw, re.DOTALL)
-            if not match:
-                match = re.search(r"\{.*\}", raw, re.DOTALL)
-            if match:
-                try:
-                    data = json.loads(match.group(0))
-                except json.JSONDecodeError as inner_exc:
-                    raise ValueError(f"LLM response was not valid JSON: {inner_exc}") from inner_exc
-            else:
+            try:
+                data = _try_extract_embedded_json(raw)
+            except ValueError:
                 raise ValueError(f"LLM response was not valid JSON: {exc}") from exc
 
         # OpenAI-style shape: {choices: [{message: {content: "...json..."}}]}
@@ -3705,29 +3791,59 @@ class ProseWindow(Adw.ApplicationWindow):
                 if not isinstance(choice, dict):
                     continue
                 msg = choice.get("message") or choice.get("delta") or {}
-                if isinstance(msg, dict) and msg.get("content"):
-                    content_fragments.append(str(msg["content"]))
+                content = _extract_message_content(msg)
+                if content:
+                    content_fragments.append(content)
+                    continue
+                arguments = _extract_function_arguments(msg)
+                if arguments:
+                    content_fragments.append(arguments)
             content = "".join(content_fragments).strip()
             if content:
                 try:
                     data = _load_json(content)
                 except json.JSONDecodeError as exc:
-                    raise ValueError(f"LLM content was not valid JSON: {exc}") from exc
+                    try:
+                        data = _try_extract_embedded_json(content)
+                    except ValueError:
+                        raise ValueError(f"LLM content was not valid JSON: {exc}") from exc
 
         candidates = _coerce_list(data)
         suggestions: list[Suggestion] = []
         for item in candidates:
-            snippet = str(item.get("snippet") or "").strip()
-            replacement = str(item.get("replacement") or "").strip()
+            snippet = str(
+                item.get("snippet")
+                or item.get("source")
+                or item.get("original")
+                or item.get("from")
+                or item.get("text")
+                or ""
+            ).strip()
+            replacement = str(
+                item.get("replacement")
+                or item.get("suggestion")
+                or item.get("corrected")
+                or item.get("to")
+                or item.get("edit")
+                or ""
+            ).strip()
             if not snippet or not replacement:
                 continue  # skip unusable entries
+            page_value = (
+                item.get("page")
+                or item.get("page_number")
+                or item.get("pageNum")
+                or item.get("pagenum")
+            )
+            page_match = re.search(r"\d+", str(page_value or ""))
+            page = int(page_match.group(0)) if page_match else None
             suggestions.append(
                 Suggestion(
                     title=str(item.get("title") or "Suggested change"),
-                    page=int(item.get("page")) if str(item.get("page") or "").isdigit() else None,
+                    page=page,
                     snippet=snippet,
                     replacement=replacement,
-                    reasoning=str(item.get("reasoning") or ""),
+                    reasoning=str(item.get("reasoning") or item.get("why") or item.get("explanation") or ""),
                 )
             )
         if not suggestions:
@@ -3741,6 +3857,7 @@ class ProseWindow(Adw.ApplicationWindow):
 
     def _on_llm_failed(self, message: str) -> bool:
         self._set_busy(False)
+        self._view_json_btn.set_sensitive(bool(self._last_raw_response))
         self._notify_llm_error(message)
         return False
 
