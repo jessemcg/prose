@@ -124,6 +124,12 @@ CONFIG_KEY_CONCL_SECTION_API_KEY = "concl_section_api_key"
 CONFIG_KEY_CONCL_SECTION_KIMI_REASONING = "concl_section_kimi_reasoning"
 CONFIG_KEY_CONCL_SECTION_DEEPSEEK_REASONING = "concl_section_deepseek_reasoning"
 CONFIG_KEY_CONCL_SECTION_PROMPT = "concl_section_prompt"
+CONFIG_KEY_TRANSLATE_API_URL = "translate_api_url"
+CONFIG_KEY_TRANSLATE_MODEL_ID = "translate_model_id"
+CONFIG_KEY_TRANSLATE_API_KEY = "translate_api_key"
+CONFIG_KEY_TRANSLATE_KIMI_REASONING = "translate_kimi_reasoning"
+CONFIG_KEY_TRANSLATE_DEEPSEEK_REASONING = "translate_deepseek_reasoning"
+CONFIG_KEY_TRANSLATE_PROMPT = "translate_prompt"
 CONFIG_KEY_EDITOR_SOURCE_FILE = "editor_source_file"
 CONFIG_KEY_LAST_ODT_FILE = "last_odt_file"
 
@@ -172,6 +178,10 @@ DEFAULT_TOPIC_SENTENCE_PROMPT = (
 DEFAULT_CONCL_SECTION_PROMPT = (
     "Write a concise conclusion for the provided section. "
     "Return only the conclusion."
+)
+DEFAULT_TRANSLATE_PROMPT = (
+    "Translate the provided text into Spanish. Preserve meaning, tone, line breaks, numbering, and punctuation. "
+    "Do not summarize and do not omit content."
 )
 
 LIBREOFFICE_PROFILE = Path.home() / ".config" / "libreoffice-prose-profile"
@@ -473,6 +483,22 @@ class ConclSectionSettings:
         return all(
             value.strip()
             for value in (self.api_url, self.api_key, self.prompt or DEFAULT_CONCL_SECTION_PROMPT)
+        )
+
+
+@dataclass
+class TranslateSettings:
+    api_url: str
+    model_id: str
+    api_key: str
+    kimi_reasoning: bool
+    deepseek_reasoning: bool
+    prompt: str
+
+    def is_configured(self) -> bool:
+        return all(
+            value.strip()
+            for value in (self.api_url, self.api_key, self.prompt or DEFAULT_TRANSLATE_PROMPT)
         )
 
 
@@ -905,6 +931,36 @@ def save_concl_section_settings(settings: ConclSectionSettings) -> None:
     data[CONFIG_KEY_CONCL_SECTION_PROMPT] = settings.prompt or DEFAULT_CONCL_SECTION_PROMPT
     _write_config(data)
 
+
+def load_translate_settings() -> TranslateSettings:
+    raw = _read_config()
+    return TranslateSettings(
+        api_url=str(raw.get(CONFIG_KEY_TRANSLATE_API_URL, "") or "").strip(),
+        model_id=str(raw.get(CONFIG_KEY_TRANSLATE_MODEL_ID, "") or "").strip(),
+        api_key=str(raw.get(CONFIG_KEY_TRANSLATE_API_KEY, "") or "").strip(),
+        kimi_reasoning=_coerce_bool_config(
+            raw.get(CONFIG_KEY_TRANSLATE_KIMI_REASONING),
+            DEFAULT_KIMI_REASONING_ENABLED,
+        ),
+        deepseek_reasoning=_coerce_bool_config(
+            raw.get(CONFIG_KEY_TRANSLATE_DEEPSEEK_REASONING),
+            DEFAULT_DEEPSEEK_REASONING_ENABLED,
+        ),
+        prompt=str(raw.get(CONFIG_KEY_TRANSLATE_PROMPT, DEFAULT_TRANSLATE_PROMPT) or DEFAULT_TRANSLATE_PROMPT).strip(),
+    )
+
+
+def save_translate_settings(settings: TranslateSettings) -> None:
+    data = _read_config()
+    data[CONFIG_KEY_TRANSLATE_API_URL] = settings.api_url
+    data[CONFIG_KEY_TRANSLATE_MODEL_ID] = settings.model_id
+    data[CONFIG_KEY_TRANSLATE_API_KEY] = settings.api_key
+    data[CONFIG_KEY_TRANSLATE_KIMI_REASONING] = bool(settings.kimi_reasoning)
+    data[CONFIG_KEY_TRANSLATE_DEEPSEEK_REASONING] = bool(settings.deepseek_reasoning)
+    data[CONFIG_KEY_TRANSLATE_PROMPT] = settings.prompt or DEFAULT_TRANSLATE_PROMPT
+    _write_config(data)
+
+
 def load_editor_source_file() -> Path | None:
     raw = _read_config()
     path = raw.get(CONFIG_KEY_EDITOR_SOURCE_FILE)
@@ -976,6 +1032,7 @@ class ProseWindow(Adw.ApplicationWindow):
         self._concl_no_issues_settings = load_concl_no_issues_settings()
         self._topic_sentence_settings = load_topic_sentence_settings()
         self._concl_section_settings = load_concl_section_settings()
+        self._translate_settings = load_translate_settings()
         self._editor_source_file = load_editor_source_file()
         self._last_odt_path = load_last_odt_file()
         self._ctx = None
@@ -1045,6 +1102,10 @@ class ProseWindow(Adw.ApplicationWindow):
 
         status_label = Gtk.Label(label="LibreOffice status unknown", halign=Gtk.Align.START)
         status_label.add_css_class("dim-label")
+        status_label.set_wrap(True)
+        status_label.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
+        status_label.set_xalign(0.0)
+        status_label.set_hexpand(True)
         self._status_label = status_label
 
         status_spinner = Gtk.Spinner()
@@ -1053,7 +1114,8 @@ class ProseWindow(Adw.ApplicationWindow):
         self._status_spinner = status_spinner
 
         status_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        status_row.set_halign(Gtk.Align.START)
+        status_row.set_halign(Gtk.Align.FILL)
+        status_row.set_hexpand(True)
         status_row.append(status_spinner)
         status_row.append(status_label)
 
@@ -1110,6 +1172,7 @@ class ProseWindow(Adw.ApplicationWindow):
             ("Concl.", "app.transform-conclusion"),
             ("No Issues Concl.", "app.transform-concl-no-issues"),
             ("Quotes", "app.transform-wrap-quotes"),
+            ("Translate", "app.transform-translate"),
         ):
             button = Gtk.Button(label=label)
             button.set_action_name(action_name)
@@ -1388,6 +1451,7 @@ class ProseWindow(Adw.ApplicationWindow):
         _add_action("reference-lookup", lambda: self._on_reference_clicked(None))
         _add_action("transform-shorten", lambda: self._on_shorten_clicked(None))
         _add_action("transform-wrap-quotes", lambda: self._on_wrap_quotes_clicked(None))
+        _add_action("transform-translate", lambda: self._on_translate_clicked(None))
         _add_action("transform-topic-sentence", lambda: self._on_topic_sentence_clicked(None))
         _add_action("transform-introduction", lambda: self._on_introduction_clicked(None))
         _add_action("transform-conclusion", lambda: self._on_conclusion_clicked(None))
@@ -1432,6 +1496,7 @@ class ProseWindow(Adw.ApplicationWindow):
             self._concl_no_issues_settings,
             self._topic_sentence_settings,
             self._concl_section_settings,
+            self._translate_settings,
             self._editor_source_file,
             self._on_editor_source_file_updated,
             self._on_settings_saved,
@@ -1463,6 +1528,7 @@ class ProseWindow(Adw.ApplicationWindow):
         concl_no_issues_settings: ConclNoIssuesSettings,
         topic_sentence_settings: TopicSentenceSettings,
         concl_section_settings: ConclSectionSettings,
+        translate_settings: TranslateSettings,
     ) -> None:
         self._proof_settings = proof_settings
         self._spelling_settings = spelling_settings
@@ -1478,6 +1544,7 @@ class ProseWindow(Adw.ApplicationWindow):
         self._concl_no_issues_settings = concl_no_issues_settings
         self._topic_sentence_settings = topic_sentence_settings
         self._concl_section_settings = concl_section_settings
+        self._translate_settings = translate_settings
         save_proofread_settings(proof_settings)
         save_spellingstyle_settings(spelling_settings)
         save_improve1_settings(improve1_settings)
@@ -1492,6 +1559,7 @@ class ProseWindow(Adw.ApplicationWindow):
         save_concl_no_issues_settings(concl_no_issues_settings)
         save_topic_sentence_settings(topic_sentence_settings)
         save_concl_section_settings(concl_section_settings)
+        save_translate_settings(translate_settings)
 
     def _on_settings_closed(self, _window: Gtk.Window) -> bool:
         self._settings_window = None
@@ -1950,6 +2018,25 @@ class ProseWindow(Adw.ApplicationWindow):
             return
         wrapped = self._wrap_text_in_curly_quotes(source_text)
         self._replace_selected_text_no_trailing_space(wrapped)
+
+    def _on_translate_clicked(self, _button: Gtk.Button) -> None:
+        if self._busy:
+            return
+        if not self._translate_settings.is_configured():
+            self._show_toast("Add Translate API URL, API key, and prompt in Settings. Model ID may be required.")
+            return
+        desktop = self._get_desktop()
+        if not desktop:
+            self._show_toast("Unable to reach LibreOffice listener. Is the service running?")
+            return
+        doc = self._get_active_writer(desktop)
+        if not doc:
+            self._show_toast("Open a Writer document (File → Launch Writer).")
+            return
+        self._set_busy(True)
+        self._status_label.set_label("Translating document to Spanish…")
+        thread = threading.Thread(target=self._run_translate_document, args=(doc,), daemon=True)
+        thread.start()
 
     def _on_add_case_clicked(self, _button: Gtk.Button) -> None:
         if self._busy:
@@ -4028,6 +4115,556 @@ class ProseWindow(Adw.ApplicationWindow):
             return
         GLib.idle_add(self._on_concl_section_finished, "Section conclusion complete.")
 
+    def _run_translate_document(self, doc: XTextDocument) -> None:  # type: ignore[type-arg]
+        try:
+            paragraphs = self._collect_document_paragraph_texts(doc)
+            if not paragraphs:
+                GLib.idle_add(self._on_spellingstyle_failed, "Document has no translatable text.")
+                return
+            translated_paragraphs: list[str] = []
+            for source_text in paragraphs:
+                if not source_text.strip():
+                    translated_paragraphs.append(source_text)
+                    continue
+                translated_text = self._translate_unit_text(source_text, strict=False)
+                if not translated_text.strip():
+                    translated_text = source_text
+                translated_paragraphs.append(translated_text)
+            normalized_paragraphs = [p.replace("\r\n", "\n").replace("\r", "\n").strip("\n") for p in translated_paragraphs]
+            self._replace_document_text_plain(doc, "\n\n".join(normalized_paragraphs))
+            GLib.idle_add(self._on_translate_finished, "Document translated to Spanish.")
+        except Exception as exc:  # noqa: BLE001
+            GLib.idle_add(self._on_spellingstyle_failed, str(exc))
+
+    def _collect_document_paragraph_texts(self, doc: XTextDocument) -> list[str]:  # type: ignore[type-arg]
+        try:
+            doc_text = doc.getText()
+            enum = doc_text.createEnumeration()
+        except Exception as exc:  # noqa: BLE001
+            raise ValueError(f"Unable to read Writer document: {exc}") from exc
+        paragraphs: list[str] = []
+        while enum.hasMoreElements():
+            paragraph = enum.nextElement()
+            try:
+                paragraph_text = str(paragraph.getString() or "")
+            except Exception:
+                paragraph_text = ""
+            paragraphs.append(paragraph_text)
+        return paragraphs
+
+    def _replace_document_text_plain(self, doc: XTextDocument, text: str) -> None:  # type: ignore[type-arg]
+        try:
+            doc_text = doc.getText()
+            doc_text.setString(text)
+            cursor = doc_text.createTextCursor()
+            cursor.gotoStart(False)
+            cursor.gotoEnd(True)
+            slant_none = self._get_font_slant("NONE")
+            for prop_name in ("CharPosture", "CharPostureAsian", "CharPostureComplex"):
+                try:
+                    cursor.setPropertyValue(prop_name, slant_none)
+                except Exception:
+                    continue
+        except Exception as exc:  # noqa: BLE001
+            raise ValueError(f"Unable to replace document text: {exc}") from exc
+
+    def _translate_paragraph_by_sentences(self, paragraph: str) -> str:
+        parts = self._split_paragraph_for_translation_fallback(paragraph)
+        translated_parts: list[str] = []
+        for part in parts:
+            if not part.strip():
+                translated_parts.append(part)
+                continue
+            translated = self._translate_unit_text(part, strict=True)
+            if self._translation_looks_truncated(part, translated):
+                return paragraph
+            translated_parts.append(translated)
+        return "".join(translated_parts)
+
+    def _split_paragraph_for_translation_fallback(self, paragraph: str) -> list[str]:
+        chunks = re.split(r"(?<=[.!?:;])(\s+)", paragraph)
+        if not chunks:
+            return [paragraph]
+        parts: list[str] = []
+        idx = 0
+        while idx < len(chunks):
+            text = chunks[idx]
+            ws = chunks[idx + 1] if idx + 1 < len(chunks) else ""
+            parts.append(f"{text}{ws}")
+            idx += 2
+        return parts if parts else [paragraph]
+
+    def _collect_translatable_paragraphs(
+        self,
+        doc: XTextDocument,  # type: ignore[type-arg]
+    ) -> list[tuple[int, str, list[tuple[str, Any]]]]:
+        paragraphs: list[tuple[int, str, list[tuple[str, Any]]]] = []
+        index = 0
+        try:
+            doc_text = doc.getText()
+            index = self._collect_translatable_paragraphs_in_text(doc_text, paragraphs, index)
+        except Exception as exc:  # noqa: BLE001
+            raise ValueError(f"Unable to read Writer document: {exc}") from exc
+        for note_text in self._iter_note_texts(doc):
+            index = self._collect_translatable_paragraphs_in_text(note_text, paragraphs, index)
+        return paragraphs
+
+    def _collect_translatable_paragraphs_in_text(
+        self,
+        text_obj: Any,
+        target: list[tuple[int, str, list[tuple[str, Any]]]],
+        start_index: int,
+    ) -> int:
+        try:
+            enum = text_obj.createEnumeration()
+        except Exception:
+            return start_index
+        index = start_index
+        while enum.hasMoreElements():
+            paragraph = enum.nextElement()
+            try:
+                portion_enum = paragraph.createEnumeration()
+            except Exception:
+                continue
+            portion_entries: list[tuple[str, Any]] = []
+            while portion_enum.hasMoreElements():
+                portion = portion_enum.nextElement()
+                try:
+                    portion_type = str(portion.getPropertyValue("TextPortionType") or "")
+                except Exception:
+                    portion_type = ""
+                if portion_type != "Text":
+                    continue
+                text = str(portion.getString() or "")
+                if not text:
+                    continue
+                try:
+                    cursor = text_obj.createTextCursorByRange(portion.getStart())
+                    cursor.gotoRange(portion.getEnd(), True)
+                except Exception:
+                    continue
+                portion_entries.append((text, cursor))
+            if not portion_entries:
+                continue
+            paragraph_text = "".join(text for text, _cursor in portion_entries)
+            if not paragraph_text.strip():
+                continue
+            target.append((index, paragraph_text, portion_entries))
+            index += 1
+        return index
+
+    def _distribute_text_across_portions(self, text: str, source_portions: list[str]) -> list[str]:
+        count = len(source_portions)
+        if count <= 1:
+            return [text]
+        if not text:
+            return [""] * count
+        source_lengths = [max(1, len(part)) for part in source_portions]
+        total_source = sum(source_lengths)
+        total_target = len(text)
+        boundaries: list[int] = []
+        running_source = 0
+        previous = 0
+        for idx in range(count - 1):
+            running_source += source_lengths[idx]
+            target = int(round((running_source / total_source) * total_target))
+            target = max(previous, min(target, total_target))
+            target = self._snap_split_boundary(text, target, previous, total_target)
+            boundaries.append(target)
+            previous = target
+        parts: list[str] = []
+        start = 0
+        for boundary in boundaries:
+            parts.append(text[start:boundary])
+            start = boundary
+        parts.append(text[start:])
+        if len(parts) < count:
+            parts.extend([""] * (count - len(parts)))
+        return parts[:count]
+
+    def _snap_split_boundary(self, text: str, target: int, lower: int, upper: int, window: int = 20) -> int:
+        if target <= lower:
+            return lower
+        if target >= upper:
+            return upper
+        best = target
+        for distance in range(window + 1):
+            left = target - distance
+            right = target + distance
+            candidates = []
+            if lower < left < upper:
+                candidates.append(left)
+            if lower < right < upper and right != left:
+                candidates.append(right)
+            for candidate in candidates:
+                if text[candidate - 1].isspace() or text[candidate].isspace():
+                    return candidate
+        return best
+
+    def _collect_translatable_portions(self, doc: XTextDocument) -> list[tuple[int, str, Any]]:  # type: ignore[type-arg]
+        collected: list[tuple[int, str, Any]] = []
+        index = 0
+        try:
+            doc_text = doc.getText()
+            index = self._collect_translatable_portions_in_text(doc_text, collected, index)
+        except Exception as exc:  # noqa: BLE001
+            raise ValueError(f"Unable to read Writer document: {exc}") from exc
+        for note_text in self._iter_note_texts(doc):
+            index = self._collect_translatable_portions_in_text(note_text, collected, index)
+        return collected
+
+    def _collect_translatable_portions_in_text(
+        self,
+        text_obj: Any,
+        target: list[tuple[int, str, Any]],
+        start_index: int,
+    ) -> int:
+        try:
+            enum = text_obj.createEnumeration()
+        except Exception:
+            return start_index
+        index = start_index
+        while enum.hasMoreElements():
+            paragraph = enum.nextElement()
+            try:
+                portion_enum = paragraph.createEnumeration()
+            except Exception:
+                continue
+            while portion_enum.hasMoreElements():
+                portion = portion_enum.nextElement()
+                try:
+                    portion_type = str(portion.getPropertyValue("TextPortionType") or "")
+                except Exception:
+                    portion_type = ""
+                if portion_type != "Text":
+                    continue
+                text = str(portion.getString() or "")
+                if not text:
+                    continue
+                try:
+                    cursor = text_obj.createTextCursorByRange(portion.getStart())
+                    cursor.gotoRange(portion.getEnd(), True)
+                except Exception:
+                    continue
+                target.append((index, text, cursor))
+                index += 1
+        return index
+
+    def _build_translation_units(
+        self,
+        portions: list[tuple[int, str, Any]],
+    ) -> list[tuple[int, int, int, str]]:
+        units: list[tuple[int, int, int, str]] = []
+        unit_index = 0
+        for portion_index, text, _cursor in portions:
+            chunks = self._split_text_for_translation(text)
+            if not chunks:
+                chunks = [text]
+            for chunk_order, chunk_text in enumerate(chunks):
+                units.append((unit_index, portion_index, chunk_order, chunk_text))
+                unit_index += 1
+        return units
+
+    def _split_text_for_translation(self, text: str, max_chunk_chars: int = 700) -> list[str]:
+        if not text:
+            return []
+        if len(text) <= max_chunk_chars:
+            return [text]
+        parts: list[str] = []
+        start = 0
+        text_len = len(text)
+        while start < text_len:
+            end = min(start + max_chunk_chars, text_len)
+            if end < text_len:
+                cut = text.rfind("\n", start + 1, end)
+                if cut <= start:
+                    cut = text.rfind(" ", start + 1, end)
+                if cut > start:
+                    end = cut + 1
+            chunk = text[start:end]
+            if not chunk:
+                break
+            parts.append(chunk)
+            start = end
+        return parts
+
+    def _build_translation_batches(
+        self,
+        portions: list[tuple[int, str, Any]] | list[tuple[int, int, int, str]],
+        max_chars: int = 3500,
+        max_items: int = 24,
+    ) -> list[list[tuple[int, str, Any]]]:
+        normalized: list[tuple[int, str, Any]] = []
+        for item in portions:
+            if len(item) == 3:
+                index, text, cursor = item  # type: ignore[misc]
+                normalized.append((index, text, cursor))
+            elif len(item) == 4:
+                index, _portion_index, _chunk_order, text = item  # type: ignore[misc]
+                normalized.append((index, text, None))
+        batches: list[list[tuple[int, str, Any]]] = []
+        current: list[tuple[int, str, Any]] = []
+        current_chars = 0
+        for item in normalized:
+            item_chars = len(item[1])
+            if current and (len(current) >= max_items or current_chars + item_chars > max_chars):
+                batches.append(current)
+                current = []
+                current_chars = 0
+            current.append(item)
+            current_chars += item_chars
+        if current:
+            batches.append(current)
+        return batches
+
+    def _translate_unit_text(self, source_text: str, strict: bool) -> str:
+        prompt = self._build_translate_instructions(strict, expect_json=False)
+        if self._translate_settings.api_url.rstrip("/").endswith("/responses"):
+            payload = {
+                "input": (
+                    f"{prompt}\n\n"
+                    "Return only the translated text.\n\n"
+                    "SOURCE:\n"
+                    f"{source_text}"
+                ),
+                "stream": False,
+            }
+            payload = self._add_model_id(
+                payload,
+                self._translate_settings.model_id,
+                self._translate_settings.kimi_reasoning,
+                self._translate_settings.deepseek_reasoning,
+            )
+            return self._call_responses_text(
+                payload,
+                self._translate_settings.api_url,
+                self._translate_settings.api_key,
+            )
+        payload = {
+            "messages": [
+                {"role": "system", "content": prompt},
+                {
+                    "role": "user",
+                    "content": (
+                        "Return only the translated text.\n\n"
+                        f"{source_text}"
+                    ),
+                },
+            ],
+            "stream": False,
+        }
+        payload = self._add_model_id(
+            payload,
+            self._translate_settings.model_id,
+            self._translate_settings.kimi_reasoning,
+            self._translate_settings.deepseek_reasoning,
+        )
+        return self._call_chat_text(
+            payload,
+            self._translate_settings.api_url,
+            self._translate_settings.api_key,
+        )
+
+    def _translate_batch(self, batch: list[tuple[int, str, Any]]) -> dict[int, str]:
+        translated = self._translate_batch_once(batch, strict=False)
+        source_by_index = {index: text for index, text, _cursor in batch}
+        suspect = self._find_suspect_translations(source_by_index, translated)
+        if not suspect:
+            return translated
+        for index in sorted(suspect):
+            source_text = source_by_index[index]
+            single_item = [(index, source_text, None)]
+            translated.update(self._translate_batch_once(single_item, strict=True))
+        suspect_after_retry = self._find_suspect_translations(source_by_index, translated)
+        if suspect_after_retry:
+            for index in suspect_after_retry:
+                translated[index] = source_by_index[index]
+            current_count = int(getattr(self, "_translate_fallback_count", 0) or 0)
+            self._translate_fallback_count = current_count + len(suspect_after_retry)
+        return translated
+
+    def _translate_batch_once(self, batch: list[tuple[int, str, Any]], strict: bool) -> dict[int, str]:
+        source_payload = [{"index": index, "text": text} for index, text, _cursor in batch]
+        instructions = self._build_translate_instructions(strict)
+        source_json = json.dumps(source_payload, ensure_ascii=False)
+        if self._translate_settings.api_url.rstrip("/").endswith("/responses"):
+            request_payload = {
+                "input": f"{instructions}\n\nSOURCE:\n{source_json}",
+                "stream": False,
+            }
+            request_payload = self._add_model_id(
+                request_payload,
+                self._translate_settings.model_id,
+                self._translate_settings.kimi_reasoning,
+                self._translate_settings.deepseek_reasoning,
+            )
+            raw_output = self._call_responses_text(
+                request_payload,
+                self._translate_settings.api_url,
+                self._translate_settings.api_key,
+            )
+        else:
+            request_payload = {
+                "messages": [
+                    {"role": "system", "content": instructions},
+                    {"role": "user", "content": source_json},
+                ],
+                "stream": False,
+            }
+            request_payload = self._add_model_id(
+                request_payload,
+                self._translate_settings.model_id,
+                self._translate_settings.kimi_reasoning,
+                self._translate_settings.deepseek_reasoning,
+            )
+            raw_output = self._call_chat_text(
+                request_payload,
+                self._translate_settings.api_url,
+                self._translate_settings.api_key,
+            )
+        return self._parse_translation_batch(raw_output, {index for index, _text, _cursor in batch})
+
+    def _build_translate_instructions(self, strict: bool, expect_json: bool = True) -> str:
+        prompt = self._translate_settings.prompt or DEFAULT_TRANSLATE_PROMPT
+        if expect_json:
+            base = (
+                f"{prompt}\n\n"
+                "Translate each item's text into Spanish.\n"
+                "Return JSON only using this exact shape:\n"
+                '{"translations":[{"index":0,"text":"..."},{"index":1,"text":"..."}]}\n'
+                "Keep the same index values from the source.\n"
+                "Never omit lines, headings, case numbers, section numbers, dates, or citations.\n"
+                "Preserve line breaks and paragraph breaks.\n"
+                "If any source text is already Spanish, keep it in Spanish.\n"
+                "Do not summarize."
+            )
+        else:
+            base = (
+                f"{prompt}\n\n"
+                "Translate the provided text into Spanish.\n"
+                "Never omit lines, headings, case numbers, section numbers, dates, or citations.\n"
+                "Preserve line breaks and paragraph breaks.\n"
+                "If source text is already Spanish, keep it in Spanish.\n"
+                "Do not summarize."
+            )
+        if not strict:
+            return base
+        if expect_json:
+            return (
+                base
+                + "\n"
+                + "STRICT CHECK: the translated text for each item must fully cover the source item with no omissions."
+            )
+        return base + "\nSTRICT CHECK: the translated text must fully cover the source text with no omissions."
+
+    def _find_suspect_translations(
+        self,
+        source_by_index: dict[int, str],
+        translated_by_index: dict[int, str],
+    ) -> set[int]:
+        suspect: set[int] = set()
+        for index, source_text in source_by_index.items():
+            translated_text = translated_by_index.get(index, "")
+            if self._translation_looks_truncated(source_text, translated_text):
+                suspect.add(index)
+        return suspect
+
+    def _translation_looks_truncated(self, source: str, translated: str) -> bool:
+        source_clean = source.strip()
+        translated_clean = translated.strip()
+        if not source_clean:
+            return False
+        if not translated_clean:
+            return True
+        if len(source_clean) >= 30 and len(translated_clean) < 8:
+            return True
+        if len(source_clean) >= 80 and len(translated_clean) < int(len(source_clean) * 0.35):
+            return True
+        if len(source_clean) >= 40 and re.search(r"[A-Za-zÀ-ÖØ-öø-ÿ]$", translated_clean):
+            if translated_clean.endswith(" d") or translated_clean.endswith(" e"):
+                return True
+        source_numbers = set(re.findall(r"\d[\d./,-]*", source_clean))
+        translated_numbers = set(re.findall(r"\d[\d./,-]*", translated_clean))
+        if source_numbers and not source_numbers.issubset(translated_numbers):
+            return True
+        source_end_punct = bool(re.search(r"[.:;!?)]\s*$", source_clean))
+        translated_end_punct = bool(re.search(r"[.:;!?)]\s*$", translated_clean))
+        if source_end_punct and not translated_end_punct and len(translated_clean) < int(len(source_clean) * 0.7):
+            return True
+        source_lines = [line for line in source_clean.splitlines() if line.strip()]
+        translated_lines = [line for line in translated_clean.splitlines() if line.strip()]
+        if len(source_lines) >= 2 and len(translated_lines) == 0:
+            return True
+        return False
+
+    def _call_chat_text(self, payload: dict[str, Any], api_url: str, api_key: str) -> str:
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {api_key}",
+            "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) Prose/1.0",
+        }
+        data = json.dumps(payload).encode("utf-8")
+        req = urllib.request.Request(api_url, data=data, headers=headers, method="POST")
+        with urllib.request.urlopen(req) as resp:
+            raw = resp.read().decode("utf-8", errors="ignore")
+        text = "".join(self._extract_response_text(raw)).strip()
+        if not text:
+            raise ValueError("Translate returned empty output.")
+        return text
+
+    def _call_responses_text(self, payload: dict[str, Any], api_url: str, api_key: str) -> str:
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {api_key}",
+            "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) Prose/1.0",
+        }
+        data = json.dumps(payload).encode("utf-8")
+        req = urllib.request.Request(api_url, data=data, headers=headers, method="POST")
+        with urllib.request.urlopen(req) as resp:
+            raw = resp.read().decode("utf-8", errors="ignore")
+        text = "".join(self._extract_responses_text(raw)).strip()
+        if not text:
+            raise ValueError("Translate returned empty output.")
+        return text
+
+    def _parse_translation_batch(self, raw_output: str, expected_indexes: set[int]) -> dict[int, str]:
+        cleaned = raw_output.strip()
+        if not cleaned:
+            raise ValueError("Translate returned empty output.")
+        if cleaned.startswith("```"):
+            fence_match = re.match(r"^```(?:json)?\s*([\s\S]*?)\s*```$", cleaned, flags=re.IGNORECASE)
+            if fence_match:
+                cleaned = fence_match.group(1).strip()
+        try:
+            data = json.loads(cleaned)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"Translate output was not valid JSON: {exc}") from exc
+        entries = []
+        if isinstance(data, dict):
+            entries = data.get("translations") or data.get("items") or []
+        elif isinstance(data, list):
+            entries = data
+        if not isinstance(entries, list):
+            raise ValueError("Translate output did not include a translations list.")
+        translated: dict[int, str] = {}
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            index_raw = entry.get("index")
+            text_raw = entry.get("text")
+            try:
+                index = int(index_raw)
+            except (TypeError, ValueError):
+                continue
+            if index not in expected_indexes:
+                continue
+            translated[index] = str(text_raw or "")
+        missing = expected_indexes - set(translated.keys())
+        if missing:
+            missing_preview = ", ".join(str(i) for i in sorted(missing)[:5])
+            raise ValueError(f"Translate output missed indexes: {missing_preview}")
+        return translated
+
     def _compose_spellingstyle_payload(self, source_text: str) -> dict[str, Any]:
         system_prompt = self._spelling_settings.prompt or DEFAULT_SPELLINGSTYLE_PROMPT
         payload = {
@@ -4610,6 +5247,11 @@ class ProseWindow(Adw.ApplicationWindow):
         self._capture_spellingstyle_range_end()
         return False
 
+    def _on_translate_finished(self, message: str) -> bool:
+        self._set_busy(False)
+        self._status_label.set_label(message)
+        return False
+
     def _render_suggestions(self) -> None:
         for row in self._suggestion_rows:
             self._list_box.remove(row)
@@ -4940,6 +5582,7 @@ class SettingsWindow(Adw.ApplicationWindow):
         concl_no_issues_settings: ConclNoIssuesSettings,
         topic_sentence_settings: TopicSentenceSettings,
         concl_section_settings: ConclSectionSettings,
+        translate_settings: TranslateSettings,
         editor_source_file: Path | None,
         on_source_change: Callable[[Path | None], None],
         on_save: Callable[
@@ -4958,6 +5601,7 @@ class SettingsWindow(Adw.ApplicationWindow):
                 ConclNoIssuesSettings,
                 TopicSentenceSettings,
                 ConclSectionSettings,
+                TranslateSettings,
             ],
             None,
         ],
@@ -4979,6 +5623,7 @@ class SettingsWindow(Adw.ApplicationWindow):
         self._concl_no_issues_settings = concl_no_issues_settings
         self._topic_sentence_settings = topic_sentence_settings
         self._concl_section_settings = concl_section_settings
+        self._translate_settings = translate_settings
         self._editor_source_file = editor_source_file
         self._prompt_editors: dict[str, PromptEditorWidgets] = {}
         self._prompt_row_keys: dict[Gtk.ListBoxRow, str] = {}
@@ -5057,6 +5702,7 @@ class SettingsWindow(Adw.ApplicationWindow):
             ("concl-no-issues", "Concl. No Issues", self._concl_no_issues_settings, DEFAULT_CONCL_NO_ISSUES_PROMPT),
             ("topic-sentence", "Topic Sentence", self._topic_sentence_settings, DEFAULT_TOPIC_SENTENCE_PROMPT),
             ("concl-section", "Concl. Section", self._concl_section_settings, DEFAULT_CONCL_SECTION_PROMPT),
+            ("translate", "Translate", self._translate_settings, DEFAULT_TRANSLATE_PROMPT),
         ]
         first_row: Gtk.ListBoxRow | None = None
         for key, title, settings, default_prompt in prompt_definitions:
@@ -5161,6 +5807,7 @@ class SettingsWindow(Adw.ApplicationWindow):
         concl_no_issues_widgets = self._prompt_editors.get("concl-no-issues")
         topic_sentence_widgets = self._prompt_editors.get("topic-sentence")
         concl_section_widgets = self._prompt_editors.get("concl-section")
+        translate_widgets = self._prompt_editors.get("translate")
         if not all(
             (
                 proof_widgets,
@@ -5177,6 +5824,7 @@ class SettingsWindow(Adw.ApplicationWindow):
                 concl_no_issues_widgets,
                 topic_sentence_widgets,
                 concl_section_widgets,
+                translate_widgets,
             )
         ):
             return
@@ -5195,6 +5843,7 @@ class SettingsWindow(Adw.ApplicationWindow):
         concl_no_issues_prompt_text = self._prompt_text(concl_no_issues_widgets.prompt_buffer)
         topic_sentence_prompt_text = self._prompt_text(topic_sentence_widgets.prompt_buffer)
         concl_section_prompt_text = self._prompt_text(concl_section_widgets.prompt_buffer)
+        translate_prompt_text = self._prompt_text(translate_widgets.prompt_buffer)
         proof_settings = ProofreadSettings(
             api_url=proof_widgets.api_url_row.get_text().strip(),
             model_id=proof_widgets.model_row.get_text().strip(),
@@ -5309,6 +5958,14 @@ class SettingsWindow(Adw.ApplicationWindow):
             deepseek_reasoning=bool(concl_section_widgets.deepseek_reasoning_row.get_active()),
             prompt=concl_section_prompt_text.strip() or DEFAULT_CONCL_SECTION_PROMPT,
         )
+        translate_settings = TranslateSettings(
+            api_url=translate_widgets.api_url_row.get_text().strip(),
+            model_id=translate_widgets.model_row.get_text().strip(),
+            api_key=translate_widgets.api_key_row.get_text().strip(),
+            kimi_reasoning=bool(translate_widgets.kimi_reasoning_row.get_active()),
+            deepseek_reasoning=bool(translate_widgets.deepseek_reasoning_row.get_active()),
+            prompt=translate_prompt_text.strip() or DEFAULT_TRANSLATE_PROMPT,
+        )
         self._on_save(
             proof_settings,
             spelling_settings,
@@ -5324,6 +5981,7 @@ class SettingsWindow(Adw.ApplicationWindow):
             concl_no_issues_settings,
             topic_sentence_settings,
             concl_section_settings,
+            translate_settings,
         )
         self.close()
 
@@ -5353,6 +6011,7 @@ class SettingsWindow(Adw.ApplicationWindow):
             | ConclNoIssuesSettings
             | TopicSentenceSettings
             | ConclSectionSettings
+            | TranslateSettings
         ),
         default_prompt: str,
     ) -> Gtk.Widget:
@@ -5505,6 +6164,7 @@ class EditorCommandsWindow(Adw.ApplicationWindow):
             ("Reference Lookup", "reference-lookup", None, "Look up a definition for the selected text."),
             ("Focus Ask Field", "focus-ask", None, "Focus the Ask question field in the Editor view."),
             ("Wrap Selection in Quotes", "transform-wrap-quotes", None, "Wrap selected text in curly quotes."),
+            ("Translate Document", "transform-translate", None, "Translate the full Writer document into Spanish."),
             ("Create Topic Sentence", "transform-topic-sentence", None, "Generate a topic sentence from a paragraph."),
             ("Create Concl. Section", "transform-concl-section", None, "Summarize the current section."),
             ("Add Case", "add-case", None, "Add selected case citation to concordance and AutoText."),
