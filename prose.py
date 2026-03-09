@@ -3,8 +3,12 @@
 from __future__ import annotations
 
 import json
+import importlib
+import os
 import re
+import shutil
 import subprocess
+import sys
 import threading
 import time
 import urllib.error
@@ -20,15 +24,12 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Adw, Gdk, Gio, GLib, Gtk, Pango  # type: ignore
 
-try:
-    import uno  # type: ignore
-    from com.sun.star.beans import PropertyValue  # type: ignore
-    from com.sun.star.connection import NoConnectException  # type: ignore
-    from com.sun.star.frame import XModel  # type: ignore
-    from com.sun.star.text import ControlCharacter, XTextDocument  # type: ignore
-except Exception:  # noqa: BLE001
-    uno = None  # type: ignore
-    ControlCharacter = None  # type: ignore[assignment]
+uno = None  # type: ignore
+PropertyValue = None  # type: ignore[assignment]
+NoConnectException = Exception  # type: ignore[assignment]
+XModel = None  # type: ignore[assignment]
+ControlCharacter = None  # type: ignore[assignment]
+XTextDocument = None  # type: ignore[assignment]
 
 
 APP_ID = "com.mcglaw.Prose"
@@ -102,6 +103,7 @@ CONFIG_KEY_TRANSLATE_API_KEY = "translate_api_key"
 CONFIG_KEY_TRANSLATE_PROMPT = "translate_prompt"
 CONFIG_KEY_EDITOR_SOURCE_FILE = "editor_source_file"
 CONFIG_KEY_LAST_ODT_FILE = "last_odt_file"
+CONFIG_KEY_LIBREOFFICE_PYTHON_PATH = "libreoffice_python_path"
 
 DEFAULT_PROMPT = (
     "You are a meticulous legal proofreader. Improve clarity, fix grammar, and preserve legal meaning. "
@@ -155,8 +157,19 @@ DEFAULT_TRANSLATE_PROMPT = (
 )
 
 LIBREOFFICE_PROFILE = Path.home() / ".config" / "libreoffice-prose-profile"
+DEFAULT_NORMAL_LIBREOFFICE_PROFILE = Path.home() / ".config" / "libreoffice" / "4"
 UNO_BRIDGE_URL = "uno:socket,host=127.0.0.1,port=2004;urp;StarOffice.ComponentContext"
 SOFFICE_PATH = Path("/usr/lib/libreoffice/program/soffice")
+DEFAULT_LIBREOFFICE_PYTHON_PATH = Path("/usr/lib/libreoffice/program")
+LIBREOFFICE_PYTHON_CANDIDATES = (
+    Path("/usr/lib64/libreoffice/program"),
+    Path("/usr/lib/libreoffice/program"),
+    Path("/opt/libreoffice/program"),
+    Path("/opt/libreoffice7.6/program"),
+    Path("/opt/libreoffice7.5/program"),
+    Path("/Applications/LibreOffice.app/Contents/Resources"),
+    Path("/Applications/LibreOffice.app/Contents/MacOS"),
+)
 SPELLING_OUTPUT_FONT_SIZE_PX = 18
 SPELLING_OUTPUT_PADDING_PX = 12
 SPELLING_OUTPUT_CORNER_RADIUS_PX = 10
@@ -197,6 +210,12 @@ OBSOLETE_REASONING_CONFIG_KEYS = (
     "translate_deepseek_reasoning",
 )
 
+_UNO_BOOTSTRAPPED = False
+_UNO_IMPORT_ERROR: str | None = None
+_UNO_IMPORT_SOURCE = "uninitialized"
+_UNO_IMPORT_PATH: Path | None = None
+_UNO_ATTEMPTED_PATHS: list[Path] = []
+
 
 def _read_config() -> dict[str, Any]:
     if not CONFIG_FILE.exists():
@@ -214,6 +233,148 @@ def _write_config(data: dict[str, Any]) -> None:
         CONFIG_FILE.write_text(json.dumps(data, indent=2), encoding="utf-8")
     except OSError:
         pass
+
+
+def _normal_libreoffice_profile_path() -> Path:
+    root = DEFAULT_NORMAL_LIBREOFFICE_PROFILE.expanduser().resolve(strict=False)
+    user_dir = root / "user"
+    if user_dir.exists():
+        return root
+    legacy_user_dir = Path.home() / ".config" / "libreoffice"
+    if (legacy_user_dir / "user").exists():
+        return legacy_user_dir.expanduser().resolve(strict=False)
+    return root
+
+
+def load_libreoffice_python_path() -> Path | None:
+    raw = _read_config()
+    path = raw.get(CONFIG_KEY_LIBREOFFICE_PYTHON_PATH)
+    if isinstance(path, str) and path.strip():
+        return Path(path).expanduser().resolve(strict=False)
+    return DEFAULT_LIBREOFFICE_PYTHON_PATH
+
+
+def save_libreoffice_python_path(path: Path | None) -> None:
+    data = _read_config()
+    if path:
+        data[CONFIG_KEY_LIBREOFFICE_PYTHON_PATH] = str(path.expanduser().resolve(strict=False))
+    else:
+        data.pop(CONFIG_KEY_LIBREOFFICE_PYTHON_PATH, None)
+    _write_config(data)
+
+
+def _candidate_uno_paths(configured_path: Path | None = None) -> list[Path]:
+    seen: set[Path] = set()
+    candidates: list[Path] = []
+
+    def _add(path: Path | None) -> None:
+        if not path:
+            return
+        resolved = path.expanduser().resolve(strict=False)
+        if resolved in seen:
+            return
+        seen.add(resolved)
+        candidates.append(resolved)
+
+    _add(configured_path)
+
+    env_pythonpath = os.environ.get("PYTHONPATH", "")
+    for raw in env_pythonpath.split(os.pathsep):
+        if raw.strip():
+            _add(Path(raw.strip()))
+
+    soffice_dir = SOFFICE_PATH.parent
+    if SOFFICE_PATH.exists():
+        _add(soffice_dir)
+
+    for candidate in LIBREOFFICE_PYTHON_CANDIDATES:
+        _add(candidate)
+
+    return candidates
+
+
+def _import_uno_from_candidates(configured_path: Path | None = None, *, force_retry: bool = False) -> bool:
+    global _UNO_BOOTSTRAPPED, _UNO_IMPORT_ERROR, _UNO_IMPORT_SOURCE, _UNO_IMPORT_PATH, _UNO_ATTEMPTED_PATHS
+    global uno, PropertyValue, NoConnectException, XModel, ControlCharacter, XTextDocument
+
+    if _UNO_BOOTSTRAPPED and not force_retry and uno is not None:
+        return True
+
+    _UNO_BOOTSTRAPPED = True
+    _UNO_IMPORT_ERROR = None
+    _UNO_IMPORT_SOURCE = "direct"
+    _UNO_IMPORT_PATH = None
+    _UNO_ATTEMPTED_PATHS = []
+
+    try:
+        importlib.invalidate_caches()
+        uno = importlib.import_module("uno")  # type: ignore[assignment]
+        from com.sun.star.beans import PropertyValue as _PropertyValue  # type: ignore
+        from com.sun.star.connection import NoConnectException as _NoConnectException  # type: ignore
+        from com.sun.star.frame import XModel as _XModel  # type: ignore
+        from com.sun.star.text import ControlCharacter as _ControlCharacter, XTextDocument as _XTextDocument  # type: ignore
+
+        PropertyValue = _PropertyValue  # type: ignore[assignment]
+        NoConnectException = _NoConnectException  # type: ignore[assignment]
+        XModel = _XModel  # type: ignore[assignment]
+        ControlCharacter = _ControlCharacter  # type: ignore[assignment]
+        XTextDocument = _XTextDocument  # type: ignore[assignment]
+        return True
+    except Exception as exc:  # noqa: BLE001
+        _UNO_IMPORT_ERROR = str(exc) or exc.__class__.__name__
+
+    for candidate in _candidate_uno_paths(configured_path):
+        _UNO_ATTEMPTED_PATHS.append(candidate)
+        uno_py = candidate / "uno.py"
+        uno_pkg = candidate / "uno"
+        if not uno_py.exists() and not uno_pkg.exists():
+            continue
+        candidate_str = str(candidate)
+        if candidate_str not in sys.path:
+            sys.path.append(candidate_str)
+        try:
+            importlib.invalidate_caches()
+            sys.modules.pop("uno", None)
+            uno = importlib.import_module("uno")  # type: ignore[assignment]
+            from com.sun.star.beans import PropertyValue as _PropertyValue  # type: ignore
+            from com.sun.star.connection import NoConnectException as _NoConnectException  # type: ignore
+            from com.sun.star.frame import XModel as _XModel  # type: ignore
+            from com.sun.star.text import ControlCharacter as _ControlCharacter, XTextDocument as _XTextDocument  # type: ignore
+
+            PropertyValue = _PropertyValue  # type: ignore[assignment]
+            NoConnectException = _NoConnectException  # type: ignore[assignment]
+            XModel = _XModel  # type: ignore[assignment]
+            ControlCharacter = _ControlCharacter  # type: ignore[assignment]
+            XTextDocument = _XTextDocument  # type: ignore[assignment]
+            _UNO_IMPORT_SOURCE = "configured" if configured_path and candidate == configured_path.resolve(strict=False) else "auto"
+            _UNO_IMPORT_PATH = candidate
+            _UNO_IMPORT_ERROR = None
+            return True
+        except Exception as exc:  # noqa: BLE001
+            _UNO_IMPORT_ERROR = str(exc) or exc.__class__.__name__
+
+    uno = None  # type: ignore[assignment]
+    PropertyValue = None  # type: ignore[assignment]
+    NoConnectException = Exception  # type: ignore[assignment]
+    XModel = None  # type: ignore[assignment]
+    ControlCharacter = None  # type: ignore[assignment]
+    XTextDocument = None  # type: ignore[assignment]
+    return False
+
+
+def _uno_status_message(configured_path: Path | None = None) -> str:
+    if uno is not None:
+        if _UNO_IMPORT_SOURCE == "configured" and _UNO_IMPORT_PATH:
+            return f"python-uno loaded from configured path: {_UNO_IMPORT_PATH}"
+        if _UNO_IMPORT_SOURCE == "auto" and _UNO_IMPORT_PATH:
+            return f"python-uno auto-detected at {_UNO_IMPORT_PATH}"
+        return "python-uno available."
+
+    if configured_path:
+        return f"python-uno unavailable. Configured path not usable: {configured_path}"
+    if _UNO_ATTEMPTED_PATHS:
+        return "python-uno unavailable. Set a LibreOffice Python path in Settings."
+    return "python-uno unavailable."
 
 def _action_command(
     action_name: str,
@@ -813,6 +974,8 @@ class ProseApp(Adw.Application):
 class ProseWindow(Adw.ApplicationWindow):
     def __init__(self, app: ProseApp) -> None:
         super().__init__(application=app, title=APP_NAME, default_width=920, default_height=680)
+        self._libreoffice_python_path = load_libreoffice_python_path()
+        _import_uno_from_candidates(self._libreoffice_python_path)
         self._proof_settings = load_proofread_settings()
         self._spelling_settings = load_spellingstyle_settings()
         self._improve1_settings = load_improve1_settings()
@@ -1292,8 +1455,10 @@ class ProseWindow(Adw.ApplicationWindow):
             self._topic_sentence_settings,
             self._concl_section_settings,
             self._translate_settings,
+            self._libreoffice_python_path,
             self._editor_source_file,
             self._on_editor_source_file_updated,
+            self._copy_normal_profile_to_prose,
             self._on_settings_saved,
         )
         win.connect("close-request", self._on_settings_closed)
@@ -1324,6 +1489,7 @@ class ProseWindow(Adw.ApplicationWindow):
         topic_sentence_settings: TopicSentenceSettings,
         concl_section_settings: ConclSectionSettings,
         translate_settings: TranslateSettings,
+        libreoffice_python_path: Path | None,
     ) -> None:
         self._proof_settings = proof_settings
         self._spelling_settings = spelling_settings
@@ -1340,6 +1506,7 @@ class ProseWindow(Adw.ApplicationWindow):
         self._topic_sentence_settings = topic_sentence_settings
         self._concl_section_settings = concl_section_settings
         self._translate_settings = translate_settings
+        self._libreoffice_python_path = libreoffice_python_path.expanduser().resolve(strict=False) if libreoffice_python_path else None
         save_proofread_settings(proof_settings)
         save_spellingstyle_settings(spelling_settings)
         save_improve1_settings(improve1_settings)
@@ -1355,6 +1522,11 @@ class ProseWindow(Adw.ApplicationWindow):
         save_topic_sentence_settings(topic_sentence_settings)
         save_concl_section_settings(concl_section_settings)
         save_translate_settings(translate_settings)
+        save_libreoffice_python_path(self._libreoffice_python_path)
+        _import_uno_from_candidates(self._libreoffice_python_path, force_retry=True)
+        self._ctx = None
+        self._desktop = None
+        self._update_uno_status()
 
     def _on_settings_closed(self, _window: Gtk.Window) -> bool:
         self._settings_window = None
@@ -1413,6 +1585,61 @@ class ProseWindow(Adw.ApplicationWindow):
         if self._settings_window:
             self._settings_window.set_source_file(self._editor_source_file)
         save_editor_source_file(self._editor_source_file)
+
+    def _copy_normal_profile_to_prose(self) -> tuple[bool, str]:
+        source = _normal_libreoffice_profile_path()
+        target = LIBREOFFICE_PROFILE.expanduser().resolve(strict=False)
+        if not source.exists():
+            return False, f"Normal LibreOffice profile not found: {source}"
+        if not (source / "user").exists():
+            return False, f"LibreOffice profile is missing its user directory: {source}"
+        try:
+            same_profile = source.samefile(target)
+        except OSError:
+            same_profile = source == target
+        if same_profile:
+            return False, "Normal and Prose LibreOffice profiles are the same path."
+        stopped, stop_message = self._stop_listener_for_profile_copy()
+        if not stopped:
+            return False, stop_message
+        backup_path: Path | None = None
+        try:
+            if target.exists():
+                stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+                backup_path = target.with_name(f"{target.name}.backup-{stamp}")
+                shutil.move(str(target), str(backup_path))
+            shutil.copytree(source, target)
+            self._ctx = None
+            self._desktop = None
+            self._active_doc = None
+            return True, "Copied normal LibreOffice profile into Prose."
+        except Exception as exc:  # noqa: BLE001
+            try:
+                if target.exists():
+                    shutil.rmtree(target)
+                if backup_path and backup_path.exists():
+                    shutil.move(str(backup_path), str(target))
+            except Exception:
+                pass
+            return False, f"Unable to copy LibreOffice profile: {exc}"
+
+    def _stop_listener_for_profile_copy(self, timeout: float = 5.0) -> tuple[bool, str]:
+        self._ctx = None
+        self._desktop = None
+        self._active_doc = None
+        proc = self._listener_proc
+        if not proc or proc.poll() is not None:
+            self._listener_proc = None
+            return True, ""
+        try:
+            proc.terminate()
+            proc.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            return False, "Close the Prose LibreOffice window, then try profile copy again."
+        except Exception as exc:  # noqa: BLE001
+            return False, f"Unable to stop LibreOffice before copying profile: {exc}"
+        self._listener_proc = None
+        return True, ""
 
     def _on_next_four_clicked(self, _button: Gtk.Button) -> None:
         start = int(self._start_spin.get_value())
@@ -2611,6 +2838,7 @@ class ProseWindow(Adw.ApplicationWindow):
 
     def _get_desktop(self):
         if uno is None:
+            self._status_label.set_label(_uno_status_message(self._libreoffice_python_path))
             return None
         if self._desktop is not None:
             return self._desktop
@@ -2879,7 +3107,10 @@ class ProseWindow(Adw.ApplicationWindow):
     def _launch_writer_document(self, path: Path) -> None:
         desktop = self._get_desktop()
         if not desktop:
-            self._show_toast("LibreOffice listener unavailable; cannot open document.")
+            if uno is None:
+                self._show_toast("python-uno unavailable. Set the LibreOffice Python path in Settings.")
+            else:
+                self._show_toast("LibreOffice listener unavailable; cannot open document.")
             return
         try:
             url = uno.systemPathToFileUrl(str(path))
@@ -5292,7 +5523,7 @@ class ProseWindow(Adw.ApplicationWindow):
 
     def _update_uno_status(self) -> None:
         if uno is None:
-            self._status_label.set_label("python-uno not available.")
+            self._status_label.set_label(_uno_status_message(self._libreoffice_python_path))
             return
         self._get_desktop()
 
@@ -5316,8 +5547,10 @@ class SettingsWindow(Adw.ApplicationWindow):
         topic_sentence_settings: TopicSentenceSettings,
         concl_section_settings: ConclSectionSettings,
         translate_settings: TranslateSettings,
+        libreoffice_python_path: Path | None,
         editor_source_file: Path | None,
         on_source_change: Callable[[Path | None], None],
+        on_copy_normal_profile: Callable[[], tuple[bool, str]],
         on_save: Callable[
             [
                 ProofreadSettings,
@@ -5335,13 +5568,16 @@ class SettingsWindow(Adw.ApplicationWindow):
                 TopicSentenceSettings,
                 ConclSectionSettings,
                 TranslateSettings,
+                Path | None,
             ],
             None,
         ],
     ) -> None:
         super().__init__(application=parent.get_application(), title="Settings")
+        self._parent_window = parent
         self._on_save = on_save
         self._on_source_change = on_source_change
+        self._on_copy_normal_profile = on_copy_normal_profile
         self._proof_settings = proof_settings
         self._spelling_settings = spelling_settings
         self._improve1_settings = improve1_settings
@@ -5357,10 +5593,12 @@ class SettingsWindow(Adw.ApplicationWindow):
         self._topic_sentence_settings = topic_sentence_settings
         self._concl_section_settings = concl_section_settings
         self._translate_settings = translate_settings
+        self._libreoffice_python_path = libreoffice_python_path
         self._editor_source_file = editor_source_file
         self._prompt_editors: dict[str, PromptEditorWidgets] = {}
         self._prompt_row_keys: dict[Gtk.ListBoxRow, str] = {}
         self._source_row_guard = False
+        self._libreoffice_path_row_guard = False
         self.set_default_size(900, 720)
         self.set_resizable(True)
         self._build_ui()
@@ -5394,6 +5632,47 @@ class SettingsWindow(Adw.ApplicationWindow):
         source_row.add_suffix(choose_btn)
         source_group.add(source_row)
         self._source_row = source_row
+
+        libreoffice_row = Adw.EntryRow(title="LibreOffice Python path")
+        libreoffice_row.set_hexpand(True)
+        libreoffice_row.set_text(str(self._libreoffice_python_path or ""))
+        libreoffice_row.connect("changed", self._on_libreoffice_path_row_changed)
+        libreoffice_choose_btn = Gtk.Button(label="Choose")
+        libreoffice_choose_btn.add_css_class("flat")
+        libreoffice_choose_btn.connect("clicked", self._on_choose_libreoffice_path)
+        libreoffice_clear_btn = Gtk.Button(label="Clear")
+        libreoffice_clear_btn.add_css_class("flat")
+        libreoffice_clear_btn.connect("clicked", self._on_clear_libreoffice_path)
+        libreoffice_row.add_suffix(libreoffice_choose_btn)
+        libreoffice_row.add_suffix(libreoffice_clear_btn)
+        source_group.add(libreoffice_row)
+        self._libreoffice_path_row = libreoffice_row
+
+        libreoffice_hint = Gtk.Label(
+            label="Optional. Point this at LibreOffice's Python bridge directory, usually .../libreoffice/program.",
+            xalign=0,
+        )
+        libreoffice_hint.add_css_class("dim-label")
+        libreoffice_hint.set_wrap(True)
+        source_group.add(libreoffice_hint)
+
+        profile_row = Adw.ActionRow(
+            title="LibreOffice Profile Import",
+            subtitle=f"Copy {_normal_libreoffice_profile_path()} into {LIBREOFFICE_PROFILE}.",
+        )
+        profile_copy_btn = Gtk.Button(label="Copy Normal Profile to Prose")
+        profile_copy_btn.add_css_class("flat")
+        profile_copy_btn.connect("clicked", self._on_copy_normal_profile_clicked)
+        profile_row.add_suffix(profile_copy_btn)
+        source_group.add(profile_row)
+
+        profile_hint = Gtk.Label(
+            label="Overwrites the Prose LibreOffice profile after confirmation. Close any Prose Writer window first.",
+            xalign=0,
+        )
+        profile_hint.add_css_class("dim-label")
+        profile_hint.set_wrap(True)
+        source_group.add(profile_hint)
 
         split = Gtk.Paned(orientation=Gtk.Orientation.HORIZONTAL)
         split.set_hexpand(True)
@@ -5521,6 +5800,67 @@ class SettingsWindow(Adw.ApplicationWindow):
         self._source_row_guard = False
         if notify:
             self._on_source_change(self._editor_source_file)
+
+    def _on_choose_libreoffice_path(self, _button: Gtk.Button) -> None:
+        dialog = Gtk.FileDialog(title="Choose LibreOffice Python directory")
+        dialog.select_folder(self, None, self._on_libreoffice_path_chosen)
+
+    def _on_libreoffice_path_chosen(self, dialog: Gtk.FileDialog, result: Gio.AsyncResult) -> None:  # noqa: D401
+        try:
+            file = dialog.select_folder_finish(result)
+            path = Path(file.get_path() or "")
+        except Exception:
+            return
+        if not path:
+            return
+        self._set_libreoffice_python_path(path)
+
+    def _on_clear_libreoffice_path(self, _button: Gtk.Button) -> None:
+        self._set_libreoffice_python_path(None)
+
+    def _on_libreoffice_path_row_changed(self, row: Adw.EntryRow) -> None:
+        if self._libreoffice_path_row_guard:
+            return
+        raw = row.get_text().strip()
+        if not raw:
+            self._set_libreoffice_python_path(None)
+            return
+        self._set_libreoffice_python_path(Path(raw))
+
+    def _set_libreoffice_python_path(self, path: Path | None) -> None:
+        self._libreoffice_python_path = path.expanduser().resolve(strict=False) if path else None
+        self._libreoffice_path_row_guard = True
+        self._libreoffice_path_row.set_text(str(self._libreoffice_python_path or ""))
+        self._libreoffice_path_row_guard = False
+
+    def _on_copy_normal_profile_clicked(self, _button: Gtk.Button) -> None:
+        source = _normal_libreoffice_profile_path()
+        target = LIBREOFFICE_PROFILE
+        dialog = Adw.MessageDialog.new(
+            self,
+            "Copy normal LibreOffice profile?",
+            (
+                f"This replaces the Prose LibreOffice profile.\n\n"
+                f"Source: {source}\n"
+                f"Target: {target}\n\n"
+                "Any Prose-specific LibreOffice settings in the target profile will be lost."
+            ),
+        )
+        dialog.add_response("cancel", "Cancel")
+        dialog.add_response("copy", "Copy Profile")
+        dialog.set_response_appearance("copy", Adw.ResponseAppearance.DESTRUCTIVE)
+        dialog.set_default_response("cancel")
+        dialog.set_close_response("cancel")
+        dialog.connect("response", self._on_copy_normal_profile_response)
+        dialog.present()
+
+    def _on_copy_normal_profile_response(self, _dialog: Adw.MessageDialog, response: str) -> None:
+        if response != "copy":
+            return
+        ok, message = self._on_copy_normal_profile()
+        self._parent_window._show_toast(message)
+        if ok:
+            self._parent_window._status_label.set_label("LibreOffice profile imported. Launch Writer to use it.")
 
     def trigger_save(self) -> None:
         self._on_save_clicked(None)
@@ -5685,6 +6025,7 @@ class SettingsWindow(Adw.ApplicationWindow):
             topic_sentence_settings,
             concl_section_settings,
             translate_settings,
+            self._libreoffice_python_path,
         )
         self.close()
 
