@@ -1,6 +1,6 @@
 # Prose
 
-![Prose icon](prose.png)
+<img src="prose.png" alt="Prose" width="128" align="left">
 
 Prose is a GTK4/Libadwaita desktop application for AI-assisted editing inside LibreOffice Writer. It connects to a local LibreOffice Writer process through the UNO bridge, opens Writer documents in a dedicated Prose LibreOffice profile, and runs prompt-driven tools such as proofreading, SpellingStyle, shorten, translate, reference lookup, and related editing helpers.
 
