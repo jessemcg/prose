@@ -104,6 +104,7 @@ CONFIG_KEY_TRANSLATE_PROMPT = "translate_prompt"
 CONFIG_KEY_EDITOR_SOURCE_FILE = "editor_source_file"
 CONFIG_KEY_LAST_ODT_FILE = "last_odt_file"
 CONFIG_KEY_LIBREOFFICE_PYTHON_PATH = "libreoffice_python_path"
+CONFIG_KEY_CONCORDANCE_FILE_PATH = "concordance_file_path"
 
 DEFAULT_PROMPT = (
     "You are a meticulous legal proofreader. Improve clarity, fix grammar, and preserve legal meaning. "
@@ -176,7 +177,6 @@ SPELLING_OUTPUT_CORNER_RADIUS_PX = 10
 REFERENCE_OUTPUT_FONT_SIZE_PX = SPELLING_OUTPUT_FONT_SIZE_PX
 TAVILY_MCP_SERVER_URL = "https://mcp.tavily.com/mcp"
 REFERENCE_URL_RE = re.compile(r"https?://[^\s)\]]+")
-CONCORDANCE_FILE = Path("/home/jesse/Dropbox/MCGLAW/CONCORDANCE/Concordance_File.sdi")
 OBSOLETE_REASONING_CONFIG_KEYS = (
     "proofread_kimi_reasoning",
     "proofread_deepseek_reasoning",
@@ -260,6 +260,23 @@ def save_libreoffice_python_path(path: Path | None) -> None:
         data[CONFIG_KEY_LIBREOFFICE_PYTHON_PATH] = str(path.expanduser().resolve(strict=False))
     else:
         data.pop(CONFIG_KEY_LIBREOFFICE_PYTHON_PATH, None)
+    _write_config(data)
+
+
+def load_concordance_file_path() -> Path | None:
+    raw = _read_config()
+    path = raw.get(CONFIG_KEY_CONCORDANCE_FILE_PATH)
+    if isinstance(path, str) and path.strip():
+        return Path(path).expanduser().resolve(strict=False)
+    return None
+
+
+def save_concordance_file_path(path: Path | None) -> None:
+    data = _read_config()
+    if path:
+        data[CONFIG_KEY_CONCORDANCE_FILE_PATH] = str(path.expanduser().resolve(strict=False))
+    else:
+        data.pop(CONFIG_KEY_CONCORDANCE_FILE_PATH, None)
     _write_config(data)
 
 
@@ -993,6 +1010,7 @@ class ProseWindow(Adw.ApplicationWindow):
         self._translate_settings = load_translate_settings()
         self._editor_source_file = load_editor_source_file()
         self._last_odt_path = load_last_odt_file()
+        self._concordance_file_path = load_concordance_file_path()
         self._ctx = None
         self._desktop = None
         self._active_doc = None
@@ -1456,6 +1474,7 @@ class ProseWindow(Adw.ApplicationWindow):
             self._concl_section_settings,
             self._translate_settings,
             self._libreoffice_python_path,
+            self._concordance_file_path,
             self._editor_source_file,
             self._on_editor_source_file_updated,
             self._copy_normal_profile_to_prose,
@@ -1490,6 +1509,7 @@ class ProseWindow(Adw.ApplicationWindow):
         concl_section_settings: ConclSectionSettings,
         translate_settings: TranslateSettings,
         libreoffice_python_path: Path | None,
+        concordance_file_path: Path | None,
     ) -> None:
         self._proof_settings = proof_settings
         self._spelling_settings = spelling_settings
@@ -1507,6 +1527,9 @@ class ProseWindow(Adw.ApplicationWindow):
         self._concl_section_settings = concl_section_settings
         self._translate_settings = translate_settings
         self._libreoffice_python_path = libreoffice_python_path.expanduser().resolve(strict=False) if libreoffice_python_path else None
+        self._concordance_file_path = (
+            concordance_file_path.expanduser().resolve(strict=False) if concordance_file_path else None
+        )
         save_proofread_settings(proof_settings)
         save_spellingstyle_settings(spelling_settings)
         save_improve1_settings(improve1_settings)
@@ -1523,6 +1546,7 @@ class ProseWindow(Adw.ApplicationWindow):
         save_concl_section_settings(concl_section_settings)
         save_translate_settings(translate_settings)
         save_libreoffice_python_path(self._libreoffice_python_path)
+        save_concordance_file_path(self._concordance_file_path)
         _import_uno_from_candidates(self._libreoffice_python_path, force_retry=True)
         self._ctx = None
         self._desktop = None
@@ -2573,6 +2597,10 @@ class ProseWindow(Adw.ApplicationWindow):
         return f"“{normalized}”"
 
     def _append_case_to_concordance(self, citation: str) -> None:
+        concordance_file = self._concordance_file_path
+        if not concordance_file:
+            raise FileNotFoundError("No concordance file configured.")
+        concordance_file.parent.mkdir(parents=True, exist_ok=True)
         short = re.sub(r" \(\d{4}\) ", ",supra, ", citation)
         short = re.sub(r"Cal\.App\.\d+[a-z]*.*", lambda m: m.group(0).split()[0], short)
         short = re.sub(r"Cal\.\d+[a-z]*.*", lambda m: m.group(0).split()[0], short)
@@ -2581,7 +2609,7 @@ class ProseWindow(Adw.ApplicationWindow):
             f"{citation};{citation};Cases;;0;0",
             f"{short};{citation};Cases;;0;0",
         ]
-        with CONCORDANCE_FILE.open("a", encoding="utf-8") as handle:
+        with concordance_file.open("a", encoding="utf-8") as handle:
             for line in lines:
                 handle.write("\n" + line)
 
@@ -5548,6 +5576,7 @@ class SettingsWindow(Adw.ApplicationWindow):
         concl_section_settings: ConclSectionSettings,
         translate_settings: TranslateSettings,
         libreoffice_python_path: Path | None,
+        concordance_file_path: Path | None,
         editor_source_file: Path | None,
         on_source_change: Callable[[Path | None], None],
         on_copy_normal_profile: Callable[[], tuple[bool, str]],
@@ -5568,6 +5597,7 @@ class SettingsWindow(Adw.ApplicationWindow):
                 TopicSentenceSettings,
                 ConclSectionSettings,
                 TranslateSettings,
+                Path | None,
                 Path | None,
             ],
             None,
@@ -5594,11 +5624,13 @@ class SettingsWindow(Adw.ApplicationWindow):
         self._concl_section_settings = concl_section_settings
         self._translate_settings = translate_settings
         self._libreoffice_python_path = libreoffice_python_path
+        self._concordance_file_path = concordance_file_path
         self._editor_source_file = editor_source_file
         self._prompt_editors: dict[str, PromptEditorWidgets] = {}
         self._prompt_row_keys: dict[Gtk.ListBoxRow, str] = {}
         self._source_row_guard = False
         self._libreoffice_path_row_guard = False
+        self._concordance_path_row_guard = False
         self.set_default_size(900, 720)
         self.set_resizable(True)
         self._build_ui()
@@ -5647,6 +5679,29 @@ class SettingsWindow(Adw.ApplicationWindow):
         libreoffice_row.add_suffix(libreoffice_clear_btn)
         source_group.add(libreoffice_row)
         self._libreoffice_path_row = libreoffice_row
+
+        concordance_row = Adw.EntryRow(title="Concordance file")
+        concordance_row.set_hexpand(True)
+        concordance_row.set_text(str(self._concordance_file_path or ""))
+        concordance_row.connect("changed", self._on_concordance_path_row_changed)
+        concordance_choose_btn = Gtk.Button(label="Choose")
+        concordance_choose_btn.add_css_class("flat")
+        concordance_choose_btn.connect("clicked", self._on_choose_concordance_file)
+        concordance_clear_btn = Gtk.Button(label="Clear")
+        concordance_clear_btn.add_css_class("flat")
+        concordance_clear_btn.connect("clicked", self._on_clear_concordance_file)
+        concordance_row.add_suffix(concordance_choose_btn)
+        concordance_row.add_suffix(concordance_clear_btn)
+        source_group.add(concordance_row)
+        self._concordance_path_row = concordance_row
+
+        concordance_hint = Gtk.Label(
+            label="Optional. Used by Add Case when appending citations to the concordance file.",
+            xalign=0,
+        )
+        concordance_hint.add_css_class("dim-label")
+        concordance_hint.set_wrap(True)
+        source_group.add(concordance_hint)
 
         libreoffice_hint = Gtk.Label(
             label="Optional. Point this at LibreOffice's Python bridge directory, usually .../libreoffice/program.",
@@ -5832,6 +5887,38 @@ class SettingsWindow(Adw.ApplicationWindow):
         self._libreoffice_path_row_guard = True
         self._libreoffice_path_row.set_text(str(self._libreoffice_python_path or ""))
         self._libreoffice_path_row_guard = False
+
+    def _on_choose_concordance_file(self, _button: Gtk.Button) -> None:
+        dialog = Gtk.FileDialog(title="Choose concordance file")
+        dialog.open(self, None, self._on_concordance_file_chosen)
+
+    def _on_concordance_file_chosen(self, dialog: Gtk.FileDialog, result: Gio.AsyncResult) -> None:  # noqa: D401
+        try:
+            file = dialog.open_finish(result)
+            path = Path(file.get_path() or "")
+        except Exception:
+            return
+        if not path:
+            return
+        self._set_concordance_file_path(path)
+
+    def _on_clear_concordance_file(self, _button: Gtk.Button) -> None:
+        self._set_concordance_file_path(None)
+
+    def _on_concordance_path_row_changed(self, row: Adw.EntryRow) -> None:
+        if self._concordance_path_row_guard:
+            return
+        raw = row.get_text().strip()
+        if not raw:
+            self._set_concordance_file_path(None)
+            return
+        self._set_concordance_file_path(Path(raw))
+
+    def _set_concordance_file_path(self, path: Path | None) -> None:
+        self._concordance_file_path = path.expanduser().resolve(strict=False) if path else None
+        self._concordance_path_row_guard = True
+        self._concordance_path_row.set_text(str(self._concordance_file_path or ""))
+        self._concordance_path_row_guard = False
 
     def _on_copy_normal_profile_clicked(self, _button: Gtk.Button) -> None:
         source = _normal_libreoffice_profile_path()
@@ -6026,6 +6113,7 @@ class SettingsWindow(Adw.ApplicationWindow):
             concl_section_settings,
             translate_settings,
             self._libreoffice_python_path,
+            self._concordance_file_path,
         )
         self.close()
 
