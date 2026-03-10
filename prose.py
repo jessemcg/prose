@@ -5665,69 +5665,41 @@ class SettingsWindow(Adw.ApplicationWindow):
         source_group.add(source_row)
         self._source_row = source_row
 
-        libreoffice_row = Adw.EntryRow(title="LibreOffice Python path")
-        libreoffice_row.set_hexpand(True)
-        libreoffice_row.set_text(str(self._libreoffice_python_path or ""))
-        libreoffice_row.connect("changed", self._on_libreoffice_path_row_changed)
-        libreoffice_choose_btn = Gtk.Button(label="Choose")
-        libreoffice_choose_btn.add_css_class("flat")
-        libreoffice_choose_btn.connect("clicked", self._on_choose_libreoffice_path)
-        libreoffice_clear_btn = Gtk.Button(label="Clear")
-        libreoffice_clear_btn.add_css_class("flat")
-        libreoffice_clear_btn.connect("clicked", self._on_clear_libreoffice_path)
-        libreoffice_row.add_suffix(libreoffice_choose_btn)
-        libreoffice_row.add_suffix(libreoffice_clear_btn)
+        libreoffice_row, libreoffice_entry = self._build_path_setting_row(
+            title="LibreOffice Python path",
+            value=str(self._libreoffice_python_path or ""),
+            info_text="Required. Point this at LibreOffice's Python bridge directory, usually .../libreoffice/program.",
+            on_changed=self._on_libreoffice_path_row_changed,
+            on_choose=self._on_choose_libreoffice_path,
+            on_clear=self._on_clear_libreoffice_path,
+        )
         source_group.add(libreoffice_row)
-        self._libreoffice_path_row = libreoffice_row
+        self._libreoffice_path_row = libreoffice_entry
 
-        concordance_row = Adw.EntryRow(title="Concordance file")
-        concordance_row.set_hexpand(True)
-        concordance_row.set_text(str(self._concordance_file_path or ""))
-        concordance_row.connect("changed", self._on_concordance_path_row_changed)
-        concordance_choose_btn = Gtk.Button(label="Choose")
-        concordance_choose_btn.add_css_class("flat")
-        concordance_choose_btn.connect("clicked", self._on_choose_concordance_file)
-        concordance_clear_btn = Gtk.Button(label="Clear")
-        concordance_clear_btn.add_css_class("flat")
-        concordance_clear_btn.connect("clicked", self._on_clear_concordance_file)
-        concordance_row.add_suffix(concordance_choose_btn)
-        concordance_row.add_suffix(concordance_clear_btn)
+        concordance_row, concordance_entry = self._build_path_setting_row(
+            title="Concordance file",
+            value=str(self._concordance_file_path or ""),
+            info_text="Optional. Used by Add Case when appending citations to the concordance file.",
+            on_changed=self._on_concordance_path_row_changed,
+            on_choose=self._on_choose_concordance_file,
+            on_clear=self._on_clear_concordance_file,
+        )
         source_group.add(concordance_row)
-        self._concordance_path_row = concordance_row
-
-        concordance_hint = Gtk.Label(
-            label="Optional. Used by Add Case when appending citations to the concordance file.",
-            xalign=0,
-        )
-        concordance_hint.add_css_class("dim-label")
-        concordance_hint.set_wrap(True)
-        source_group.add(concordance_hint)
-
-        libreoffice_hint = Gtk.Label(
-            label="Optional. Point this at LibreOffice's Python bridge directory, usually .../libreoffice/program.",
-            xalign=0,
-        )
-        libreoffice_hint.add_css_class("dim-label")
-        libreoffice_hint.set_wrap(True)
-        source_group.add(libreoffice_hint)
+        self._concordance_path_row = concordance_entry
 
         profile_row = Adw.ActionRow(
             title="LibreOffice Profile Import",
-            subtitle=f"Copy {_normal_libreoffice_profile_path()} into {LIBREOFFICE_PROFILE}.",
+            subtitle=(
+                f"Copy {_normal_libreoffice_profile_path()} into {LIBREOFFICE_PROFILE}.\n"
+                "Overwrites the Prose LibreOffice profile after confirmation. Close any Prose Writer window first."
+            ),
         )
+        profile_row.set_subtitle_lines(4)
         profile_copy_btn = Gtk.Button(label="Copy Normal Profile to Prose")
         profile_copy_btn.add_css_class("flat")
         profile_copy_btn.connect("clicked", self._on_copy_normal_profile_clicked)
         profile_row.add_suffix(profile_copy_btn)
         source_group.add(profile_row)
-
-        profile_hint = Gtk.Label(
-            label="Overwrites the Prose LibreOffice profile after confirmation. Close any Prose Writer window first.",
-            xalign=0,
-        )
-        profile_hint.add_css_class("dim-label")
-        profile_hint.set_wrap(True)
-        source_group.add(profile_hint)
 
         split = Gtk.Paned(orientation=Gtk.Orientation.HORIZONTAL)
         split.set_hexpand(True)
@@ -5848,6 +5820,59 @@ class SettingsWindow(Adw.ApplicationWindow):
             return
         self._set_editor_source_file(Path(raw), notify=True)
 
+    def _build_path_setting_row(
+        self,
+        title: str,
+        value: str,
+        info_text: str,
+        on_changed: Callable[[Gtk.Editable], None],
+        on_choose: Callable[[Gtk.Button], None],
+        on_clear: Callable[[Gtk.Button], None],
+    ) -> tuple[Adw.PreferencesRow, Gtk.Entry]:
+        row = Adw.PreferencesRow()
+        row.set_selectable(False)
+        row.set_activatable(False)
+
+        content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        content.set_margin_top(10)
+        content.set_margin_bottom(10)
+        content.set_margin_start(12)
+        content.set_margin_end(12)
+
+        title_label = Gtk.Label(label=title, xalign=0)
+        title_label.add_css_class("caption")
+        title_label.add_css_class("dim-label")
+        content.append(title_label)
+
+        entry_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        entry = Gtk.Entry()
+        entry.set_hexpand(True)
+        entry.set_text(value)
+        entry.connect("changed", on_changed)
+        entry_box.append(entry)
+
+        choose_btn = Gtk.Button(label="Choose")
+        choose_btn.add_css_class("flat")
+        choose_btn.connect("clicked", on_choose)
+        entry_box.append(choose_btn)
+
+        clear_btn = Gtk.Button(label="Clear")
+        clear_btn.add_css_class("flat")
+        clear_btn.connect("clicked", on_clear)
+        entry_box.append(clear_btn)
+
+        content.append(entry_box)
+
+        info_label = Gtk.Label(label=info_text, xalign=0)
+        info_label.add_css_class("caption")
+        info_label.add_css_class("dim-label")
+        info_label.set_wrap(True)
+        info_label.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
+        content.append(info_label)
+
+        row.set_child(content)
+        return row, entry
+
     def _set_editor_source_file(self, path: Path | None, notify: bool) -> None:
         self._editor_source_file = path.expanduser().resolve(strict=False) if path else None
         self._source_row_guard = True
@@ -5873,7 +5898,7 @@ class SettingsWindow(Adw.ApplicationWindow):
     def _on_clear_libreoffice_path(self, _button: Gtk.Button) -> None:
         self._set_libreoffice_python_path(None)
 
-    def _on_libreoffice_path_row_changed(self, row: Adw.EntryRow) -> None:
+    def _on_libreoffice_path_row_changed(self, row: Gtk.Editable) -> None:
         if self._libreoffice_path_row_guard:
             return
         raw = row.get_text().strip()
@@ -5905,7 +5930,7 @@ class SettingsWindow(Adw.ApplicationWindow):
     def _on_clear_concordance_file(self, _button: Gtk.Button) -> None:
         self._set_concordance_file_path(None)
 
-    def _on_concordance_path_row_changed(self, row: Adw.EntryRow) -> None:
+    def _on_concordance_path_row_changed(self, row: Gtk.Editable) -> None:
         if self._concordance_path_row_guard:
             return
         raw = row.get_text().strip()
