@@ -1040,6 +1040,7 @@ class ProseWindow(Adw.ApplicationWindow):
         self._combine_cites_cursor = None
         self._settings_window: SettingsWindow | None = None
         self._editor_commands_window: EditorCommandsWindow | None = None
+        self._shortcuts_window: Gtk.ShortcutsWindow | None = None
         self._build_ui()
         self._ensure_menu()
         self._register_actions()
@@ -1395,6 +1396,7 @@ class ProseWindow(Adw.ApplicationWindow):
         menu = Gio.Menu()
         menu.append("Settings", "app.settings")
         menu.append("Editor Commands", "app.editor-commands")
+        menu.append("Keyboard Shortcuts", "app.show-shortcuts")
         self._menu_button.set_menu_model(menu)
 
         action_settings = Gio.SimpleAction.new("settings", None)
@@ -1437,6 +1439,7 @@ class ProseWindow(Adw.ApplicationWindow):
         _add_action("request-changes", lambda: self._on_request_clicked(None))
         _add_action("view-last-json", lambda: self._on_view_json_clicked(None))
         _add_action("focus-ask", self._on_focus_ask)
+        _add_action("show-shortcuts", self._on_show_shortcuts)
         _add_action("save-settings", self._on_action_save_settings)
 
         goto_action = Gio.SimpleAction.new("suggestion-goto", GLib.VariantType.new("i"))
@@ -1452,6 +1455,40 @@ class ProseWindow(Adw.ApplicationWindow):
         app.add_action(reject_action)
 
         app.set_accels_for_action("app.focus-ask", ["<Ctrl><Shift>Q"])
+        app.set_accels_for_action("app.show-shortcuts", ["F1"])
+
+    def _build_shortcuts_window(self) -> Gtk.ShortcutsWindow:
+        if self._shortcuts_window is not None:
+            return self._shortcuts_window
+
+        window = Gtk.ShortcutsWindow(
+            transient_for=self,
+            modal=False,
+            hide_on_close=True,
+            title=f"{APP_NAME} Keyboard Shortcuts",
+        )
+        window.set_default_size(760, 420)
+
+        section = Gtk.ShortcutsSection(title="Keyboard Shortcuts")
+
+        editor_group = Gtk.ShortcutsGroup(title="Editor")
+        editor_group.append(
+            Gtk.ShortcutsShortcut(title="Focus Ask field", accelerator="<Primary><Shift>Q")
+        )
+        section.append(editor_group)
+
+        help_group = Gtk.ShortcutsGroup(title="Reference")
+        help_group.append(Gtk.ShortcutsShortcut(title="Show keyboard shortcuts", accelerator="F1"))
+        section.append(help_group)
+
+        window.add_section(section)
+        self._shortcuts_window = window
+        return window
+
+    def _on_show_shortcuts(self) -> None:
+        window = self._build_shortcuts_window()
+        window.set_transient_for(self)
+        window.present()
 
 
     # Actions ------------------------------------------------------------
