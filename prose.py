@@ -162,6 +162,18 @@ DEFAULT_TRANSLATE_PROMPT = (
 DEFAULT_RT_PREFIX = "2"
 DEFAULT_CT_PREFIX = "2"
 MAX_WORD_SUBSTITUTIONS = 3
+CITATION_NUMBER_WORDS = {
+    "zero": "0",
+    "one": "1",
+    "two": "2",
+    "three": "3",
+    "four": "4",
+    "five": "5",
+    "six": "6",
+    "seven": "7",
+    "eight": "8",
+    "nine": "9",
+}
 
 LIBREOFFICE_PROFILE = Path.home() / ".config" / "libreoffice-prose-profile"
 DEFAULT_NORMAL_LIBREOFFICE_PROFILE = Path.home() / ".config" / "libreoffice" / "4"
@@ -2023,9 +2035,37 @@ class ProseWindow(Adw.ApplicationWindow):
         self._set_busy(False)
         self._status_label.set_label(completed_text)
 
+    def _preprocess_citation_input(self, source_text: str) -> str:
+        normalized = source_text.lower()
+        for word, digit in CITATION_NUMBER_WORDS.items():
+            normalized = re.sub(rf"\b{word}\b", digit, normalized)
+        normalized = (
+            normalized.replace("\u00a0", " ")
+            .replace("\u202f", " ")
+            .replace("\u200a", " ")
+            .replace("\u200b", "")
+            .replace("\u3000", " ")
+        )
+        normalized = re.sub(r"(\d)\s*,\s*(\d)", r"\1\2", normalized)
+        while re.search(r"(\d)\s*,\s*(\d)", normalized):
+            normalized = re.sub(r"(\d)\s*,\s*(\d)", r"\1\2", normalized)
+        normalized = re.sub(r"(\d)\s*:\s*(\d)", r"\1\2", normalized)
+        normalized = re.sub(r"(\d)\s*\.\s*(\d)", r"\1\2", normalized)
+        normalized = re.sub(r"\$\s*(\d)", r"\1", normalized)
+        normalized = re.sub(r"\b(\d{1,5}) to (\d{1,5})\b", r"\1-\2", normalized)
+        normalized = normalized.replace(" – ", "-").replace(" - ", "-").replace(" -- ", "-")
+        normalized = re.sub(r"\sdash\s", "-", normalized)
+        normalized = re.sub(r"^\s*-\s*", "", normalized)
+        normalized = re.sub(r"(\d{1,5})\s*[–-]\s*(\d{1,5})", r"\1-\2", normalized)
+        normalized = re.sub(r"(\d{1,5})-(\d{1,5})", r"\1–\2", normalized)
+        normalized = re.sub(r"(\d)\s+(\d)", r"\1\2", normalized)
+        while re.search(r"(\d)\s+(\d)", normalized):
+            normalized = re.sub(r"(\d)\s+(\d)", r"\1\2", normalized)
+        return normalized
+
     def _normalize_citation_input(self, source_text: str) -> tuple[int, int | None] | None:
-        normalized = source_text.replace("—", "-").replace("–", "-")
-        match = re.search(r"(\d{1,5})(?:\s*-\s*(\d{1,5}))?", normalized)
+        normalized = self._preprocess_citation_input(source_text)
+        match = re.search(r"(\d{1,5})(?:\s*[–-]\s*(\d{1,5}))?", normalized)
         if not match:
             return None
         start = int(match.group(1))
@@ -2051,6 +2091,7 @@ class ProseWindow(Adw.ApplicationWindow):
         source_text = self._read_editor_source_text()
         if source_text is None:
             return
+        self._set_spelling_output_text(source_text)
         citation = self._build_prefixed_citation(label, prefix, source_text)
         if not citation:
             self._show_toast(f"No {label} page number found in source file.")
