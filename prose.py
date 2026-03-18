@@ -101,6 +101,9 @@ CONFIG_KEY_TRANSLATE_API_URL = "translate_api_url"
 CONFIG_KEY_TRANSLATE_MODEL_ID = "translate_model_id"
 CONFIG_KEY_TRANSLATE_API_KEY = "translate_api_key"
 CONFIG_KEY_TRANSLATE_PROMPT = "translate_prompt"
+CONFIG_KEY_RT_PREFIX = "rt_prefix"
+CONFIG_KEY_CT_PREFIX = "ct_prefix"
+CONFIG_KEY_WORD_SUBSTITUTIONS = "word_substitutions"
 CONFIG_KEY_EDITOR_SOURCE_FILE = "editor_source_file"
 CONFIG_KEY_LAST_ODT_FILE = "last_odt_file"
 CONFIG_KEY_LIBREOFFICE_PYTHON_PATH = "libreoffice_python_path"
@@ -156,6 +159,9 @@ DEFAULT_TRANSLATE_PROMPT = (
     "Translate the provided text into Spanish. Preserve meaning, tone, line breaks, numbering, and punctuation. "
     "Do not summarize and do not omit content."
 )
+DEFAULT_RT_PREFIX = "2"
+DEFAULT_CT_PREFIX = "2"
+MAX_WORD_SUBSTITUTIONS = 3
 
 LIBREOFFICE_PROFILE = Path.home() / ".config" / "libreoffice-prose-profile"
 DEFAULT_NORMAL_LIBREOFFICE_PROFILE = Path.home() / ".config" / "libreoffice" / "4"
@@ -637,6 +643,19 @@ class PromptEditorWidgets:
     ask_prompt_buffer: Gtk.TextBuffer | None
 
 
+@dataclass
+class WordSubstitution:
+    original: str
+    replacement: str
+
+
+@dataclass
+class PrefixSettings:
+    rt_prefix: str
+    ct_prefix: str
+    substitutions: list[WordSubstitution]
+
+
 def load_proofread_settings() -> ProofreadSettings:
     raw = _read_config()
     return ProofreadSettings(
@@ -653,6 +672,41 @@ def save_proofread_settings(settings: ProofreadSettings) -> None:
     data[CONFIG_KEY_PROOFREAD_MODEL_ID] = settings.model_id
     data[CONFIG_KEY_PROOFREAD_API_KEY] = settings.api_key
     data[CONFIG_KEY_PROOFREAD_PROMPT] = settings.prompt or DEFAULT_PROMPT
+    _write_config(data)
+
+
+def _sanitize_word_substitutions(raw: Any) -> list[WordSubstitution]:
+    substitutions: list[WordSubstitution] = []
+    if isinstance(raw, list):
+        for item in raw[:MAX_WORD_SUBSTITUTIONS]:
+            if not isinstance(item, dict):
+                continue
+            original = str(item.get("original", "") or "").strip()
+            replacement = str(item.get("replacement", "") or "").strip()
+            substitutions.append(WordSubstitution(original=original, replacement=replacement))
+    while len(substitutions) < MAX_WORD_SUBSTITUTIONS:
+        substitutions.append(WordSubstitution(original="", replacement=""))
+    return substitutions
+
+
+def load_prefix_settings() -> PrefixSettings:
+    raw = _read_config()
+    substitutions = _sanitize_word_substitutions(raw.get(CONFIG_KEY_WORD_SUBSTITUTIONS))
+    return PrefixSettings(
+        rt_prefix=str(raw.get(CONFIG_KEY_RT_PREFIX, DEFAULT_RT_PREFIX) or "").strip(),
+        ct_prefix=str(raw.get(CONFIG_KEY_CT_PREFIX, DEFAULT_CT_PREFIX) or "").strip(),
+        substitutions=substitutions,
+    )
+
+
+def save_prefix_settings(settings: PrefixSettings) -> None:
+    data = _read_config()
+    data[CONFIG_KEY_RT_PREFIX] = settings.rt_prefix
+    data[CONFIG_KEY_CT_PREFIX] = settings.ct_prefix
+    data[CONFIG_KEY_WORD_SUBSTITUTIONS] = [
+        {"original": entry.original.strip(), "replacement": entry.replacement.strip()}
+        for entry in settings.substitutions[:MAX_WORD_SUBSTITUTIONS]
+    ]
     _write_config(data)
 
 
@@ -1008,6 +1062,7 @@ class ProseWindow(Adw.ApplicationWindow):
         self._topic_sentence_settings = load_topic_sentence_settings()
         self._concl_section_settings = load_concl_section_settings()
         self._translate_settings = load_translate_settings()
+        self._prefix_settings = load_prefix_settings()
         self._editor_source_file = load_editor_source_file()
         self._last_odt_path = load_last_odt_file()
         self._concordance_file_path = load_concordance_file_path()
@@ -1041,6 +1096,9 @@ class ProseWindow(Adw.ApplicationWindow):
         self._settings_window: SettingsWindow | None = None
         self._editor_commands_window: EditorCommandsWindow | None = None
         self._shortcuts_window: Gtk.ShortcutsWindow | None = None
+        self._rt_prefix_entry: Gtk.Entry | None = None
+        self._ct_prefix_entry: Gtk.Entry | None = None
+        self._substitution_rows: list[tuple[Gtk.Entry, Gtk.Entry]] = []
         self._build_ui()
         self._ensure_menu()
         self._register_actions()
@@ -1106,10 +1164,13 @@ class ProseWindow(Adw.ApplicationWindow):
 
         editor_panel = self._build_editor_panel()
         proof_panel = self._build_proof_panel()
+        prefixes_panel = self._build_prefixes_panel()
         editor_page = stack.add_titled(editor_panel, "editor", "Editor")
         editor_page.set_icon_name("document-edit-symbolic")
         proof_page = stack.add_titled(proof_panel, "proof", "Proof Reader")
         proof_page.set_icon_name("tools-check-spelling-symbolic")
+        prefixes_page = stack.add_titled(prefixes_panel, "prefixes", "Prefixes")
+        prefixes_page.set_icon_name("format-indent-more-symbolic")
         stack.set_visible_child_name("editor")
 
         top_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
@@ -1392,6 +1453,127 @@ class ProseWindow(Adw.ApplicationWindow):
         panel.append(scroller)
         return panel
 
+    def _build_prefixes_panel(self) -> Gtk.Widget:
+        panel = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+        panel.set_margin_top(6)
+        panel.set_margin_bottom(12)
+        panel.set_margin_start(18)
+        panel.set_margin_end(18)
+
+        intro = Gtk.Label(
+            label=(
+                "Manage the prefixes used by Input RT/Input CT and the temporary word substitutions "
+                "applied before direct input or SpellingStyle sends text to the first model."
+            ),
+            xalign=0,
+        )
+        intro.add_css_class("dim-label")
+        intro.set_wrap(True)
+        intro.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
+        panel.append(intro)
+
+        prefixes_group = Adw.PreferencesGroup(title="Citation Prefixes")
+        prefixes_group.add_css_class("list-stack")
+        panel.append(prefixes_group)
+
+        rt_row = Adw.PreferencesRow()
+        rt_row.set_selectable(False)
+        rt_row.set_activatable(False)
+        rt_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        rt_box.set_margin_top(10)
+        rt_box.set_margin_bottom(10)
+        rt_box.set_margin_start(12)
+        rt_box.set_margin_end(12)
+        rt_label = Gtk.Label(label="RT prefix", xalign=0)
+        rt_label.set_size_request(90, -1)
+        rt_box.append(rt_label)
+        rt_entry = Gtk.Entry()
+        rt_entry.set_hexpand(True)
+        rt_entry.set_text(self._prefix_settings.rt_prefix)
+        rt_box.append(rt_entry)
+        rt_row.set_child(rt_box)
+        prefixes_group.add(rt_row)
+        self._rt_prefix_entry = rt_entry
+
+        ct_row = Adw.PreferencesRow()
+        ct_row.set_selectable(False)
+        ct_row.set_activatable(False)
+        ct_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        ct_box.set_margin_top(10)
+        ct_box.set_margin_bottom(10)
+        ct_box.set_margin_start(12)
+        ct_box.set_margin_end(12)
+        ct_label = Gtk.Label(label="CT prefix", xalign=0)
+        ct_label.set_size_request(90, -1)
+        ct_box.append(ct_label)
+        ct_entry = Gtk.Entry()
+        ct_entry.set_hexpand(True)
+        ct_entry.set_text(self._prefix_settings.ct_prefix)
+        ct_box.append(ct_entry)
+        ct_row.set_child(ct_box)
+        prefixes_group.add(ct_row)
+        self._ct_prefix_entry = ct_entry
+
+        substitutions_group = Adw.PreferencesGroup(
+            title="Word Substitutions",
+            description="Any non-empty pair replaces every match before direct input or SpellingStyle runs.",
+        )
+        substitutions_group.add_css_class("list-stack")
+        panel.append(substitutions_group)
+
+        self._substitution_rows = []
+        for index in range(MAX_WORD_SUBSTITUTIONS):
+            current = self._prefix_settings.substitutions[index]
+            row = Adw.PreferencesRow()
+            row.set_selectable(False)
+            row.set_activatable(False)
+
+            row_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+            row_box.set_margin_top(10)
+            row_box.set_margin_bottom(10)
+            row_box.set_margin_start(12)
+            row_box.set_margin_end(12)
+
+            label = Gtk.Label(label=f"Pair {index + 1}", xalign=0)
+            label.set_size_request(56, -1)
+            row_box.append(label)
+
+            original_entry = Gtk.Entry()
+            original_entry.set_hexpand(True)
+            original_entry.set_placeholder_text("Original")
+            original_entry.set_text(current.original)
+            row_box.append(original_entry)
+
+            arrow = Gtk.Label(label="->", xalign=0.5)
+            arrow.add_css_class("dim-label")
+            row_box.append(arrow)
+
+            replacement_entry = Gtk.Entry()
+            replacement_entry.set_hexpand(True)
+            replacement_entry.set_placeholder_text("Replacement")
+            replacement_entry.set_text(current.replacement)
+            row_box.append(replacement_entry)
+
+            row.set_child(row_box)
+            substitutions_group.add(row)
+            self._substitution_rows.append((original_entry, replacement_entry))
+
+        buttons = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        buttons.set_halign(Gtk.Align.END)
+        save_btn = Gtk.Button(label="Save Prefixes")
+        save_btn.add_css_class("suggested-action")
+        save_btn.add_css_class("flat")
+        save_btn.set_action_name("app.save-prefixes")
+        buttons.append(save_btn)
+        panel.append(buttons)
+
+        scroller = Gtk.ScrolledWindow()
+        scroller.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        scroller.set_hexpand(True)
+        scroller.set_vexpand(True)
+        scroller.set_child(panel)
+        return scroller
+
     def _ensure_menu(self) -> None:
         menu = Gio.Menu()
         menu.append("Settings", "app.settings")
@@ -1416,10 +1598,13 @@ class ProseWindow(Adw.ApplicationWindow):
         _add_action("choose-source-file", lambda: self._on_choose_source_file(None))
         _add_action("editor-commands", lambda: self._on_open_editor_commands())
         _add_action("direct-input", lambda: self._on_direct_input_clicked(None))
+        _add_action("input-rt", lambda: self._on_input_rt_clicked(None))
+        _add_action("input-ct", lambda: self._on_input_ct_clicked(None))
         _add_action(
             "direct-input-no-trailing-space",
             lambda: self._on_direct_input_no_trailing_space_clicked(None),
         )
+        _add_action("save-prefixes", lambda: self._on_save_prefixes_clicked(None))
         _add_action("combine-cites", lambda: self._on_combine_cites_clicked(None))
         _add_action("spellingstyle", lambda: self._on_spellingstyle_clicked(None))
         _add_action("improve1", lambda: self._on_improve1_clicked(None))
@@ -1748,15 +1933,10 @@ class ProseWindow(Adw.ApplicationWindow):
         if self._spelling_settings.api_url.rstrip("/").endswith("/responses"):
             self._show_toast("SpellingStyle uses a chat endpoint. Update the API URL in Settings.")
             return
-        source_path = self._editor_source_file
-        if not source_path or not source_path.exists():
-            self._show_toast("Choose a source text file first.")
+        source_text = self._read_editor_source_text()
+        if source_text is None:
             return
-        try:
-            source_text = source_path.read_text(encoding="utf-8")
-        except OSError as exc:
-            self._show_toast(f"Unable to read source file: {exc}")
-            return
+        source_text = self._apply_word_substitutions(source_text)
         if not source_text.strip():
             self._show_toast("Source file is empty.")
             return
@@ -1780,15 +1960,36 @@ class ProseWindow(Adw.ApplicationWindow):
     def _run_direct_input(self, add_trailing_space: bool) -> None:
         if self._busy:
             return
+        source_text = self._read_editor_source_text()
+        if source_text is None:
+            return
+        source_text = self._apply_word_substitutions(source_text)
+        self._insert_text_into_writer(
+            source_text,
+            status_text="Inserting source text…",
+            completed_text="Source text inserted.",
+            add_trailing_space=add_trailing_space,
+        )
+
+    def _read_editor_source_text(self) -> str | None:
         source_path = self._editor_source_file
         if not source_path or not source_path.exists():
             self._show_toast("Choose a source text file first.")
-            return
+            return None
         try:
-            source_text = source_path.read_text(encoding="utf-8")
+            return source_path.read_text(encoding="utf-8")
         except OSError as exc:
             self._show_toast(f"Unable to read source file: {exc}")
-            return
+            return None
+
+    def _insert_text_into_writer(
+        self,
+        source_text: str,
+        *,
+        status_text: str,
+        completed_text: str,
+        add_trailing_space: bool,
+    ) -> None:
         if not source_text.strip():
             self._show_toast("Source file is empty.")
             return
@@ -1806,7 +2007,7 @@ class ProseWindow(Adw.ApplicationWindow):
         if source_text.startswith(" ") and self._get_preceding_char(doc) == " ":
             source_text = source_text.lstrip(" ")
         self._set_busy(True)
-        self._status_label.set_label("Inserting source text…")
+        self._status_label.set_label(status_text)
         self._append_editor_text(source_text)
         if self._editor_insert_doc and self._editor_insert_cursor:
             self._flush_pending_newlines(
@@ -1820,13 +2021,84 @@ class ProseWindow(Adw.ApplicationWindow):
                 self._trim_trailing_whitespace(self._editor_insert_doc, self._editor_insert_cursor)
         self._capture_spellingstyle_range_end()
         self._set_busy(False)
-        self._status_label.set_label("Source text inserted.")
+        self._status_label.set_label(completed_text)
+
+    def _normalize_citation_input(self, source_text: str) -> tuple[int, int | None] | None:
+        normalized = source_text.replace("—", "-").replace("–", "-")
+        match = re.search(r"(\d{1,5})(?:\s*-\s*(\d{1,5}))?", normalized)
+        if not match:
+            return None
+        start = int(match.group(1))
+        end = int(match.group(2)) if match.group(2) else None
+        if end is not None and end < start:
+            start, end = end, start
+        return start, end
+
+    def _build_prefixed_citation(self, label: str, prefix: str, source_text: str) -> str | None:
+        pages = self._normalize_citation_input(source_text)
+        if not pages:
+            return None
+        start, end = pages
+        prefix_text = "".join(ch for ch in prefix.strip() if ch.isdigit())
+        cite_label = f"{prefix_text}{label}"
+        if end is None:
+            return f"({cite_label} {start}.)"
+        return f"({cite_label} {start}\u2013{end}.)"
+
+    def _run_citation_input(self, label: str, prefix: str) -> None:
+        if self._busy:
+            return
+        source_text = self._read_editor_source_text()
+        if source_text is None:
+            return
+        citation = self._build_prefixed_citation(label, prefix, source_text)
+        if not citation:
+            self._show_toast(f"No {label} page number found in source file.")
+            return
+        self._insert_text_into_writer(
+            citation,
+            status_text=f"Inserting {label} citation…",
+            completed_text=f"{label} citation inserted.",
+            add_trailing_space=True,
+        )
 
     def _on_direct_input_clicked(self, _button: Gtk.Button) -> None:
         self._run_direct_input(add_trailing_space=True)
 
     def _on_direct_input_no_trailing_space_clicked(self, _button: Gtk.Button) -> None:
         self._run_direct_input(add_trailing_space=False)
+
+    def _on_input_rt_clicked(self, _button: Gtk.Button) -> None:
+        self._run_citation_input("RT", self._prefix_settings.rt_prefix)
+
+    def _on_input_ct_clicked(self, _button: Gtk.Button) -> None:
+        self._run_citation_input("CT", self._prefix_settings.ct_prefix)
+
+    def _apply_word_substitutions(self, source_text: str) -> str:
+        updated = source_text
+        for entry in self._prefix_settings.substitutions:
+            if not entry.original or not entry.replacement:
+                continue
+            updated = updated.replace(entry.original, entry.replacement)
+        return updated
+
+    def _collect_prefix_settings_from_ui(self) -> PrefixSettings:
+        substitutions: list[WordSubstitution] = []
+        for original_entry, replacement_entry in self._substitution_rows[:MAX_WORD_SUBSTITUTIONS]:
+            substitutions.append(
+                WordSubstitution(
+                    original=original_entry.get_text().strip(),
+                    replacement=replacement_entry.get_text().strip(),
+                )
+            )
+        rt_prefix = self._rt_prefix_entry.get_text().strip() if self._rt_prefix_entry else self._prefix_settings.rt_prefix
+        ct_prefix = self._ct_prefix_entry.get_text().strip() if self._ct_prefix_entry else self._prefix_settings.ct_prefix
+        return PrefixSettings(rt_prefix=rt_prefix, ct_prefix=ct_prefix, substitutions=substitutions)
+
+    def _on_save_prefixes_clicked(self, _button: Gtk.Button) -> None:
+        self._prefix_settings = self._collect_prefix_settings_from_ui()
+        save_prefix_settings(self._prefix_settings)
+        self._show_toast("Prefixes and substitutions saved.")
 
     def _on_combine_cites_clicked(self, _button: Gtk.Button) -> None:
         if self._busy:
@@ -6324,6 +6596,8 @@ class EditorCommandsWindow(Adw.ApplicationWindow):
         commands = [
             ("Launch Writer", "launch-writer", None, "Open a Writer document via UNO."),
             ("Direct Input", "direct-input", None, "Insert the source file text into Writer."),
+            ("Input RT", "input-rt", None, "Insert a formatted RT citation from the source file."),
+            ("Input CT", "input-ct", None, "Insert a formatted CT citation from the source file."),
             (
                 "Direct Input No Trailing Space",
                 "direct-input-no-trailing-space",
