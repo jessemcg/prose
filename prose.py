@@ -2059,6 +2059,9 @@ class ProseWindow(Adw.ApplicationWindow):
 
     # Actions ------------------------------------------------------------
     def _on_open_settings(self, *_args: object) -> None:
+        if self._settings_window:
+            self._settings_window.present()
+            return
         win = SettingsWindow(
             self,
             self._proof_settings,
@@ -6639,6 +6642,10 @@ class SettingsWindow(Adw.ApplicationWindow):
         buttons.set_margin_start(12)
         buttons.set_margin_end(12)
         buttons.set_halign(Gtk.Align.END)
+        close_btn = Gtk.Button(label="Close")
+        close_btn.add_css_class("flat")
+        close_btn.connect("clicked", self._on_close_clicked)
+        buttons.append(close_btn)
         save_btn = Gtk.Button(label="Save Settings")
         save_btn.add_css_class("suggested-action")
         save_btn.add_css_class("flat")
@@ -6911,6 +6918,9 @@ class SettingsWindow(Adw.ApplicationWindow):
     def trigger_save(self) -> None:
         self._on_save_clicked(None)
 
+    def _on_close_clicked(self, _button: Gtk.Button) -> None:
+        self.close()
+
     def _on_save_clicked(self, _button: Gtk.Button) -> None:
         proof_widgets = self._prompt_editors.get("proof")
         spelling_widgets = self._prompt_editors.get("spelling")
@@ -7102,7 +7112,7 @@ class SettingsWindow(Adw.ApplicationWindow):
             self._libreoffice_python_path,
             self._concordance_file_path,
         )
-        self.close()
+        self._parent_window._show_toast("Settings saved.")
 
     def _on_prompt_row_selected(self, _listbox: Gtk.ListBox, row: Gtk.ListBoxRow | None) -> None:
         if not row:
