@@ -42,65 +42,85 @@ CONFIG_KEY_PROOFREAD_API_URL = "api_url"
 CONFIG_KEY_PROOFREAD_MODEL_ID = "model_id"
 CONFIG_KEY_PROOFREAD_API_KEY = "api_key"
 CONFIG_KEY_PROOFREAD_PROMPT = "proofread_prompt"
+CONFIG_KEY_PROOFREAD_DISABLE_REASONING = "proofread_disable_reasoning"
 CONFIG_KEY_SPELLING_API_URL = "spellingstyle_api_url"
 CONFIG_KEY_SPELLING_MODEL_ID = "spellingstyle_model_id"
 CONFIG_KEY_SPELLING_API_KEY = "spellingstyle_api_key"
 CONFIG_KEY_SPELLING_PROMPT = "spellingstyle_prompt"
+CONFIG_KEY_SPELLING_DISABLE_REASONING = "spellingstyle_disable_reasoning"
 CONFIG_KEY_IMPROVE1_API_URL = "improve1_api_url"
 CONFIG_KEY_IMPROVE1_MODEL_ID = "improve1_model_id"
 CONFIG_KEY_IMPROVE1_API_KEY = "improve1_api_key"
 CONFIG_KEY_IMPROVE1_PROMPT = "improve1_prompt"
+CONFIG_KEY_IMPROVE1_DISABLE_REASONING = "improve1_disable_reasoning"
 CONFIG_KEY_IMPROVE2_API_URL = "improve2_api_url"
 CONFIG_KEY_IMPROVE2_MODEL_ID = "improve2_model_id"
 CONFIG_KEY_IMPROVE2_API_KEY = "improve2_api_key"
 CONFIG_KEY_IMPROVE2_PROMPT = "improve2_prompt"
+CONFIG_KEY_IMPROVE2_DISABLE_REASONING = "improve2_disable_reasoning"
 CONFIG_KEY_COMBINE_CITES_API_URL = "combine_cites_api_url"
 CONFIG_KEY_COMBINE_CITES_MODEL_ID = "combine_cites_model_id"
 CONFIG_KEY_COMBINE_CITES_API_KEY = "combine_cites_api_key"
 CONFIG_KEY_COMBINE_CITES_PROMPT = "combine_cites_prompt"
+CONFIG_KEY_COMBINE_CITES_DISABLE_REASONING = "combine_cites_disable_reasoning"
 CONFIG_KEY_THESAURUS_API_URL = "thesaurus_api_url"
 CONFIG_KEY_THESAURUS_MODEL_ID = "thesaurus_model_id"
 CONFIG_KEY_THESAURUS_API_KEY = "thesaurus_api_key"
 CONFIG_KEY_THESAURUS_PROMPT = "thesaurus_prompt"
+CONFIG_KEY_THESAURUS_DISABLE_REASONING = "thesaurus_disable_reasoning"
 CONFIG_KEY_REFERENCE_API_URL = "reference_api_url"
 CONFIG_KEY_REFERENCE_MODEL_ID = "reference_model_id"
 CONFIG_KEY_REFERENCE_API_KEY = "reference_api_key"
 CONFIG_KEY_REFERENCE_TAVILY_API_KEY = "reference_tavily_api_key"
 CONFIG_KEY_REFERENCE_PROMPT = "reference_prompt"
 CONFIG_KEY_REFERENCE_ASK_PROMPT = "reference_ask_prompt"
+CONFIG_KEY_REFERENCE_DISABLE_REASONING = "reference_disable_reasoning"
 CONFIG_KEY_ASK_API_URL = "ask_api_url"
 CONFIG_KEY_ASK_MODEL_ID = "ask_model_id"
 CONFIG_KEY_ASK_API_KEY = "ask_api_key"
 CONFIG_KEY_ASK_TAVILY_API_KEY = "ask_tavily_api_key"
 CONFIG_KEY_ASK_PROMPT = "ask_prompt"
+CONFIG_KEY_ASK_DISABLE_REASONING = "ask_disable_reasoning"
 CONFIG_KEY_SHORTEN_API_URL = "shorten_api_url"
 CONFIG_KEY_SHORTEN_MODEL_ID = "shorten_model_id"
 CONFIG_KEY_SHORTEN_API_KEY = "shorten_api_key"
 CONFIG_KEY_SHORTEN_PROMPT = "shorten_prompt"
+CONFIG_KEY_SHORTEN_DISABLE_REASONING = "shorten_disable_reasoning"
 CONFIG_KEY_INTRO_API_URL = "introduction_api_url"
 CONFIG_KEY_INTRO_MODEL_ID = "introduction_model_id"
 CONFIG_KEY_INTRO_API_KEY = "introduction_api_key"
 CONFIG_KEY_INTRO_PROMPT = "introduction_prompt"
+CONFIG_KEY_INTRO_DISABLE_REASONING = "introduction_disable_reasoning"
+CONFIG_KEY_INTRO_REPLY_API_URL = "introduction_reply_api_url"
+CONFIG_KEY_INTRO_REPLY_MODEL_ID = "introduction_reply_model_id"
+CONFIG_KEY_INTRO_REPLY_API_KEY = "introduction_reply_api_key"
+CONFIG_KEY_INTRO_REPLY_PROMPT = "introduction_reply_prompt"
+CONFIG_KEY_INTRO_REPLY_DISABLE_REASONING = "introduction_reply_disable_reasoning"
 CONFIG_KEY_CONCLUSION_API_URL = "conclusion_api_url"
 CONFIG_KEY_CONCLUSION_MODEL_ID = "conclusion_model_id"
 CONFIG_KEY_CONCLUSION_API_KEY = "conclusion_api_key"
 CONFIG_KEY_CONCLUSION_PROMPT = "conclusion_prompt"
+CONFIG_KEY_CONCLUSION_DISABLE_REASONING = "conclusion_disable_reasoning"
 CONFIG_KEY_CONCL_NO_ISSUES_API_URL = "concl_no_issues_api_url"
 CONFIG_KEY_CONCL_NO_ISSUES_MODEL_ID = "concl_no_issues_model_id"
 CONFIG_KEY_CONCL_NO_ISSUES_API_KEY = "concl_no_issues_api_key"
 CONFIG_KEY_CONCL_NO_ISSUES_PROMPT = "concl_no_issues_prompt"
+CONFIG_KEY_CONCL_NO_ISSUES_DISABLE_REASONING = "concl_no_issues_disable_reasoning"
 CONFIG_KEY_TOPIC_SENTENCE_API_URL = "topic_sentence_api_url"
 CONFIG_KEY_TOPIC_SENTENCE_MODEL_ID = "topic_sentence_model_id"
 CONFIG_KEY_TOPIC_SENTENCE_API_KEY = "topic_sentence_api_key"
 CONFIG_KEY_TOPIC_SENTENCE_PROMPT = "topic_sentence_prompt"
+CONFIG_KEY_TOPIC_SENTENCE_DISABLE_REASONING = "topic_sentence_disable_reasoning"
 CONFIG_KEY_CONCL_SECTION_API_URL = "concl_section_api_url"
 CONFIG_KEY_CONCL_SECTION_MODEL_ID = "concl_section_model_id"
 CONFIG_KEY_CONCL_SECTION_API_KEY = "concl_section_api_key"
 CONFIG_KEY_CONCL_SECTION_PROMPT = "concl_section_prompt"
+CONFIG_KEY_CONCL_SECTION_DISABLE_REASONING = "concl_section_disable_reasoning"
 CONFIG_KEY_TRANSLATE_API_URL = "translate_api_url"
 CONFIG_KEY_TRANSLATE_MODEL_ID = "translate_model_id"
 CONFIG_KEY_TRANSLATE_API_KEY = "translate_api_key"
 CONFIG_KEY_TRANSLATE_PROMPT = "translate_prompt"
+CONFIG_KEY_TRANSLATE_DISABLE_REASONING = "translate_disable_reasoning"
 CONFIG_KEY_RT_PREFIX = "rt_prefix"
 CONFIG_KEY_CT_PREFIX = "ct_prefix"
 CONFIG_KEY_WORD_SUBSTITUTIONS = "word_substitutions"
@@ -108,6 +128,7 @@ CONFIG_KEY_EDITOR_SOURCE_FILE = "editor_source_file"
 CONFIG_KEY_LAST_ODT_FILE = "last_odt_file"
 CONFIG_KEY_LIBREOFFICE_PYTHON_PATH = "libreoffice_python_path"
 CONFIG_KEY_CONCORDANCE_FILE_PATH = "concordance_file_path"
+CONFIG_KEY_EDITOR_PINNED_ACTIONS = "editor_pinned_actions"
 
 DEFAULT_PROMPT = (
     "You are a meticulous legal proofreader. Improve clarity, fix grammar, and preserve legal meaning. "
@@ -138,6 +159,7 @@ DEFAULT_INTRO_PROMPT = (
     "Write a concise introduction for the brief based on the provided argument section. "
     "Return only the introduction."
 )
+DEFAULT_INTRO_REPLY_PROMPT = DEFAULT_INTRO_PROMPT
 DEFAULT_CONCLUSION_PROMPT = (
     "Write a conclusion for the brief based on the provided argument section. "
     "Return only the conclusion."
@@ -162,6 +184,7 @@ DEFAULT_TRANSLATE_PROMPT = (
 DEFAULT_RT_PREFIX = "2"
 DEFAULT_CT_PREFIX = "2"
 MAX_WORD_SUBSTITUTIONS = 3
+MAX_PINNED_EDITOR_ACTIONS = 5
 CITATION_NUMBER_WORDS = {
     "zero": "0",
     "one": "1",
@@ -233,6 +256,44 @@ _UNO_IMPORT_ERROR: str | None = None
 _UNO_IMPORT_SOURCE = "uninitialized"
 _UNO_IMPORT_PATH: Path | None = None
 _UNO_ATTEMPTED_PATHS: list[Path] = []
+
+
+def _coerce_bool_config(value: Any, default: bool) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"1", "true", "yes", "on"}:
+            return True
+        if normalized in {"0", "false", "no", "off"}:
+            return False
+    if isinstance(value, (int, float)):
+        return bool(value)
+    return default
+
+
+def _model_looks_kimi(model_id: str) -> bool:
+    normalized = (model_id or "").strip().lower()
+    return "kimi" in normalized or "moonshot" in normalized
+
+
+def _model_looks_deepseek(model_id: str) -> bool:
+    normalized = (model_id or "").strip().lower()
+    return "deepseek" in normalized
+
+
+def _apply_disable_reasoning_to_body(
+    body: dict[str, Any],
+    *,
+    model_id: str,
+    disable_reasoning: bool,
+) -> None:
+    if not disable_reasoning:
+        return
+    if _model_looks_deepseek(model_id) or _model_looks_kimi(model_id):
+        body["thinking"] = {"type": "disabled"}
+    else:
+        body["reasoning_effort"] = "none"
 
 
 def _read_config() -> dict[str, Any]:
@@ -429,6 +490,7 @@ class ProofreadSettings:
     model_id: str
     api_key: str
     prompt: str
+    disable_reasoning: bool
 
     def is_configured(self) -> bool:
         return all(
@@ -443,6 +505,7 @@ class SpellingStyleSettings:
     model_id: str
     api_key: str
     prompt: str
+    disable_reasoning: bool
 
     def is_configured(self) -> bool:
         return all(
@@ -457,6 +520,7 @@ class Improve1Settings:
     model_id: str
     api_key: str
     prompt: str
+    disable_reasoning: bool
 
     def is_configured(self) -> bool:
         return all(
@@ -471,6 +535,7 @@ class Improve2Settings:
     model_id: str
     api_key: str
     prompt: str
+    disable_reasoning: bool
 
     def is_configured(self) -> bool:
         return all(
@@ -485,6 +550,7 @@ class CombineCitesSettings:
     model_id: str
     api_key: str
     prompt: str
+    disable_reasoning: bool
 
     def is_configured(self) -> bool:
         return all(
@@ -499,6 +565,7 @@ class ThesaurusSettings:
     model_id: str
     api_key: str
     prompt: str
+    disable_reasoning: bool
 
     def is_configured(self) -> bool:
         return all(
@@ -514,6 +581,7 @@ class ReferenceSettings:
     api_key: str
     tavily_api_key: str
     prompt: str
+    disable_reasoning: bool
 
     def is_configured(self) -> bool:
         return all(
@@ -534,6 +602,7 @@ class AskSettings:
     api_key: str
     tavily_api_key: str
     prompt: str
+    disable_reasoning: bool
 
     def is_configured(self) -> bool:
         return all(
@@ -553,6 +622,7 @@ class ShortenSettings:
     model_id: str
     api_key: str
     prompt: str
+    disable_reasoning: bool
 
     def is_configured(self) -> bool:
         return all(
@@ -567,6 +637,7 @@ class IntroductionSettings:
     model_id: str
     api_key: str
     prompt: str
+    disable_reasoning: bool
 
     def is_configured(self) -> bool:
         return all(
@@ -581,6 +652,7 @@ class ConclusionSettings:
     model_id: str
     api_key: str
     prompt: str
+    disable_reasoning: bool
 
     def is_configured(self) -> bool:
         return all(
@@ -595,6 +667,7 @@ class ConclNoIssuesSettings:
     model_id: str
     api_key: str
     prompt: str
+    disable_reasoning: bool
 
     def is_configured(self) -> bool:
         return all(
@@ -609,6 +682,7 @@ class TopicSentenceSettings:
     model_id: str
     api_key: str
     prompt: str
+    disable_reasoning: bool
 
     def is_configured(self) -> bool:
         return all(
@@ -623,6 +697,7 @@ class ConclSectionSettings:
     model_id: str
     api_key: str
     prompt: str
+    disable_reasoning: bool
 
     def is_configured(self) -> bool:
         return all(
@@ -637,6 +712,7 @@ class TranslateSettings:
     model_id: str
     api_key: str
     prompt: str
+    disable_reasoning: bool
 
     def is_configured(self) -> bool:
         return all(
@@ -651,6 +727,7 @@ class PromptEditorWidgets:
     model_row: Adw.EntryRow
     api_key_row: Adw.PasswordEntryRow
     tavily_api_key_row: Adw.PasswordEntryRow | None
+    disable_reasoning_row: Adw.SwitchRow
     prompt_buffer: Gtk.TextBuffer
     ask_prompt_buffer: Gtk.TextBuffer | None
 
@@ -668,6 +745,97 @@ class PrefixSettings:
     substitutions: list[WordSubstitution]
 
 
+@dataclass(frozen=True)
+class QuickActionDefinition:
+    key: str
+    label: str
+    title: str
+    action_name: str
+    description: str
+
+
+EDITOR_QUICK_ACTIONS = (
+    QuickActionDefinition(
+        key="shorten",
+        label="Shorten",
+        title="Shorten",
+        action_name="transform-shorten",
+        description="Shorten selected text while preserving meaning.",
+    ),
+    QuickActionDefinition(
+        key="topic-sentence",
+        label="Topic Sent.",
+        title="Topic Sentence",
+        action_name="transform-topic-sentence",
+        description="Generate a topic sentence from the current paragraph.",
+    ),
+    QuickActionDefinition(
+        key="concl-section",
+        label="Section Concl.",
+        title="Section Conclusion",
+        action_name="transform-concl-section",
+        description="Write a concise conclusion for the current section.",
+    ),
+    QuickActionDefinition(
+        key="add-case",
+        label="Add Case",
+        title="Add Case",
+        action_name="add-case",
+        description="Add the selected case citation to concordance and AutoText.",
+    ),
+    QuickActionDefinition(
+        key="intro",
+        label="Intro",
+        title="Introduction",
+        action_name="transform-introduction",
+        description="Write an introduction from the current argument section.",
+    ),
+    QuickActionDefinition(
+        key="intro-reply",
+        label="Intro Reply",
+        title="Introduction for Reply",
+        action_name="transform-introduction-reply",
+        description="Write an introduction for a reply brief from the current argument section.",
+    ),
+    QuickActionDefinition(
+        key="conclusion",
+        label="Concl.",
+        title="Conclusion",
+        action_name="transform-conclusion",
+        description="Write a conclusion from the current argument section.",
+    ),
+    QuickActionDefinition(
+        key="concl-no-issues",
+        label="No Issues Concl.",
+        title="Conclusion Without Issues",
+        action_name="transform-concl-no-issues",
+        description="Write a conclusion from the current issues-considered section.",
+    ),
+    QuickActionDefinition(
+        key="quotes",
+        label="Quotes",
+        title="Wrap Selection in Quotes",
+        action_name="transform-wrap-quotes",
+        description="Wrap selected text in curly quotes.",
+    ),
+    QuickActionDefinition(
+        key="translate",
+        label="Translate",
+        title="Translate Document",
+        action_name="transform-translate",
+        description="Translate the full Writer document into Spanish.",
+    ),
+)
+EDITOR_QUICK_ACTION_BY_KEY = {definition.key: definition for definition in EDITOR_QUICK_ACTIONS}
+DEFAULT_EDITOR_PINNED_ACTION_IDS = (
+    "shorten",
+    "topic-sentence",
+    "concl-section",
+    "intro",
+    "conclusion",
+)
+
+
 def load_proofread_settings() -> ProofreadSettings:
     raw = _read_config()
     return ProofreadSettings(
@@ -675,6 +843,7 @@ def load_proofread_settings() -> ProofreadSettings:
         model_id=str(raw.get(CONFIG_KEY_PROOFREAD_MODEL_ID, "") or "").strip(),
         api_key=str(raw.get(CONFIG_KEY_PROOFREAD_API_KEY, "") or "").strip(),
         prompt=str(raw.get(CONFIG_KEY_PROOFREAD_PROMPT, DEFAULT_PROMPT) or DEFAULT_PROMPT).strip(),
+        disable_reasoning=_coerce_bool_config(raw.get(CONFIG_KEY_PROOFREAD_DISABLE_REASONING), False),
     )
 
 
@@ -684,6 +853,7 @@ def save_proofread_settings(settings: ProofreadSettings) -> None:
     data[CONFIG_KEY_PROOFREAD_MODEL_ID] = settings.model_id
     data[CONFIG_KEY_PROOFREAD_API_KEY] = settings.api_key
     data[CONFIG_KEY_PROOFREAD_PROMPT] = settings.prompt or DEFAULT_PROMPT
+    data[CONFIG_KEY_PROOFREAD_DISABLE_REASONING] = bool(settings.disable_reasoning)
     _write_config(data)
 
 
@@ -730,6 +900,7 @@ def load_spellingstyle_settings() -> SpellingStyleSettings:
         api_key=str(raw.get(CONFIG_KEY_SPELLING_API_KEY, "") or "").strip(),
         prompt=str(raw.get(CONFIG_KEY_SPELLING_PROMPT, DEFAULT_SPELLINGSTYLE_PROMPT) or DEFAULT_SPELLINGSTYLE_PROMPT)
         .strip(),
+        disable_reasoning=_coerce_bool_config(raw.get(CONFIG_KEY_SPELLING_DISABLE_REASONING), False),
     )
 
 
@@ -739,6 +910,7 @@ def save_spellingstyle_settings(settings: SpellingStyleSettings) -> None:
     data[CONFIG_KEY_SPELLING_MODEL_ID] = settings.model_id
     data[CONFIG_KEY_SPELLING_API_KEY] = settings.api_key
     data[CONFIG_KEY_SPELLING_PROMPT] = settings.prompt or DEFAULT_SPELLINGSTYLE_PROMPT
+    data[CONFIG_KEY_SPELLING_DISABLE_REASONING] = bool(settings.disable_reasoning)
     _write_config(data)
 
 
@@ -749,6 +921,7 @@ def load_improve1_settings() -> Improve1Settings:
         model_id=str(raw.get(CONFIG_KEY_IMPROVE1_MODEL_ID, "") or "").strip(),
         api_key=str(raw.get(CONFIG_KEY_IMPROVE1_API_KEY, "") or "").strip(),
         prompt=str(raw.get(CONFIG_KEY_IMPROVE1_PROMPT, DEFAULT_IMPROVE1_PROMPT) or DEFAULT_IMPROVE1_PROMPT).strip(),
+        disable_reasoning=_coerce_bool_config(raw.get(CONFIG_KEY_IMPROVE1_DISABLE_REASONING), False),
     )
 
 
@@ -758,6 +931,7 @@ def save_improve1_settings(settings: Improve1Settings) -> None:
     data[CONFIG_KEY_IMPROVE1_MODEL_ID] = settings.model_id
     data[CONFIG_KEY_IMPROVE1_API_KEY] = settings.api_key
     data[CONFIG_KEY_IMPROVE1_PROMPT] = settings.prompt or DEFAULT_IMPROVE1_PROMPT
+    data[CONFIG_KEY_IMPROVE1_DISABLE_REASONING] = bool(settings.disable_reasoning)
     _write_config(data)
 
 
@@ -768,6 +942,7 @@ def load_improve2_settings() -> Improve2Settings:
         model_id=str(raw.get(CONFIG_KEY_IMPROVE2_MODEL_ID, "") or "").strip(),
         api_key=str(raw.get(CONFIG_KEY_IMPROVE2_API_KEY, "") or "").strip(),
         prompt=str(raw.get(CONFIG_KEY_IMPROVE2_PROMPT, DEFAULT_IMPROVE2_PROMPT) or DEFAULT_IMPROVE2_PROMPT).strip(),
+        disable_reasoning=_coerce_bool_config(raw.get(CONFIG_KEY_IMPROVE2_DISABLE_REASONING), False),
     )
 
 
@@ -777,6 +952,7 @@ def save_improve2_settings(settings: Improve2Settings) -> None:
     data[CONFIG_KEY_IMPROVE2_MODEL_ID] = settings.model_id
     data[CONFIG_KEY_IMPROVE2_API_KEY] = settings.api_key
     data[CONFIG_KEY_IMPROVE2_PROMPT] = settings.prompt or DEFAULT_IMPROVE2_PROMPT
+    data[CONFIG_KEY_IMPROVE2_DISABLE_REASONING] = bool(settings.disable_reasoning)
     _write_config(data)
 
 
@@ -788,6 +964,7 @@ def load_combine_cites_settings() -> CombineCitesSettings:
         api_key=str(raw.get(CONFIG_KEY_COMBINE_CITES_API_KEY, "") or "").strip(),
         prompt=str(raw.get(CONFIG_KEY_COMBINE_CITES_PROMPT, DEFAULT_COMBINE_CITES_PROMPT) or DEFAULT_COMBINE_CITES_PROMPT)
         .strip(),
+        disable_reasoning=_coerce_bool_config(raw.get(CONFIG_KEY_COMBINE_CITES_DISABLE_REASONING), False),
     )
 
 
@@ -797,6 +974,7 @@ def save_combine_cites_settings(settings: CombineCitesSettings) -> None:
     data[CONFIG_KEY_COMBINE_CITES_MODEL_ID] = settings.model_id
     data[CONFIG_KEY_COMBINE_CITES_API_KEY] = settings.api_key
     data[CONFIG_KEY_COMBINE_CITES_PROMPT] = settings.prompt or DEFAULT_COMBINE_CITES_PROMPT
+    data[CONFIG_KEY_COMBINE_CITES_DISABLE_REASONING] = bool(settings.disable_reasoning)
     _write_config(data)
 
 
@@ -807,6 +985,7 @@ def load_thesaurus_settings() -> ThesaurusSettings:
         model_id=str(raw.get(CONFIG_KEY_THESAURUS_MODEL_ID, "") or "").strip(),
         api_key=str(raw.get(CONFIG_KEY_THESAURUS_API_KEY, "") or "").strip(),
         prompt=str(raw.get(CONFIG_KEY_THESAURUS_PROMPT, DEFAULT_THESAURUS_PROMPT) or DEFAULT_THESAURUS_PROMPT).strip(),
+        disable_reasoning=_coerce_bool_config(raw.get(CONFIG_KEY_THESAURUS_DISABLE_REASONING), False),
     )
 
 
@@ -816,6 +995,7 @@ def save_thesaurus_settings(settings: ThesaurusSettings) -> None:
     data[CONFIG_KEY_THESAURUS_MODEL_ID] = settings.model_id
     data[CONFIG_KEY_THESAURUS_API_KEY] = settings.api_key
     data[CONFIG_KEY_THESAURUS_PROMPT] = settings.prompt or DEFAULT_THESAURUS_PROMPT
+    data[CONFIG_KEY_THESAURUS_DISABLE_REASONING] = bool(settings.disable_reasoning)
     _write_config(data)
 
 
@@ -827,6 +1007,7 @@ def load_reference_settings() -> ReferenceSettings:
         api_key=str(raw.get(CONFIG_KEY_REFERENCE_API_KEY, "") or "").strip(),
         tavily_api_key=str(raw.get(CONFIG_KEY_REFERENCE_TAVILY_API_KEY, "") or "").strip(),
         prompt=str(raw.get(CONFIG_KEY_REFERENCE_PROMPT, DEFAULT_REFERENCE_PROMPT) or DEFAULT_REFERENCE_PROMPT).strip(),
+        disable_reasoning=_coerce_bool_config(raw.get(CONFIG_KEY_REFERENCE_DISABLE_REASONING), False),
     )
 
 
@@ -837,6 +1018,7 @@ def save_reference_settings(settings: ReferenceSettings) -> None:
     data[CONFIG_KEY_REFERENCE_API_KEY] = settings.api_key
     data[CONFIG_KEY_REFERENCE_TAVILY_API_KEY] = settings.tavily_api_key
     data[CONFIG_KEY_REFERENCE_PROMPT] = settings.prompt or DEFAULT_REFERENCE_PROMPT
+    data[CONFIG_KEY_REFERENCE_DISABLE_REASONING] = bool(settings.disable_reasoning)
     _write_config(data)
 
 
@@ -851,6 +1033,7 @@ def load_ask_settings() -> AskSettings:
         api_key=str(raw.get(CONFIG_KEY_ASK_API_KEY, "") or "").strip(),
         tavily_api_key=str(raw.get(CONFIG_KEY_ASK_TAVILY_API_KEY, "") or "").strip(),
         prompt=prompt,
+        disable_reasoning=_coerce_bool_config(raw.get(CONFIG_KEY_ASK_DISABLE_REASONING), False),
     )
 
 
@@ -861,6 +1044,7 @@ def save_ask_settings(settings: AskSettings) -> None:
     data[CONFIG_KEY_ASK_API_KEY] = settings.api_key
     data[CONFIG_KEY_ASK_TAVILY_API_KEY] = settings.tavily_api_key
     data[CONFIG_KEY_ASK_PROMPT] = settings.prompt or DEFAULT_ASK_PROMPT
+    data[CONFIG_KEY_ASK_DISABLE_REASONING] = bool(settings.disable_reasoning)
     _write_config(data)
 
 
@@ -871,6 +1055,7 @@ def load_shorten_settings() -> ShortenSettings:
         model_id=str(raw.get(CONFIG_KEY_SHORTEN_MODEL_ID, "") or "").strip(),
         api_key=str(raw.get(CONFIG_KEY_SHORTEN_API_KEY, "") or "").strip(),
         prompt=str(raw.get(CONFIG_KEY_SHORTEN_PROMPT, DEFAULT_SHORTEN_PROMPT) or DEFAULT_SHORTEN_PROMPT).strip(),
+        disable_reasoning=_coerce_bool_config(raw.get(CONFIG_KEY_SHORTEN_DISABLE_REASONING), False),
     )
 
 
@@ -880,6 +1065,7 @@ def save_shorten_settings(settings: ShortenSettings) -> None:
     data[CONFIG_KEY_SHORTEN_MODEL_ID] = settings.model_id
     data[CONFIG_KEY_SHORTEN_API_KEY] = settings.api_key
     data[CONFIG_KEY_SHORTEN_PROMPT] = settings.prompt or DEFAULT_SHORTEN_PROMPT
+    data[CONFIG_KEY_SHORTEN_DISABLE_REASONING] = bool(settings.disable_reasoning)
     _write_config(data)
 
 
@@ -890,6 +1076,7 @@ def load_introduction_settings() -> IntroductionSettings:
         model_id=str(raw.get(CONFIG_KEY_INTRO_MODEL_ID, "") or "").strip(),
         api_key=str(raw.get(CONFIG_KEY_INTRO_API_KEY, "") or "").strip(),
         prompt=str(raw.get(CONFIG_KEY_INTRO_PROMPT, DEFAULT_INTRO_PROMPT) or DEFAULT_INTRO_PROMPT).strip(),
+        disable_reasoning=_coerce_bool_config(raw.get(CONFIG_KEY_INTRO_DISABLE_REASONING), False),
     )
 
 
@@ -899,6 +1086,29 @@ def save_introduction_settings(settings: IntroductionSettings) -> None:
     data[CONFIG_KEY_INTRO_MODEL_ID] = settings.model_id
     data[CONFIG_KEY_INTRO_API_KEY] = settings.api_key
     data[CONFIG_KEY_INTRO_PROMPT] = settings.prompt or DEFAULT_INTRO_PROMPT
+    data[CONFIG_KEY_INTRO_DISABLE_REASONING] = bool(settings.disable_reasoning)
+    _write_config(data)
+
+
+def load_introduction_reply_settings() -> IntroductionSettings:
+    raw = _read_config()
+    return IntroductionSettings(
+        api_url=str(raw.get(CONFIG_KEY_INTRO_REPLY_API_URL, "") or "").strip(),
+        model_id=str(raw.get(CONFIG_KEY_INTRO_REPLY_MODEL_ID, "") or "").strip(),
+        api_key=str(raw.get(CONFIG_KEY_INTRO_REPLY_API_KEY, "") or "").strip(),
+        prompt=str(raw.get(CONFIG_KEY_INTRO_REPLY_PROMPT, DEFAULT_INTRO_REPLY_PROMPT) or DEFAULT_INTRO_REPLY_PROMPT)
+        .strip(),
+        disable_reasoning=_coerce_bool_config(raw.get(CONFIG_KEY_INTRO_REPLY_DISABLE_REASONING), False),
+    )
+
+
+def save_introduction_reply_settings(settings: IntroductionSettings) -> None:
+    data = _read_config()
+    data[CONFIG_KEY_INTRO_REPLY_API_URL] = settings.api_url
+    data[CONFIG_KEY_INTRO_REPLY_MODEL_ID] = settings.model_id
+    data[CONFIG_KEY_INTRO_REPLY_API_KEY] = settings.api_key
+    data[CONFIG_KEY_INTRO_REPLY_PROMPT] = settings.prompt or DEFAULT_INTRO_REPLY_PROMPT
+    data[CONFIG_KEY_INTRO_REPLY_DISABLE_REASONING] = bool(settings.disable_reasoning)
     _write_config(data)
 
 
@@ -909,6 +1119,7 @@ def load_conclusion_settings() -> ConclusionSettings:
         model_id=str(raw.get(CONFIG_KEY_CONCLUSION_MODEL_ID, "") or "").strip(),
         api_key=str(raw.get(CONFIG_KEY_CONCLUSION_API_KEY, "") or "").strip(),
         prompt=str(raw.get(CONFIG_KEY_CONCLUSION_PROMPT, DEFAULT_CONCLUSION_PROMPT) or DEFAULT_CONCLUSION_PROMPT).strip(),
+        disable_reasoning=_coerce_bool_config(raw.get(CONFIG_KEY_CONCLUSION_DISABLE_REASONING), False),
     )
 
 
@@ -918,6 +1129,7 @@ def save_conclusion_settings(settings: ConclusionSettings) -> None:
     data[CONFIG_KEY_CONCLUSION_MODEL_ID] = settings.model_id
     data[CONFIG_KEY_CONCLUSION_API_KEY] = settings.api_key
     data[CONFIG_KEY_CONCLUSION_PROMPT] = settings.prompt or DEFAULT_CONCLUSION_PROMPT
+    data[CONFIG_KEY_CONCLUSION_DISABLE_REASONING] = bool(settings.disable_reasoning)
     _write_config(data)
 
 
@@ -929,6 +1141,7 @@ def load_concl_no_issues_settings() -> ConclNoIssuesSettings:
         api_key=str(raw.get(CONFIG_KEY_CONCL_NO_ISSUES_API_KEY, "") or "").strip(),
         prompt=str(raw.get(CONFIG_KEY_CONCL_NO_ISSUES_PROMPT, DEFAULT_CONCL_NO_ISSUES_PROMPT) or DEFAULT_CONCL_NO_ISSUES_PROMPT)
         .strip(),
+        disable_reasoning=_coerce_bool_config(raw.get(CONFIG_KEY_CONCL_NO_ISSUES_DISABLE_REASONING), False),
     )
 
 
@@ -938,6 +1151,7 @@ def save_concl_no_issues_settings(settings: ConclNoIssuesSettings) -> None:
     data[CONFIG_KEY_CONCL_NO_ISSUES_MODEL_ID] = settings.model_id
     data[CONFIG_KEY_CONCL_NO_ISSUES_API_KEY] = settings.api_key
     data[CONFIG_KEY_CONCL_NO_ISSUES_PROMPT] = settings.prompt or DEFAULT_CONCL_NO_ISSUES_PROMPT
+    data[CONFIG_KEY_CONCL_NO_ISSUES_DISABLE_REASONING] = bool(settings.disable_reasoning)
     _write_config(data)
 
 
@@ -949,6 +1163,7 @@ def load_topic_sentence_settings() -> TopicSentenceSettings:
         api_key=str(raw.get(CONFIG_KEY_TOPIC_SENTENCE_API_KEY, "") or "").strip(),
         prompt=str(raw.get(CONFIG_KEY_TOPIC_SENTENCE_PROMPT, DEFAULT_TOPIC_SENTENCE_PROMPT) or DEFAULT_TOPIC_SENTENCE_PROMPT)
         .strip(),
+        disable_reasoning=_coerce_bool_config(raw.get(CONFIG_KEY_TOPIC_SENTENCE_DISABLE_REASONING), False),
     )
 
 
@@ -958,6 +1173,7 @@ def save_topic_sentence_settings(settings: TopicSentenceSettings) -> None:
     data[CONFIG_KEY_TOPIC_SENTENCE_MODEL_ID] = settings.model_id
     data[CONFIG_KEY_TOPIC_SENTENCE_API_KEY] = settings.api_key
     data[CONFIG_KEY_TOPIC_SENTENCE_PROMPT] = settings.prompt or DEFAULT_TOPIC_SENTENCE_PROMPT
+    data[CONFIG_KEY_TOPIC_SENTENCE_DISABLE_REASONING] = bool(settings.disable_reasoning)
     _write_config(data)
 
 
@@ -969,6 +1185,7 @@ def load_concl_section_settings() -> ConclSectionSettings:
         api_key=str(raw.get(CONFIG_KEY_CONCL_SECTION_API_KEY, "") or "").strip(),
         prompt=str(raw.get(CONFIG_KEY_CONCL_SECTION_PROMPT, DEFAULT_CONCL_SECTION_PROMPT) or DEFAULT_CONCL_SECTION_PROMPT)
         .strip(),
+        disable_reasoning=_coerce_bool_config(raw.get(CONFIG_KEY_CONCL_SECTION_DISABLE_REASONING), False),
     )
 
 
@@ -978,6 +1195,7 @@ def save_concl_section_settings(settings: ConclSectionSettings) -> None:
     data[CONFIG_KEY_CONCL_SECTION_MODEL_ID] = settings.model_id
     data[CONFIG_KEY_CONCL_SECTION_API_KEY] = settings.api_key
     data[CONFIG_KEY_CONCL_SECTION_PROMPT] = settings.prompt or DEFAULT_CONCL_SECTION_PROMPT
+    data[CONFIG_KEY_CONCL_SECTION_DISABLE_REASONING] = bool(settings.disable_reasoning)
     _write_config(data)
 
 
@@ -988,6 +1206,7 @@ def load_translate_settings() -> TranslateSettings:
         model_id=str(raw.get(CONFIG_KEY_TRANSLATE_MODEL_ID, "") or "").strip(),
         api_key=str(raw.get(CONFIG_KEY_TRANSLATE_API_KEY, "") or "").strip(),
         prompt=str(raw.get(CONFIG_KEY_TRANSLATE_PROMPT, DEFAULT_TRANSLATE_PROMPT) or DEFAULT_TRANSLATE_PROMPT).strip(),
+        disable_reasoning=_coerce_bool_config(raw.get(CONFIG_KEY_TRANSLATE_DISABLE_REASONING), False),
     )
 
 
@@ -997,6 +1216,7 @@ def save_translate_settings(settings: TranslateSettings) -> None:
     data[CONFIG_KEY_TRANSLATE_MODEL_ID] = settings.model_id
     data[CONFIG_KEY_TRANSLATE_API_KEY] = settings.api_key
     data[CONFIG_KEY_TRANSLATE_PROMPT] = settings.prompt or DEFAULT_TRANSLATE_PROMPT
+    data[CONFIG_KEY_TRANSLATE_DISABLE_REASONING] = bool(settings.disable_reasoning)
     _write_config(data)
 
 
@@ -1031,6 +1251,57 @@ def save_last_odt_file(path: Path | None) -> None:
         data[CONFIG_KEY_LAST_ODT_FILE] = str(path.expanduser().resolve(strict=False))
     else:
         data.pop(CONFIG_KEY_LAST_ODT_FILE, None)
+    _write_config(data)
+
+
+def _default_editor_pinned_actions() -> list[str]:
+    return list(DEFAULT_EDITOR_PINNED_ACTION_IDS)
+
+
+def _sanitize_editor_pinned_actions(raw: Any) -> list[str]:
+    pinned: list[str] = []
+    seen: set[str] = set()
+    if not isinstance(raw, list):
+        return pinned
+    for item in raw:
+        key = str(item or "").strip()
+        if key not in EDITOR_QUICK_ACTION_BY_KEY or key in seen:
+            continue
+        pinned.append(key)
+        seen.add(key)
+        if len(pinned) >= MAX_PINNED_EDITOR_ACTIONS:
+            break
+    return pinned
+
+
+def _ordered_editor_quick_action_keys(pinned_action_ids: Iterable[str]) -> list[str]:
+    ordered: list[str] = []
+    seen: set[str] = set()
+    for key in pinned_action_ids:
+        if key not in EDITOR_QUICK_ACTION_BY_KEY or key in seen:
+            continue
+        ordered.append(key)
+        seen.add(key)
+    for definition in EDITOR_QUICK_ACTIONS:
+        if definition.key in seen:
+            continue
+        ordered.append(definition.key)
+    return ordered
+
+
+def load_editor_pinned_actions() -> list[str]:
+    raw = _read_config()
+    if CONFIG_KEY_EDITOR_PINNED_ACTIONS not in raw:
+        return _default_editor_pinned_actions()
+    stored = raw.get(CONFIG_KEY_EDITOR_PINNED_ACTIONS)
+    if not isinstance(stored, list):
+        return _default_editor_pinned_actions()
+    return _sanitize_editor_pinned_actions(stored)
+
+
+def save_editor_pinned_actions(action_ids: Iterable[str]) -> None:
+    data = _read_config()
+    data[CONFIG_KEY_EDITOR_PINNED_ACTIONS] = _sanitize_editor_pinned_actions(list(action_ids))
     _write_config(data)
 
 
@@ -1069,6 +1340,7 @@ class ProseWindow(Adw.ApplicationWindow):
         self._ask_settings = load_ask_settings()
         self._shorten_settings = load_shorten_settings()
         self._introduction_settings = load_introduction_settings()
+        self._introduction_reply_settings = load_introduction_reply_settings()
         self._conclusion_settings = load_conclusion_settings()
         self._concl_no_issues_settings = load_concl_no_issues_settings()
         self._topic_sentence_settings = load_topic_sentence_settings()
@@ -1078,6 +1350,7 @@ class ProseWindow(Adw.ApplicationWindow):
         self._editor_source_file = load_editor_source_file()
         self._last_odt_path = load_last_odt_file()
         self._concordance_file_path = load_concordance_file_path()
+        self._editor_pinned_action_ids = load_editor_pinned_actions()
         self._ctx = None
         self._desktop = None
         self._active_doc = None
@@ -1111,6 +1384,8 @@ class ProseWindow(Adw.ApplicationWindow):
         self._rt_prefix_entry: Gtk.Entry | None = None
         self._ct_prefix_entry: Gtk.Entry | None = None
         self._substitution_rows: list[tuple[Gtk.Entry, Gtk.Entry]] = []
+        self._transform_action_buttons: list[Gtk.Widget] = []
+        self._transform_actions_wrap: Gtk.FlowBox | None = None
         self._build_ui()
         self._ensure_menu()
         self._register_actions()
@@ -1212,27 +1487,9 @@ class ProseWindow(Adw.ApplicationWindow):
         action_wrap.set_row_spacing(6)
         action_wrap.set_max_children_per_line(6)
         action_wrap.set_hexpand(True)
-        action_buttons: list[Gtk.Button] = []
-        for label, action_name in (
-            ("Shorten", "app.transform-shorten"),
-            ("Topic Sent.", "app.transform-topic-sentence"),
-            ("Section Concl.", "app.transform-concl-section"),
-            ("Add Case", "app.add-case"),
-            ("Intro", "app.transform-introduction"),
-            ("Concl.", "app.transform-conclusion"),
-            ("No Issues Concl.", "app.transform-concl-no-issues"),
-            ("Quotes", "app.transform-wrap-quotes"),
-            ("Translate", "app.transform-translate"),
-        ):
-            button = Gtk.Button(label=label)
-            button.set_action_name(action_name)
-            button.add_css_class("flat")
-            button.add_css_class("transform-pill")
-            button.add_css_class("transform-pill-compact")
-            action_wrap.append(button)
-            action_buttons.append(button)
         panel.append(action_wrap)
-        self._transform_action_buttons = action_buttons
+        self._transform_actions_wrap = action_wrap
+        self._rebuild_transform_action_buttons()
 
         split_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
         split_box.set_hexpand(True)
@@ -1348,6 +1605,117 @@ class ProseWindow(Adw.ApplicationWindow):
         panel.append(split_box)
 
         return panel
+
+    def _clear_flow_box(self, flow_box: Gtk.FlowBox) -> None:
+        child = flow_box.get_first_child()
+        while child is not None:
+            next_child = child.get_next_sibling()
+            flow_box.remove(child)
+            child = next_child
+
+    def _build_quick_action_button(
+        self,
+        definition: QuickActionDefinition,
+        *,
+        label: str | None = None,
+        on_clicked: Callable[[Gtk.Button], None] | None = None,
+    ) -> Gtk.Button:
+        button = Gtk.Button(label=label or definition.label)
+        button.set_action_name(f"app.{definition.action_name}")
+        button.set_tooltip_text(definition.description)
+        button.add_css_class("flat")
+        button.add_css_class("transform-pill")
+        button.add_css_class("transform-pill-compact")
+        if on_clicked is not None:
+            button.connect("clicked", on_clicked)
+        return button
+
+    def _build_more_actions_button(
+        self, definitions: list[QuickActionDefinition]
+    ) -> tuple[Gtk.MenuButton, list[Gtk.Button]]:
+        popover = Gtk.Popover()
+        popover.set_position(Gtk.PositionType.BOTTOM)
+
+        content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+        content.set_margin_top(10)
+        content.set_margin_bottom(10)
+        content.set_margin_start(10)
+        content.set_margin_end(10)
+
+        title = Gtk.Label(label="More Actions", xalign=0)
+        title.add_css_class("caption")
+        title.add_css_class("dim-label")
+        content.append(title)
+
+        action_grid = Gtk.FlowBox()
+        action_grid.set_selection_mode(Gtk.SelectionMode.NONE)
+        action_grid.set_column_spacing(6)
+        action_grid.set_row_spacing(6)
+        action_grid.set_max_children_per_line(2)
+
+        action_buttons: list[Gtk.Button] = []
+        for definition in definitions:
+            button = self._build_quick_action_button(
+                definition,
+                label=definition.label,
+                on_clicked=lambda _button, current=popover: current.popdown(),
+            )
+            action_grid.append(button)
+            action_buttons.append(button)
+        content.append(action_grid)
+
+        commands_btn = Gtk.Button(label="Editor Commands…")
+        commands_btn.add_css_class("flat")
+        commands_btn.add_css_class("link")
+        commands_btn.set_halign(Gtk.Align.START)
+        commands_btn.connect("clicked", self._on_more_commands_clicked, popover)
+        content.append(commands_btn)
+
+        popover.set_child(content)
+
+        more_button = Gtk.MenuButton(label="More")
+        more_button.set_tooltip_text("Show more editor actions")
+        more_button.set_popover(popover)
+        more_button.add_css_class("flat")
+        more_button.add_css_class("transform-pill")
+        more_button.add_css_class("transform-pill-compact")
+        return more_button, action_buttons
+
+    def _on_more_commands_clicked(self, _button: Gtk.Button, popover: Gtk.Popover) -> None:
+        popover.popdown()
+        self._on_open_editor_commands()
+
+    def _rebuild_transform_action_buttons(self) -> None:
+        flow_box = self._transform_actions_wrap
+        if flow_box is None:
+            return
+
+        self._clear_flow_box(flow_box)
+        action_buttons: list[Gtk.Widget] = []
+
+        pinned_keys = self._editor_pinned_action_ids
+        pinned_set = set(pinned_keys)
+        ordered_keys = _ordered_editor_quick_action_keys(pinned_keys)
+        remaining_actions: list[QuickActionDefinition] = []
+
+        for key in ordered_keys:
+            definition = EDITOR_QUICK_ACTION_BY_KEY[key]
+            if key in pinned_set:
+                button = self._build_quick_action_button(definition)
+                flow_box.append(button)
+                action_buttons.append(button)
+            else:
+                remaining_actions.append(definition)
+
+        if remaining_actions:
+            more_button, more_action_buttons = self._build_more_actions_button(remaining_actions)
+            flow_box.append(more_button)
+            action_buttons.append(more_button)
+            action_buttons.extend(more_action_buttons)
+
+        self._transform_action_buttons = action_buttons
+        for widget in self._transform_action_buttons:
+            widget.set_sensitive(not self._busy)
 
     def _ensure_css(self) -> None:
         if self._css_provider is not None:
@@ -1629,6 +1997,7 @@ class ProseWindow(Adw.ApplicationWindow):
         _add_action("transform-translate", lambda: self._on_translate_clicked(None))
         _add_action("transform-topic-sentence", lambda: self._on_topic_sentence_clicked(None))
         _add_action("transform-introduction", lambda: self._on_introduction_clicked(None))
+        _add_action("transform-introduction-reply", lambda: self._on_introduction_reply_clicked(None))
         _add_action("transform-conclusion", lambda: self._on_conclusion_clicked(None))
         _add_action("transform-concl-no-issues", lambda: self._on_concl_no_issues_clicked(None))
         _add_action("transform-concl-section", lambda: self._on_concl_section_clicked(None))
@@ -1702,11 +2071,13 @@ class ProseWindow(Adw.ApplicationWindow):
             self._ask_settings,
             self._shorten_settings,
             self._introduction_settings,
+            self._introduction_reply_settings,
             self._conclusion_settings,
             self._concl_no_issues_settings,
             self._topic_sentence_settings,
             self._concl_section_settings,
             self._translate_settings,
+            self._editor_pinned_action_ids,
             self._libreoffice_python_path,
             self._concordance_file_path,
             self._editor_source_file,
@@ -1737,11 +2108,13 @@ class ProseWindow(Adw.ApplicationWindow):
         ask_settings: AskSettings,
         shorten_settings: ShortenSettings,
         introduction_settings: IntroductionSettings,
+        introduction_reply_settings: IntroductionSettings,
         conclusion_settings: ConclusionSettings,
         concl_no_issues_settings: ConclNoIssuesSettings,
         topic_sentence_settings: TopicSentenceSettings,
         concl_section_settings: ConclSectionSettings,
         translate_settings: TranslateSettings,
+        editor_pinned_action_ids: list[str],
         libreoffice_python_path: Path | None,
         concordance_file_path: Path | None,
     ) -> None:
@@ -1755,11 +2128,13 @@ class ProseWindow(Adw.ApplicationWindow):
         self._ask_settings = ask_settings
         self._shorten_settings = shorten_settings
         self._introduction_settings = introduction_settings
+        self._introduction_reply_settings = introduction_reply_settings
         self._conclusion_settings = conclusion_settings
         self._concl_no_issues_settings = concl_no_issues_settings
         self._topic_sentence_settings = topic_sentence_settings
         self._concl_section_settings = concl_section_settings
         self._translate_settings = translate_settings
+        self._editor_pinned_action_ids = _sanitize_editor_pinned_actions(editor_pinned_action_ids)
         self._libreoffice_python_path = libreoffice_python_path.expanduser().resolve(strict=False) if libreoffice_python_path else None
         self._concordance_file_path = (
             concordance_file_path.expanduser().resolve(strict=False) if concordance_file_path else None
@@ -1774,13 +2149,16 @@ class ProseWindow(Adw.ApplicationWindow):
         save_ask_settings(ask_settings)
         save_shorten_settings(shorten_settings)
         save_introduction_settings(introduction_settings)
+        save_introduction_reply_settings(introduction_reply_settings)
         save_conclusion_settings(conclusion_settings)
         save_concl_no_issues_settings(concl_no_issues_settings)
         save_topic_sentence_settings(topic_sentence_settings)
         save_concl_section_settings(concl_section_settings)
         save_translate_settings(translate_settings)
+        save_editor_pinned_actions(self._editor_pinned_action_ids)
         save_libreoffice_python_path(self._libreoffice_python_path)
         save_concordance_file_path(self._concordance_file_path)
+        self._rebuild_transform_action_buttons()
         _import_uno_from_candidates(self._libreoffice_python_path, force_retry=True)
         self._ctx = None
         self._desktop = None
@@ -2545,6 +2923,35 @@ class ProseWindow(Adw.ApplicationWindow):
         thread = threading.Thread(target=self._run_introduction, args=(source_text,), daemon=True)
         thread.start()
 
+    def _on_introduction_reply_clicked(self, _button: Gtk.Button) -> None:
+        if self._busy:
+            return
+        if not self._introduction_reply_settings.is_configured():
+            self._show_toast(
+                "Add Introduction for Reply API URL, API key, and prompt in Settings. Model ID may be required."
+            )
+            return
+        desktop = self._get_desktop()
+        if not desktop:
+            self._show_toast("Unable to reach LibreOffice listener. Is the service running?")
+            return
+        doc = self._get_active_writer(desktop)
+        if not doc:
+            self._show_toast("Open a Writer document (File → Launch Writer).")
+            return
+        source_text = self._extract_section_between_headings(doc, "ARGUMENT", "CONCLUSION")
+        if not source_text:
+            self._show_toast('Unable to find text between "ARGUMENT" and "CONCLUSION".')
+            return
+        if not self._prepare_editor_insertion(doc):
+            self._show_toast("Unable to prepare Writer insertion point.")
+            return
+        self._set_spelling_output_text("")
+        self._set_busy(True)
+        self._status_label.set_label("Writing introduction for reply…")
+        thread = threading.Thread(target=self._run_introduction_reply, args=(source_text,), daemon=True)
+        thread.start()
+
     def _on_conclusion_clicked(self, _button: Gtk.Button) -> None:
         if self._busy:
             return
@@ -2648,18 +3055,18 @@ class ProseWindow(Adw.ApplicationWindow):
             ],
             "stream": False,
         }
-        return self._add_model_id(payload, self._thesaurus_settings.model_id)
+        return self._add_model_id(
+            payload,
+            self._thesaurus_settings.model_id,
+            disable_reasoning=self._thesaurus_settings.disable_reasoning,
+        )
 
     def _call_thesaurus(self, payload: dict[str, Any]) -> list[str]:
-        headers = {
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {self._thesaurus_settings.api_key}",
-            "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) Prose/1.0",
-        }
-        data = json.dumps(payload).encode("utf-8")
-        req = urllib.request.Request(self._thesaurus_settings.api_url, data=data, headers=headers, method="POST")
-        with urllib.request.urlopen(req) as resp:
-            raw = resp.read().decode("utf-8", errors="ignore")
+        raw = self._post_json_and_read(
+            payload,
+            self._thesaurus_settings.api_url,
+            self._thesaurus_settings.api_key,
+        )
         parts = list(self._extract_response_text(raw))
         if not parts:
             raise ValueError("Thesaurus returned empty output.")
@@ -2767,7 +3174,11 @@ class ProseWindow(Adw.ApplicationWindow):
             ],
             "tool_choice": "auto",
         }
-        return self._add_model_id(payload, self._reference_settings.model_id)
+        return self._add_model_id(
+            payload,
+            self._reference_settings.model_id,
+            disable_reasoning=self._reference_settings.disable_reasoning,
+        )
 
     def _compose_ask_payload(self, question: str) -> dict[str, Any]:
         prompt = self._ask_settings.prompt or DEFAULT_ASK_PROMPT
@@ -2793,7 +3204,11 @@ class ProseWindow(Adw.ApplicationWindow):
             ],
             "tool_choice": "auto",
         }
-        return self._add_model_id(payload, self._ask_settings.model_id)
+        return self._add_model_id(
+            payload,
+            self._ask_settings.model_id,
+            disable_reasoning=self._ask_settings.disable_reasoning,
+        )
 
     def _on_reference_finished(self, message: str) -> bool:
         self._set_busy(False)
@@ -3342,18 +3757,18 @@ class ProseWindow(Adw.ApplicationWindow):
             ],
             "stream": False,
         }
-        return self._add_model_id(payload, self._combine_cites_settings.model_id)
+        return self._add_model_id(
+            payload,
+            self._combine_cites_settings.model_id,
+            disable_reasoning=self._combine_cites_settings.disable_reasoning,
+        )
 
     def _call_combine_cites(self, payload: dict[str, Any]) -> str:
-        headers = {
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {self._combine_cites_settings.api_key}",
-            "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) Prose/1.0",
-        }
-        data = json.dumps(payload).encode("utf-8")
-        req = urllib.request.Request(self._combine_cites_settings.api_url, data=data, headers=headers, method="POST")
-        with urllib.request.urlopen(req) as resp:
-            raw = resp.read().decode("utf-8", errors="ignore")
+        raw = self._post_json_and_read(
+            payload,
+            self._combine_cites_settings.api_url,
+            self._combine_cites_settings.api_key,
+        )
         parts = list(self._extract_response_text(raw))
         combined_text = "".join(parts).strip()
         if not combined_text:
@@ -3991,11 +4406,88 @@ class ProseWindow(Adw.ApplicationWindow):
         self,
         payload: dict[str, Any],
         model_id: str,
+        disable_reasoning: bool = False,
     ) -> dict[str, Any]:
         cleaned = model_id.strip()
         if cleaned:
             payload["model"] = cleaned
+        _apply_disable_reasoning_to_body(
+            payload,
+            model_id=cleaned,
+            disable_reasoning=disable_reasoning,
+        )
         return payload
+
+    def _should_retry_without_reasoning_controls(
+        self,
+        payload: dict[str, Any],
+        message: str,
+        *,
+        attempted_without_thinking: bool,
+        attempted_without_reasoning_effort: bool,
+    ) -> tuple[bool, bool, bool]:
+        lowered = (message or "").lower()
+        if (
+            not attempted_without_thinking
+            and "thinking" in payload
+            and "thinking" in lowered
+            and any(marker in lowered for marker in ("unsupported", "unknown", "invalid"))
+        ):
+            payload.pop("thinking", None)
+            return True, True, attempted_without_reasoning_effort
+        if (
+            not attempted_without_reasoning_effort
+            and "reasoning_effort" in payload
+            and "reasoning_effort" in lowered
+            and any(marker in lowered for marker in ("unsupported", "unknown", "invalid"))
+        ):
+            payload.pop("reasoning_effort", None)
+            return True, attempted_without_thinking, True
+        return False, attempted_without_thinking, attempted_without_reasoning_effort
+
+    def _post_json_and_read(
+        self,
+        payload: dict[str, Any],
+        api_url: str,
+        api_key: str,
+        *,
+        accept: str | None = None,
+    ) -> str:
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {api_key}",
+            "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) Prose/1.0",
+        }
+        if accept:
+            headers["Accept"] = accept
+
+        attempted_without_thinking = False
+        attempted_without_reasoning_effort = False
+        while True:
+            data = json.dumps(payload).encode("utf-8")
+            req = urllib.request.Request(api_url, data=data, headers=headers, method="POST")
+            try:
+                with urllib.request.urlopen(req) as resp:
+                    return resp.read().decode("utf-8", errors="ignore")
+            except urllib.error.HTTPError as exc:
+                detail = ""
+                try:
+                    detail = exc.read().decode("utf-8", errors="ignore").strip()
+                except Exception:
+                    pass
+                should_retry, attempted_without_thinking, attempted_without_reasoning_effort = (
+                    self._should_retry_without_reasoning_controls(
+                        payload,
+                        detail or str(exc.reason or "request failed"),
+                        attempted_without_thinking=attempted_without_thinking,
+                        attempted_without_reasoning_effort=attempted_without_reasoning_effort,
+                    )
+                )
+                if should_retry:
+                    continue
+                if detail:
+                    raise ValueError(f"HTTP {exc.code}: {exc.reason or 'request failed'} - {detail}") from exc
+                raise ValueError(f"HTTP {exc.code}: {exc.reason or 'request failed'}") from exc
 
     def _is_gemini_generate_content_url(self, api_url: str) -> bool:
         lowered = api_url.lower()
@@ -4079,18 +4571,18 @@ class ProseWindow(Adw.ApplicationWindow):
             ],
             "stream": False,
         }
-        return self._add_model_id(payload, self._proof_settings.model_id)
+        return self._add_model_id(
+            payload,
+            self._proof_settings.model_id,
+            disable_reasoning=self._proof_settings.disable_reasoning,
+        )
 
     def _call_llm(self, payload: dict[str, Any]) -> list[Suggestion]:
-        headers = {
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {self._proof_settings.api_key}",
-            "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) Prose/1.0",
-        }
-        data = json.dumps(payload).encode("utf-8")
-        req = urllib.request.Request(self._proof_settings.api_url, data=data, headers=headers, method="POST")
-        with urllib.request.urlopen(req) as resp:
-            raw = resp.read().decode("utf-8", errors="ignore")
+        raw = self._post_json_and_read(
+            payload,
+            self._proof_settings.api_url,
+            self._proof_settings.api_key,
+        )
         self._last_raw_response = raw
         suggestions = self._parse_suggestions(raw)
         return suggestions
@@ -4421,6 +4913,30 @@ class ProseWindow(Adw.ApplicationWindow):
             GLib.idle_add(self._on_spellingstyle_failed, str(exc))
             return
         GLib.idle_add(self._on_introduction_finished, "Introduction complete.")
+
+    def _run_introduction_reply(self, source_text: str) -> None:
+        payload = self._compose_introduction_reply_payload(source_text)
+        try:
+            if self._is_gemini_generate_content_url(self._introduction_reply_settings.api_url):
+                prompt = self._introduction_reply_settings.prompt or DEFAULT_INTRO_REPLY_PROMPT
+                combined = f"{prompt}\n\n{source_text}" if prompt else source_text
+                output = self._call_gemini_generate_content(
+                    self._introduction_reply_settings.api_url,
+                    self._introduction_reply_settings.api_key,
+                    combined,
+                )
+                GLib.idle_add(self._append_editor_text, output)
+                GLib.idle_add(self._append_spelling_output_text, output)
+            else:
+                for chunk in self._stream_custom(
+                    payload, self._introduction_reply_settings.api_url, self._introduction_reply_settings.api_key
+                ):
+                    GLib.idle_add(self._append_editor_text, chunk)
+                    GLib.idle_add(self._append_spelling_output_text, chunk)
+        except Exception as exc:  # noqa: BLE001
+            GLib.idle_add(self._on_spellingstyle_failed, str(exc))
+            return
+        GLib.idle_add(self._on_introduction_finished, "Introduction for reply complete.")
 
     def _run_conclusion(self, source_text: str) -> None:
         payload = self._compose_conclusion_payload(source_text)
@@ -4800,6 +5316,7 @@ class ProseWindow(Adw.ApplicationWindow):
             payload = self._add_model_id(
                 payload,
                 self._translate_settings.model_id,
+                disable_reasoning=self._translate_settings.disable_reasoning,
             )
             return self._call_responses_text(
                 payload,
@@ -4822,6 +5339,7 @@ class ProseWindow(Adw.ApplicationWindow):
         payload = self._add_model_id(
             payload,
             self._translate_settings.model_id,
+            disable_reasoning=self._translate_settings.disable_reasoning,
         )
         return self._call_chat_text(
             payload,
@@ -4859,6 +5377,7 @@ class ProseWindow(Adw.ApplicationWindow):
             request_payload = self._add_model_id(
                 request_payload,
                 self._translate_settings.model_id,
+                disable_reasoning=self._translate_settings.disable_reasoning,
             )
             raw_output = self._call_responses_text(
                 request_payload,
@@ -4876,6 +5395,7 @@ class ProseWindow(Adw.ApplicationWindow):
             request_payload = self._add_model_id(
                 request_payload,
                 self._translate_settings.model_id,
+                disable_reasoning=self._translate_settings.disable_reasoning,
             )
             raw_output = self._call_chat_text(
                 request_payload,
@@ -4958,30 +5478,14 @@ class ProseWindow(Adw.ApplicationWindow):
         return False
 
     def _call_chat_text(self, payload: dict[str, Any], api_url: str, api_key: str) -> str:
-        headers = {
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {api_key}",
-            "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) Prose/1.0",
-        }
-        data = json.dumps(payload).encode("utf-8")
-        req = urllib.request.Request(api_url, data=data, headers=headers, method="POST")
-        with urllib.request.urlopen(req) as resp:
-            raw = resp.read().decode("utf-8", errors="ignore")
+        raw = self._post_json_and_read(payload, api_url, api_key)
         text = "".join(self._extract_response_text(raw)).strip()
         if not text:
             raise ValueError("Translate returned empty output.")
         return text
 
     def _call_responses_text(self, payload: dict[str, Any], api_url: str, api_key: str) -> str:
-        headers = {
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {api_key}",
-            "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) Prose/1.0",
-        }
-        data = json.dumps(payload).encode("utf-8")
-        req = urllib.request.Request(api_url, data=data, headers=headers, method="POST")
-        with urllib.request.urlopen(req) as resp:
-            raw = resp.read().decode("utf-8", errors="ignore")
+        raw = self._post_json_and_read(payload, api_url, api_key)
         text = "".join(self._extract_responses_text(raw)).strip()
         if not text:
             raise ValueError("Translate returned empty output.")
@@ -5037,6 +5541,7 @@ class ProseWindow(Adw.ApplicationWindow):
         return self._add_model_id(
             payload,
             self._spelling_settings.model_id,
+            disable_reasoning=self._spelling_settings.disable_reasoning,
         )
 
     def _compose_improve1_payload(self, source_text: str) -> dict[str, Any]:
@@ -5051,6 +5556,7 @@ class ProseWindow(Adw.ApplicationWindow):
         return self._add_model_id(
             payload,
             self._improve1_settings.model_id,
+            disable_reasoning=self._improve1_settings.disable_reasoning,
         )
 
     def _compose_improve2_payload(self, source_text: str) -> dict[str, Any]:
@@ -5065,6 +5571,7 @@ class ProseWindow(Adw.ApplicationWindow):
         return self._add_model_id(
             payload,
             self._improve2_settings.model_id,
+            disable_reasoning=self._improve2_settings.disable_reasoning,
         )
 
     def _compose_shorten_payload(self, source_text: str) -> dict[str, Any]:
@@ -5079,6 +5586,7 @@ class ProseWindow(Adw.ApplicationWindow):
         return self._add_model_id(
             payload,
             self._shorten_settings.model_id,
+            disable_reasoning=self._shorten_settings.disable_reasoning,
         )
 
     def _compose_topic_sentence_payload(self, source_text: str) -> dict[str, Any]:
@@ -5093,6 +5601,7 @@ class ProseWindow(Adw.ApplicationWindow):
         return self._add_model_id(
             payload,
             self._topic_sentence_settings.model_id,
+            disable_reasoning=self._topic_sentence_settings.disable_reasoning,
         )
 
     def _compose_introduction_payload(self, source_text: str) -> dict[str, Any]:
@@ -5107,6 +5616,22 @@ class ProseWindow(Adw.ApplicationWindow):
         return self._add_model_id(
             payload,
             self._introduction_settings.model_id,
+            disable_reasoning=self._introduction_settings.disable_reasoning,
+        )
+
+    def _compose_introduction_reply_payload(self, source_text: str) -> dict[str, Any]:
+        system_prompt = self._introduction_reply_settings.prompt or DEFAULT_INTRO_REPLY_PROMPT
+        payload = {
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": source_text},
+            ],
+            "stream": True,
+        }
+        return self._add_model_id(
+            payload,
+            self._introduction_reply_settings.model_id,
+            disable_reasoning=self._introduction_reply_settings.disable_reasoning,
         )
 
     def _compose_conclusion_payload(self, source_text: str) -> dict[str, Any]:
@@ -5121,6 +5646,7 @@ class ProseWindow(Adw.ApplicationWindow):
         return self._add_model_id(
             payload,
             self._conclusion_settings.model_id,
+            disable_reasoning=self._conclusion_settings.disable_reasoning,
         )
 
     def _compose_conclusion_no_issues_payload(self, source_text: str) -> dict[str, Any]:
@@ -5135,6 +5661,7 @@ class ProseWindow(Adw.ApplicationWindow):
         return self._add_model_id(
             payload,
             self._concl_no_issues_settings.model_id,
+            disable_reasoning=self._concl_no_issues_settings.disable_reasoning,
         )
 
     def _compose_concl_section_payload(self, source_text: str) -> dict[str, Any]:
@@ -5149,130 +5676,29 @@ class ProseWindow(Adw.ApplicationWindow):
         return self._add_model_id(
             payload,
             self._concl_section_settings.model_id,
+            disable_reasoning=self._concl_section_settings.disable_reasoning,
         )
 
     def _stream_spellingstyle(self, payload: dict[str, Any]) -> Iterable[str]:
-        headers = {
-            "Content-Type": "application/json",
-            "Accept": "text/event-stream",
-            "Authorization": f"Bearer {self._spelling_settings.api_key}",
-            "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) Prose/1.0",
-        }
-        data = json.dumps(payload).encode("utf-8")
-        req = urllib.request.Request(self._spelling_settings.api_url, data=data, headers=headers, method="POST")
-        try:
-            with urllib.request.urlopen(req) as resp:
-                content_type = resp.headers.get("Content-Type", "")
-                if "text/event-stream" not in content_type:
-                    raw = resp.read().decode("utf-8", errors="ignore")
-                    for chunk in self._extract_response_text(raw):
-                        yield chunk
-                    return
-                for raw_line in resp:
-                    line = raw_line.decode("utf-8", errors="ignore").strip()
-                    if not line or not line.startswith("data:"):
-                        continue
-                    payload_str = line[5:].strip()
-                    if payload_str == "[DONE]":
-                        break
-                    try:
-                        data_obj = json.loads(payload_str)
-                    except json.JSONDecodeError:
-                        continue
-                    chunk = self._extract_stream_delta(data_obj)
-                    if chunk:
-                        yield chunk
-        except urllib.error.HTTPError as exc:
-            detail = ""
-            try:
-                detail = exc.read().decode("utf-8", errors="ignore").strip()
-            except Exception:
-                pass
-            if detail:
-                raise ValueError(f"HTTP {exc.code}: {exc.reason or 'request failed'} - {detail}") from exc
-            raise ValueError(f"HTTP {exc.code}: {exc.reason or 'request failed'}") from exc
+        yield from self._stream_custom(
+            payload,
+            self._spelling_settings.api_url,
+            self._spelling_settings.api_key,
+        )
 
     def _stream_improve1(self, payload: dict[str, Any]) -> Iterable[str]:
-        headers = {
-            "Content-Type": "application/json",
-            "Accept": "text/event-stream",
-            "Authorization": f"Bearer {self._improve1_settings.api_key}",
-            "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) Prose/1.0",
-        }
-        data = json.dumps(payload).encode("utf-8")
-        req = urllib.request.Request(self._improve1_settings.api_url, data=data, headers=headers, method="POST")
-        try:
-            with urllib.request.urlopen(req) as resp:
-                content_type = resp.headers.get("Content-Type", "")
-                if "text/event-stream" not in content_type:
-                    raw = resp.read().decode("utf-8", errors="ignore")
-                    for chunk in self._extract_response_text(raw):
-                        yield chunk
-                    return
-                for raw_line in resp:
-                    line = raw_line.decode("utf-8", errors="ignore").strip()
-                    if not line or not line.startswith("data:"):
-                        continue
-                    payload_str = line[5:].strip()
-                    if payload_str == "[DONE]":
-                        break
-                    try:
-                        data_obj = json.loads(payload_str)
-                    except json.JSONDecodeError:
-                        continue
-                    chunk = self._extract_stream_delta(data_obj)
-                    if chunk:
-                        yield chunk
-        except urllib.error.HTTPError as exc:
-            detail = ""
-            try:
-                detail = exc.read().decode("utf-8", errors="ignore").strip()
-            except Exception:
-                pass
-            if detail:
-                raise ValueError(f"HTTP {exc.code}: {exc.reason or 'request failed'} - {detail}") from exc
-            raise ValueError(f"HTTP {exc.code}: {exc.reason or 'request failed'}") from exc
+        yield from self._stream_custom(
+            payload,
+            self._improve1_settings.api_url,
+            self._improve1_settings.api_key,
+        )
 
     def _stream_improve2(self, payload: dict[str, Any]) -> Iterable[str]:
-        headers = {
-            "Content-Type": "application/json",
-            "Accept": "text/event-stream",
-            "Authorization": f"Bearer {self._improve2_settings.api_key}",
-            "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) Prose/1.0",
-        }
-        data = json.dumps(payload).encode("utf-8")
-        req = urllib.request.Request(self._improve2_settings.api_url, data=data, headers=headers, method="POST")
-        try:
-            with urllib.request.urlopen(req) as resp:
-                content_type = resp.headers.get("Content-Type", "")
-                if "text/event-stream" not in content_type:
-                    raw = resp.read().decode("utf-8", errors="ignore")
-                    for chunk in self._extract_response_text(raw):
-                        yield chunk
-                    return
-                for raw_line in resp:
-                    line = raw_line.decode("utf-8", errors="ignore").strip()
-                    if not line or not line.startswith("data:"):
-                        continue
-                    payload_str = line[5:].strip()
-                    if payload_str == "[DONE]":
-                        break
-                    try:
-                        data_obj = json.loads(payload_str)
-                    except json.JSONDecodeError:
-                        continue
-                    chunk = self._extract_stream_delta(data_obj)
-                    if chunk:
-                        yield chunk
-        except urllib.error.HTTPError as exc:
-            detail = ""
-            try:
-                detail = exc.read().decode("utf-8", errors="ignore").strip()
-            except Exception:
-                pass
-            if detail:
-                raise ValueError(f"HTTP {exc.code}: {exc.reason or 'request failed'} - {detail}") from exc
-            raise ValueError(f"HTTP {exc.code}: {exc.reason or 'request failed'}") from exc
+        yield from self._stream_custom(
+            payload,
+            self._improve2_settings.api_url,
+            self._improve2_settings.api_key,
+        )
 
     def _stream_custom(self, payload: dict[str, Any], api_url: str, api_key: str) -> Iterable[str]:
         headers = {
@@ -5281,39 +5707,53 @@ class ProseWindow(Adw.ApplicationWindow):
             "Authorization": f"Bearer {api_key}",
             "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) Prose/1.0",
         }
-        data = json.dumps(payload).encode("utf-8")
-        req = urllib.request.Request(api_url, data=data, headers=headers, method="POST")
-        try:
-            with urllib.request.urlopen(req) as resp:
-                content_type = resp.headers.get("Content-Type", "")
-                if "text/event-stream" not in content_type:
-                    raw = resp.read().decode("utf-8", errors="ignore")
-                    for chunk in self._extract_response_text(raw):
-                        yield chunk
-                    return
-                for raw_line in resp:
-                    line = raw_line.decode("utf-8", errors="ignore").strip()
-                    if not line or not line.startswith("data:"):
-                        continue
-                    payload_str = line[5:].strip()
-                    if payload_str == "[DONE]":
-                        break
-                    try:
-                        data_obj = json.loads(payload_str)
-                    except json.JSONDecodeError:
-                        continue
-                    chunk = self._extract_stream_delta(data_obj)
-                    if chunk:
-                        yield chunk
-        except urllib.error.HTTPError as exc:
-            detail = ""
+        attempted_without_thinking = False
+        attempted_without_reasoning_effort = False
+        while True:
+            data = json.dumps(payload).encode("utf-8")
+            req = urllib.request.Request(api_url, data=data, headers=headers, method="POST")
             try:
-                detail = exc.read().decode("utf-8", errors="ignore").strip()
-            except Exception:
-                pass
-            if detail:
-                raise ValueError(f"HTTP {exc.code}: {exc.reason or 'request failed'} - {detail}") from exc
-            raise ValueError(f"HTTP {exc.code}: {exc.reason or 'request failed'}") from exc
+                with urllib.request.urlopen(req) as resp:
+                    content_type = resp.headers.get("Content-Type", "")
+                    if "text/event-stream" not in content_type:
+                        raw = resp.read().decode("utf-8", errors="ignore")
+                        for chunk in self._extract_response_text(raw):
+                            yield chunk
+                        return
+                    for raw_line in resp:
+                        line = raw_line.decode("utf-8", errors="ignore").strip()
+                        if not line or not line.startswith("data:"):
+                            continue
+                        payload_str = line[5:].strip()
+                        if payload_str == "[DONE]":
+                            break
+                        try:
+                            data_obj = json.loads(payload_str)
+                        except json.JSONDecodeError:
+                            continue
+                        chunk = self._extract_stream_delta(data_obj)
+                        if chunk:
+                            yield chunk
+                return
+            except urllib.error.HTTPError as exc:
+                detail = ""
+                try:
+                    detail = exc.read().decode("utf-8", errors="ignore").strip()
+                except Exception:
+                    pass
+                should_retry, attempted_without_thinking, attempted_without_reasoning_effort = (
+                    self._should_retry_without_reasoning_controls(
+                        payload,
+                        detail or str(exc.reason or "request failed"),
+                        attempted_without_thinking=attempted_without_thinking,
+                        attempted_without_reasoning_effort=attempted_without_reasoning_effort,
+                    )
+                )
+                if should_retry:
+                    continue
+                if detail:
+                    raise ValueError(f"HTTP {exc.code}: {exc.reason or 'request failed'} - {detail}") from exc
+                raise ValueError(f"HTTP {exc.code}: {exc.reason or 'request failed'}") from exc
 
     def _stream_responses(self, payload: dict[str, Any], api_url: str, api_key: str) -> Iterable[str]:
         headers = {
@@ -5322,39 +5762,53 @@ class ProseWindow(Adw.ApplicationWindow):
             "Authorization": f"Bearer {api_key}",
             "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) Prose/1.0",
         }
-        data = json.dumps(payload).encode("utf-8")
-        req = urllib.request.Request(api_url, data=data, headers=headers, method="POST")
-        try:
-            with urllib.request.urlopen(req) as resp:
-                content_type = resp.headers.get("Content-Type", "")
-                if "text/event-stream" not in content_type:
-                    raw = resp.read().decode("utf-8", errors="ignore")
-                    for chunk in self._extract_responses_text(raw):
-                        yield chunk
-                    return
-                for raw_line in resp:
-                    line = raw_line.decode("utf-8", errors="ignore").strip()
-                    if not line or not line.startswith("data:"):
-                        continue
-                    payload_str = line[5:].strip()
-                    if payload_str == "[DONE]":
-                        break
-                    try:
-                        data_obj = json.loads(payload_str)
-                    except json.JSONDecodeError:
-                        continue
-                    chunk = self._extract_responses_delta(data_obj)
-                    if chunk:
-                        yield chunk
-        except urllib.error.HTTPError as exc:
-            detail = ""
+        attempted_without_thinking = False
+        attempted_without_reasoning_effort = False
+        while True:
+            data = json.dumps(payload).encode("utf-8")
+            req = urllib.request.Request(api_url, data=data, headers=headers, method="POST")
             try:
-                detail = exc.read().decode("utf-8", errors="ignore").strip()
-            except Exception:
-                pass
-            if detail:
-                raise ValueError(f"HTTP {exc.code}: {exc.reason or 'request failed'} - {detail}") from exc
-            raise ValueError(f"HTTP {exc.code}: {exc.reason or 'request failed'}") from exc
+                with urllib.request.urlopen(req) as resp:
+                    content_type = resp.headers.get("Content-Type", "")
+                    if "text/event-stream" not in content_type:
+                        raw = resp.read().decode("utf-8", errors="ignore")
+                        for chunk in self._extract_responses_text(raw):
+                            yield chunk
+                        return
+                    for raw_line in resp:
+                        line = raw_line.decode("utf-8", errors="ignore").strip()
+                        if not line or not line.startswith("data:"):
+                            continue
+                        payload_str = line[5:].strip()
+                        if payload_str == "[DONE]":
+                            break
+                        try:
+                            data_obj = json.loads(payload_str)
+                        except json.JSONDecodeError:
+                            continue
+                        chunk = self._extract_responses_delta(data_obj)
+                        if chunk:
+                            yield chunk
+                return
+            except urllib.error.HTTPError as exc:
+                detail = ""
+                try:
+                    detail = exc.read().decode("utf-8", errors="ignore").strip()
+                except Exception:
+                    pass
+                should_retry, attempted_without_thinking, attempted_without_reasoning_effort = (
+                    self._should_retry_without_reasoning_controls(
+                        payload,
+                        detail or str(exc.reason or "request failed"),
+                        attempted_without_thinking=attempted_without_thinking,
+                        attempted_without_reasoning_effort=attempted_without_reasoning_effort,
+                    )
+                )
+                if should_retry:
+                    continue
+                if detail:
+                    raise ValueError(f"HTTP {exc.code}: {exc.reason or 'request failed'} - {detail}") from exc
+                raise ValueError(f"HTTP {exc.code}: {exc.reason or 'request failed'}") from exc
 
     def _stream_reference_responses(self, payload: dict[str, Any]) -> Iterable[str]:
         return self._stream_responses(payload, self._reference_settings.api_url, self._reference_settings.api_key)
@@ -5920,11 +6374,13 @@ class SettingsWindow(Adw.ApplicationWindow):
         ask_settings: AskSettings,
         shorten_settings: ShortenSettings,
         introduction_settings: IntroductionSettings,
+        introduction_reply_settings: IntroductionSettings,
         conclusion_settings: ConclusionSettings,
         concl_no_issues_settings: ConclNoIssuesSettings,
         topic_sentence_settings: TopicSentenceSettings,
         concl_section_settings: ConclSectionSettings,
         translate_settings: TranslateSettings,
+        editor_pinned_action_ids: list[str],
         libreoffice_python_path: Path | None,
         concordance_file_path: Path | None,
         editor_source_file: Path | None,
@@ -5942,11 +6398,13 @@ class SettingsWindow(Adw.ApplicationWindow):
                 AskSettings,
                 ShortenSettings,
                 IntroductionSettings,
+                IntroductionSettings,
                 ConclusionSettings,
                 ConclNoIssuesSettings,
                 TopicSentenceSettings,
                 ConclSectionSettings,
                 TranslateSettings,
+                list[str],
                 Path | None,
                 Path | None,
             ],
@@ -5968,11 +6426,18 @@ class SettingsWindow(Adw.ApplicationWindow):
         self._ask_settings = ask_settings
         self._shorten_settings = shorten_settings
         self._introduction_settings = introduction_settings
+        self._introduction_reply_settings = introduction_reply_settings
         self._conclusion_settings = conclusion_settings
         self._concl_no_issues_settings = concl_no_issues_settings
         self._topic_sentence_settings = topic_sentence_settings
         self._concl_section_settings = concl_section_settings
         self._translate_settings = translate_settings
+        self._editor_action_order = _ordered_editor_quick_action_keys(editor_pinned_action_ids)
+        pinned_action_set = set(_sanitize_editor_pinned_actions(editor_pinned_action_ids))
+        self._quick_action_enabled = {
+            key: key in pinned_action_set
+            for key in self._editor_action_order
+        }
         self._libreoffice_python_path = libreoffice_python_path
         self._concordance_file_path = concordance_file_path
         self._editor_source_file = editor_source_file
@@ -5981,6 +6446,7 @@ class SettingsWindow(Adw.ApplicationWindow):
         self._source_row_guard = False
         self._libreoffice_path_row_guard = False
         self._concordance_path_row_guard = False
+        self._quick_action_toggle_guard = False
         self.set_default_size(900, 720)
         self.set_resizable(True)
         self._build_ui()
@@ -6051,6 +6517,44 @@ class SettingsWindow(Adw.ApplicationWindow):
         profile_row.add_suffix(profile_copy_btn)
         source_group.add(profile_row)
 
+        quick_actions_group = Adw.PreferencesGroup(
+            title="Quick Actions",
+            description=(
+                f"Pin up to {MAX_PINNED_EDITOR_ACTIONS} actions for the Editor toolbar. "
+                "Use the arrows to change their order."
+            ),
+        )
+        quick_actions_group.add_css_class("list-stack")
+        box.append(quick_actions_group)
+
+        quick_actions_row = Adw.PreferencesRow()
+        quick_actions_row.set_selectable(False)
+        quick_actions_row.set_activatable(False)
+
+        quick_actions_content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        quick_actions_content.set_margin_top(10)
+        quick_actions_content.set_margin_bottom(10)
+        quick_actions_content.set_margin_start(12)
+        quick_actions_content.set_margin_end(12)
+
+        quick_actions_hint = Gtk.Label(xalign=0)
+        quick_actions_hint.add_css_class("caption")
+        quick_actions_hint.add_css_class("dim-label")
+        quick_actions_hint.set_wrap(True)
+        quick_actions_hint.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
+        quick_actions_content.append(quick_actions_hint)
+        self._quick_actions_hint = quick_actions_hint
+
+        quick_actions_list = Gtk.ListBox()
+        quick_actions_list.set_selection_mode(Gtk.SelectionMode.NONE)
+        quick_actions_list.add_css_class("boxed-list")
+        quick_actions_content.append(quick_actions_list)
+        self._quick_actions_list = quick_actions_list
+
+        quick_actions_row.set_child(quick_actions_content)
+        quick_actions_group.add(quick_actions_row)
+        self._rebuild_quick_action_rows()
+
         split = Gtk.Paned(orientation=Gtk.Orientation.HORIZONTAL)
         split.set_hexpand(True)
         split.set_vexpand(True)
@@ -6087,6 +6591,7 @@ class SettingsWindow(Adw.ApplicationWindow):
             ("combine", "Combine Cites", self._combine_cites_settings, DEFAULT_COMBINE_CITES_PROMPT),
             ("shorten", "Shorten", self._shorten_settings, DEFAULT_SHORTEN_PROMPT),
             ("intro", "Introduction", self._introduction_settings, DEFAULT_INTRO_PROMPT),
+            ("intro-reply", "Introduction for Reply", self._introduction_reply_settings, DEFAULT_INTRO_REPLY_PROMPT),
             ("conclusion", "Conclusion", self._conclusion_settings, DEFAULT_CONCLUSION_PROMPT),
             ("concl-no-issues", "Concl. No Issues", self._concl_no_issues_settings, DEFAULT_CONCL_NO_ISSUES_PROMPT),
             ("topic-sentence", "Topic Sentence", self._topic_sentence_settings, DEFAULT_TOPIC_SENTENCE_PROMPT),
@@ -6324,6 +6829,85 @@ class SettingsWindow(Adw.ApplicationWindow):
         if ok:
             self._parent_window._status_label.set_label("LibreOffice profile imported. Launch Writer to use it.")
 
+    def _clear_list_box(self, list_box: Gtk.ListBox) -> None:
+        child = list_box.get_first_child()
+        while child is not None:
+            next_child = child.get_next_sibling()
+            list_box.remove(child)
+            child = next_child
+
+    def _current_editor_pinned_actions(self) -> list[str]:
+        return [key for key in self._editor_action_order if self._quick_action_enabled.get(key, False)]
+
+    def _update_quick_actions_hint(self) -> None:
+        count = len(self._current_editor_pinned_actions())
+        self._quick_actions_hint.set_label(
+            f"{count} of {MAX_PINNED_EDITOR_ACTIONS} pinned. Unpinned actions stay under More."
+        )
+
+    def _rebuild_quick_action_rows(self) -> None:
+        self._clear_list_box(self._quick_actions_list)
+        self._update_quick_actions_hint()
+
+        last_index = len(self._editor_action_order) - 1
+        for index, key in enumerate(self._editor_action_order):
+            definition = EDITOR_QUICK_ACTION_BY_KEY[key]
+            row = Adw.ActionRow(title=definition.title, subtitle=definition.description)
+            row.set_activatable(False)
+
+            toggle = Gtk.CheckButton()
+            toggle.set_valign(Gtk.Align.CENTER)
+            toggle.set_active(self._quick_action_enabled.get(key, False))
+            toggle.set_tooltip_text("Show this action in the Editor quick-actions row")
+            toggle.connect("toggled", self._on_quick_action_toggled, key)
+            row.add_prefix(toggle)
+
+            up_btn = Gtk.Button(icon_name="go-up-symbolic")
+            up_btn.add_css_class("flat")
+            up_btn.set_tooltip_text("Move up")
+            up_btn.set_sensitive(index > 0)
+            up_btn.connect("clicked", self._on_move_quick_action_clicked, key, -1)
+            row.add_suffix(up_btn)
+
+            down_btn = Gtk.Button(icon_name="go-down-symbolic")
+            down_btn.add_css_class("flat")
+            down_btn.set_tooltip_text("Move down")
+            down_btn.set_sensitive(index < last_index)
+            down_btn.connect("clicked", self._on_move_quick_action_clicked, key, 1)
+            row.add_suffix(down_btn)
+
+            self._quick_actions_list.append(row)
+
+    def _on_quick_action_toggled(self, button: Gtk.CheckButton, key: str) -> None:
+        if self._quick_action_toggle_guard:
+            return
+
+        active = button.get_active()
+        was_active = self._quick_action_enabled.get(key, False)
+        if active == was_active:
+            return
+
+        if active and len(self._current_editor_pinned_actions()) >= MAX_PINNED_EDITOR_ACTIONS:
+            self._quick_action_toggle_guard = True
+            button.set_active(False)
+            self._quick_action_toggle_guard = False
+            self._parent_window._show_toast(f"Pin up to {MAX_PINNED_EDITOR_ACTIONS} quick actions.")
+            return
+
+        self._quick_action_enabled[key] = active
+        self._update_quick_actions_hint()
+
+    def _on_move_quick_action_clicked(self, _button: Gtk.Button, key: str, delta: int) -> None:
+        index = self._editor_action_order.index(key)
+        target_index = index + delta
+        if target_index < 0 or target_index >= len(self._editor_action_order):
+            return
+        self._editor_action_order[index], self._editor_action_order[target_index] = (
+            self._editor_action_order[target_index],
+            self._editor_action_order[index],
+        )
+        self._rebuild_quick_action_rows()
+
     def trigger_save(self) -> None:
         self._on_save_clicked(None)
 
@@ -6338,6 +6922,7 @@ class SettingsWindow(Adw.ApplicationWindow):
         combine_widgets = self._prompt_editors.get("combine")
         shorten_widgets = self._prompt_editors.get("shorten")
         intro_widgets = self._prompt_editors.get("intro")
+        intro_reply_widgets = self._prompt_editors.get("intro-reply")
         conclusion_widgets = self._prompt_editors.get("conclusion")
         concl_no_issues_widgets = self._prompt_editors.get("concl-no-issues")
         topic_sentence_widgets = self._prompt_editors.get("topic-sentence")
@@ -6355,6 +6940,7 @@ class SettingsWindow(Adw.ApplicationWindow):
                 combine_widgets,
                 shorten_widgets,
                 intro_widgets,
+                intro_reply_widgets,
                 conclusion_widgets,
                 concl_no_issues_widgets,
                 topic_sentence_widgets,
@@ -6374,6 +6960,7 @@ class SettingsWindow(Adw.ApplicationWindow):
         combine_prompt_text = self._prompt_text(combine_widgets.prompt_buffer)
         shorten_prompt_text = self._prompt_text(shorten_widgets.prompt_buffer)
         intro_prompt_text = self._prompt_text(intro_widgets.prompt_buffer)
+        intro_reply_prompt_text = self._prompt_text(intro_reply_widgets.prompt_buffer)
         conclusion_prompt_text = self._prompt_text(conclusion_widgets.prompt_buffer)
         concl_no_issues_prompt_text = self._prompt_text(concl_no_issues_widgets.prompt_buffer)
         topic_sentence_prompt_text = self._prompt_text(topic_sentence_widgets.prompt_buffer)
@@ -6384,18 +6971,21 @@ class SettingsWindow(Adw.ApplicationWindow):
             model_id=proof_widgets.model_row.get_text().strip(),
             api_key=proof_widgets.api_key_row.get_text().strip(),
             prompt=proof_prompt_text.strip() or DEFAULT_PROMPT,
+            disable_reasoning=proof_widgets.disable_reasoning_row.get_active(),
         )
         spelling_settings = SpellingStyleSettings(
             api_url=spelling_widgets.api_url_row.get_text().strip(),
             model_id=spelling_widgets.model_row.get_text().strip(),
             api_key=spelling_widgets.api_key_row.get_text().strip(),
             prompt=spelling_prompt_text.strip() or DEFAULT_SPELLINGSTYLE_PROMPT,
+            disable_reasoning=spelling_widgets.disable_reasoning_row.get_active(),
         )
         thesaurus_settings = ThesaurusSettings(
             api_url=thesaurus_widgets.api_url_row.get_text().strip(),
             model_id=thesaurus_widgets.model_row.get_text().strip(),
             api_key=thesaurus_widgets.api_key_row.get_text().strip(),
             prompt=thesaurus_prompt_text.strip() or DEFAULT_THESAURUS_PROMPT,
+            disable_reasoning=thesaurus_widgets.disable_reasoning_row.get_active(),
         )
         reference_settings = ReferenceSettings(
             api_url=reference_widgets.api_url_row.get_text().strip(),
@@ -6403,6 +6993,7 @@ class SettingsWindow(Adw.ApplicationWindow):
             api_key=reference_widgets.api_key_row.get_text().strip(),
             tavily_api_key=(reference_widgets.tavily_api_key_row.get_text().strip() if reference_widgets.tavily_api_key_row else ""),
             prompt=reference_prompt_text.strip() or DEFAULT_REFERENCE_PROMPT,
+            disable_reasoning=reference_widgets.disable_reasoning_row.get_active(),
         )
         ask_settings = AskSettings(
             api_url=ask_widgets.api_url_row.get_text().strip(),
@@ -6410,67 +7001,86 @@ class SettingsWindow(Adw.ApplicationWindow):
             api_key=ask_widgets.api_key_row.get_text().strip(),
             tavily_api_key=(ask_widgets.tavily_api_key_row.get_text().strip() if ask_widgets.tavily_api_key_row else ""),
             prompt=ask_prompt_text.strip() or DEFAULT_ASK_PROMPT,
+            disable_reasoning=ask_widgets.disable_reasoning_row.get_active(),
         )
         improve1_settings = Improve1Settings(
             api_url=improve1_widgets.api_url_row.get_text().strip(),
             model_id=improve1_widgets.model_row.get_text().strip(),
             api_key=improve1_widgets.api_key_row.get_text().strip(),
             prompt=improve1_prompt_text.strip() or DEFAULT_IMPROVE1_PROMPT,
+            disable_reasoning=improve1_widgets.disable_reasoning_row.get_active(),
         )
         improve2_settings = Improve2Settings(
             api_url=improve2_widgets.api_url_row.get_text().strip(),
             model_id=improve2_widgets.model_row.get_text().strip(),
             api_key=improve2_widgets.api_key_row.get_text().strip(),
             prompt=improve2_prompt_text.strip() or DEFAULT_IMPROVE2_PROMPT,
+            disable_reasoning=improve2_widgets.disable_reasoning_row.get_active(),
         )
         combine_cites_settings = CombineCitesSettings(
             api_url=combine_widgets.api_url_row.get_text().strip(),
             model_id=combine_widgets.model_row.get_text().strip(),
             api_key=combine_widgets.api_key_row.get_text().strip(),
             prompt=combine_prompt_text.strip() or DEFAULT_COMBINE_CITES_PROMPT,
+            disable_reasoning=combine_widgets.disable_reasoning_row.get_active(),
         )
         shorten_settings = ShortenSettings(
             api_url=shorten_widgets.api_url_row.get_text().strip(),
             model_id=shorten_widgets.model_row.get_text().strip(),
             api_key=shorten_widgets.api_key_row.get_text().strip(),
             prompt=shorten_prompt_text.strip() or DEFAULT_SHORTEN_PROMPT,
+            disable_reasoning=shorten_widgets.disable_reasoning_row.get_active(),
         )
         introduction_settings = IntroductionSettings(
             api_url=intro_widgets.api_url_row.get_text().strip(),
             model_id=intro_widgets.model_row.get_text().strip(),
             api_key=intro_widgets.api_key_row.get_text().strip(),
             prompt=intro_prompt_text.strip() or DEFAULT_INTRO_PROMPT,
+            disable_reasoning=intro_widgets.disable_reasoning_row.get_active(),
+        )
+        introduction_reply_settings = IntroductionSettings(
+            api_url=intro_reply_widgets.api_url_row.get_text().strip(),
+            model_id=intro_reply_widgets.model_row.get_text().strip(),
+            api_key=intro_reply_widgets.api_key_row.get_text().strip(),
+            prompt=intro_reply_prompt_text.strip() or DEFAULT_INTRO_REPLY_PROMPT,
+            disable_reasoning=intro_reply_widgets.disable_reasoning_row.get_active(),
         )
         conclusion_settings = ConclusionSettings(
             api_url=conclusion_widgets.api_url_row.get_text().strip(),
             model_id=conclusion_widgets.model_row.get_text().strip(),
             api_key=conclusion_widgets.api_key_row.get_text().strip(),
             prompt=conclusion_prompt_text.strip() or DEFAULT_CONCLUSION_PROMPT,
+            disable_reasoning=conclusion_widgets.disable_reasoning_row.get_active(),
         )
         concl_no_issues_settings = ConclNoIssuesSettings(
             api_url=concl_no_issues_widgets.api_url_row.get_text().strip(),
             model_id=concl_no_issues_widgets.model_row.get_text().strip(),
             api_key=concl_no_issues_widgets.api_key_row.get_text().strip(),
             prompt=concl_no_issues_prompt_text.strip() or DEFAULT_CONCL_NO_ISSUES_PROMPT,
+            disable_reasoning=concl_no_issues_widgets.disable_reasoning_row.get_active(),
         )
         topic_sentence_settings = TopicSentenceSettings(
             api_url=topic_sentence_widgets.api_url_row.get_text().strip(),
             model_id=topic_sentence_widgets.model_row.get_text().strip(),
             api_key=topic_sentence_widgets.api_key_row.get_text().strip(),
             prompt=topic_sentence_prompt_text.strip() or DEFAULT_TOPIC_SENTENCE_PROMPT,
+            disable_reasoning=topic_sentence_widgets.disable_reasoning_row.get_active(),
         )
         concl_section_settings = ConclSectionSettings(
             api_url=concl_section_widgets.api_url_row.get_text().strip(),
             model_id=concl_section_widgets.model_row.get_text().strip(),
             api_key=concl_section_widgets.api_key_row.get_text().strip(),
             prompt=concl_section_prompt_text.strip() or DEFAULT_CONCL_SECTION_PROMPT,
+            disable_reasoning=concl_section_widgets.disable_reasoning_row.get_active(),
         )
         translate_settings = TranslateSettings(
             api_url=translate_widgets.api_url_row.get_text().strip(),
             model_id=translate_widgets.model_row.get_text().strip(),
             api_key=translate_widgets.api_key_row.get_text().strip(),
             prompt=translate_prompt_text.strip() or DEFAULT_TRANSLATE_PROMPT,
+            disable_reasoning=translate_widgets.disable_reasoning_row.get_active(),
         )
+        editor_pinned_action_ids = self._current_editor_pinned_actions()
         self._on_save(
             proof_settings,
             spelling_settings,
@@ -6482,11 +7092,13 @@ class SettingsWindow(Adw.ApplicationWindow):
             ask_settings,
             shorten_settings,
             introduction_settings,
+            introduction_reply_settings,
             conclusion_settings,
             concl_no_issues_settings,
             topic_sentence_settings,
             concl_section_settings,
             translate_settings,
+            editor_pinned_action_ids,
             self._libreoffice_python_path,
             self._concordance_file_path,
         )
@@ -6556,6 +7168,10 @@ class SettingsWindow(Adw.ApplicationWindow):
             tavily_api_key_row.set_text(settings.tavily_api_key)
             credentials_group.add(tavily_api_key_row)
 
+        disable_reasoning_row = Adw.SwitchRow(title="Disable reasoning")
+        disable_reasoning_row.set_active(bool(settings.disable_reasoning))
+        credentials_group.add(disable_reasoning_row)
+
         prompt_section = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
         prompt_section.set_hexpand(True)
         prompt_section.set_vexpand(True)
@@ -6579,6 +7195,7 @@ class SettingsWindow(Adw.ApplicationWindow):
             model_row=model_row,
             api_key_row=api_key_row,
             tavily_api_key_row=tavily_api_key_row,
+            disable_reasoning_row=disable_reasoning_row,
             prompt_buffer=buffer,
             ask_prompt_buffer=ask_prompt_buffer,
         )
@@ -6653,12 +7270,11 @@ class EditorCommandsWindow(Adw.ApplicationWindow):
             ("Keep Original", "keep-original", None, "Restore the last SpellingStyle output."),
             ("Reference Lookup", "reference-lookup", None, "Look up a definition for the selected text."),
             ("Focus Ask Field", "focus-ask", None, "Focus the Ask question field in the Editor view."),
-            ("Wrap Selection in Quotes", "transform-wrap-quotes", None, "Wrap selected text in curly quotes."),
-            ("Translate Document", "transform-translate", None, "Translate the full Writer document into Spanish."),
-            ("Create Topic Sentence", "transform-topic-sentence", None, "Generate a topic sentence from a paragraph."),
-            ("Create Concl. Section", "transform-concl-section", None, "Summarize the current section."),
-            ("Add Case", "add-case", None, "Add selected case citation to concordance and AutoText."),
         ]
+        commands.extend(
+            (definition.title, definition.action_name, None, definition.description)
+            for definition in EDITOR_QUICK_ACTIONS
+        )
 
         actions_group = Adw.PreferencesGroup(title="Editor Actions")
         page.add(actions_group)
