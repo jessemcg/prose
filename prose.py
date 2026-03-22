@@ -6,6 +6,7 @@ import json
 import importlib
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -200,7 +201,8 @@ DEFAULT_MODEL_PROFILE_NICKNAMES = {
 }
 PROFILE_BACKED_COMMAND_TITLES = {
     "proof": "Proof Reading",
-    "improve": "Improve",
+    "improve-generated": "Improve Generated",
+    "improve-selected": "Improve Selected",
     "combine": "Combine Cites",
     "thesaurus": "Thesaurus",
     "shorten": "Shorten",
@@ -506,9 +508,21 @@ def _action_command(
     object_path: str = ACTION_OBJECT_PATH,
 ) -> str:
     params = "[]" if param is None else f"[{param}]"
-    return (
-        f"gdbus call --session --dest {APP_ID} --object-path {object_path} "
-        f'--method org.gtk.Actions.Activate "{action_name}" {params} {{}}'
+    return shlex.join(
+        [
+            "gdbus",
+            "call",
+            "--session",
+            "--dest",
+            APP_ID,
+            "--object-path",
+            object_path,
+            "--method",
+            "org.gtk.Actions.Activate",
+            action_name,
+            params,
+            "{}",
+        ]
     )
 
 
@@ -781,7 +795,7 @@ class PromptEditorWidgets:
     disable_reasoning_row: Adw.SwitchRow
     prompt_buffer: Gtk.TextBuffer
     ask_prompt_buffer: Gtk.TextBuffer | None
-    default_profile_dropdown: Gtk.DropDown | None = None
+    default_profile_dropdowns: dict[str, Gtk.DropDown] | None = None
 
 
 @dataclass
@@ -818,11 +832,19 @@ class QuickActionDefinition:
 
 EDITOR_QUICK_ACTIONS = (
     QuickActionDefinition(
-        key="improve",
-        label="Improve",
-        title="Improve",
-        action_name="improve",
+        key="improve-generated",
+        label="Improve Generated",
+        title="Improve Generated",
+        action_name="improve-generated",
         description="Rewrite the latest SpellingStyle output using the selected model profile.",
+        supports_profiles=True,
+    ),
+    QuickActionDefinition(
+        key="improve-selected",
+        label="Improve Selected",
+        title="Improve Selected",
+        action_name="improve-selected",
+        description="Rewrite selected text in Writer using the selected model profile.",
         supports_profiles=True,
     ),
     QuickActionDefinition(
@@ -934,8 +956,6 @@ def _editor_command_items() -> list[tuple[str, str, str | None, str, bool]]:
         ),
         ("Combine Cites", "combine-cites", None, "Combine the first run of adjacent citations.", False),
         ("SpellingStyle", "spellingstyle", None, "Stream model output into Writer.", False),
-        ("Improve", "improve", None, "Rewrite the latest SpellingStyle output.", False),
-        ("Improve Selected", "improve-selected", None, "Rewrite selected text in Writer.", True),
         ("Keep Original", "keep-original", None, "Restore the last SpellingStyle output.", False),
         ("Reference Lookup", "reference-lookup", None, "Look up a definition for the selected text.", False),
         ("Focus Ask Field", "focus-ask", None, "Focus the Ask question field in the Editor view.", False),
@@ -957,9 +977,23 @@ def _profile_default_lookup_key_for_action_name(action_name: str) -> str | None:
     definition = EDITOR_QUICK_ACTION_BY_ACTION_NAME.get(action_name)
     if definition is not None:
         return definition.key
+    if action_name == "improve":
+        return "improve-generated"
     if action_name == "improve-selected":
-        return "improve"
+        return "improve-selected"
     return None
+
+
+def _profile_default_source_keys(action_key: str) -> tuple[str, ...]:
+    if action_key == "improve-generated":
+        return ("improve-generated", "improve")
+    return (action_key,)
+
+
+def _normalize_editor_quick_action_key(action_key: str) -> str:
+    if action_key == "improve":
+        return "improve-generated"
+    return action_key
 
 
 def _credential_signature(api_url: str, model_id: str, api_key: str) -> tuple[str, str, str] | None:
@@ -1074,8 +1108,13 @@ def _sanitize_editor_action_profile_defaults(raw: Any) -> dict[str, str | None]:
     defaults: dict[str, str | None] = {}
     source = raw if isinstance(raw, dict) else {}
     for key in PROFILE_BACKED_COMMAND_KEYS:
-        candidate = str(source.get(key, "") or "").strip()
-        defaults[key] = candidate if candidate in MODEL_PROFILE_IDS else None
+        selected_key = None
+        for source_key in _profile_default_source_keys(key):
+            candidate = str(source.get(source_key, "") or "").strip()
+            if candidate in MODEL_PROFILE_IDS:
+                selected_key = candidate
+                break
+        defaults[key] = selected_key
     return defaults
 
 
@@ -1535,7 +1574,7 @@ def _sanitize_editor_pinned_actions(raw: Any) -> list[str]:
     if not isinstance(raw, list):
         return pinned
     for item in raw:
-        key = str(item or "").strip()
+        key = _normalize_editor_quick_action_key(str(item or "").strip())
         if key not in EDITOR_QUICK_ACTION_BY_KEY or key in seen:
             continue
         pinned.append(key)
@@ -1549,6 +1588,7 @@ def _ordered_editor_quick_action_keys(pinned_action_ids: Iterable[str]) -> list[
     ordered: list[str] = []
     seen: set[str] = set()
     for key in pinned_action_ids:
+        key = _normalize_editor_quick_action_key(key)
         if key not in EDITOR_QUICK_ACTION_BY_KEY or key in seen:
             continue
         ordered.append(key)
@@ -1622,7 +1662,7 @@ class ProseWindow(Adw.ApplicationWindow):
             self._model_profiles,
             {
                 "proof": self._proof_settings,
-                "improve": self._improve1_settings,
+                "improve-generated": self._improve1_settings,
                 "combine": self._combine_cites_settings,
                 "thesaurus": self._thesaurus_settings,
                 "shorten": self._shorten_settings,
@@ -2369,6 +2409,7 @@ class ProseWindow(Adw.ApplicationWindow):
         _add_action("save-prefixes", lambda: self._on_save_prefixes_clicked(None))
         _add_action("combine-cites", lambda: self._on_combine_cites_clicked(None))
         _add_action("spellingstyle", lambda: self._on_spellingstyle_clicked(None))
+        _add_string_action("improve-generated", lambda nickname: self._on_improve_clicked(None, nickname))
         _add_string_action("improve", lambda nickname: self._on_improve_clicked(None, nickname))
         _add_action(
             "improve1",
@@ -2967,7 +3008,7 @@ class ProseWindow(Adw.ApplicationWindow):
     def _on_improve_clicked(self, _button: Gtk.Button | None, profile_nickname: str | None = None) -> None:
         if self._busy:
             return
-        profile = self._resolve_profile_for_action("improve", profile_nickname)
+        profile = self._resolve_profile_for_action("improve-generated", profile_nickname)
         if profile is None:
             return
         if not profile.is_configured():
@@ -2989,17 +3030,17 @@ class ProseWindow(Adw.ApplicationWindow):
             self._show_toast("Unable to select the last SpellingStyle range.")
             return
         if not self._prepare_improve_insertion(doc):
-            self._show_toast("Unable to prepare Improve insertion point.")
+            self._show_toast("Unable to prepare Improve Generated insertion point.")
             return
         self._set_busy(True)
-        self._status_label.set_label(f"Improving SpellingStyle output with {profile.display_name()}…")
+        self._status_label.set_label(f"Improving generated text with {profile.display_name()}…")
         thread = threading.Thread(target=self._run_improve, args=(source_text, profile), daemon=True)
         thread.start()
 
     def _on_improve_selected_clicked(self, _button: Gtk.Button | None, profile_nickname: str | None = None) -> None:
         if self._busy:
             return
-        profile = self._resolve_profile_for_action("improve", profile_nickname)
+        profile = self._resolve_profile_for_action("improve-selected", profile_nickname)
         if profile is None:
             return
         if not profile.is_configured():
@@ -5296,7 +5337,7 @@ class ProseWindow(Adw.ApplicationWindow):
         except Exception as exc:  # noqa: BLE001
             GLib.idle_add(self._on_spellingstyle_failed, str(exc))
             return
-        GLib.idle_add(self._on_improve_finished, "Improve complete.")
+        GLib.idle_add(self._on_improve_finished, "Improve Generated complete.")
 
     def _run_improve_selected(self, source_text: str, profile: ModelProfile) -> None:
         payload = self._compose_improve_payload(source_text, profile)
@@ -6950,7 +6991,7 @@ class SettingsWindow(Adw.ApplicationWindow):
             ("thesaurus", "Thesaurus", self._thesaurus_settings, DEFAULT_THESAURUS_PROMPT),
             ("reference", "Reference", self._reference_settings, DEFAULT_REFERENCE_PROMPT),
             ("ask", "Ask Field", self._ask_settings, DEFAULT_ASK_PROMPT),
-            ("improve", "Improve", self._improve1_settings, DEFAULT_IMPROVE_PROMPT),
+            ("improve-generated", "Improve", self._improve1_settings, DEFAULT_IMPROVE_PROMPT),
             ("combine", "Combine Cites", self._combine_cites_settings, DEFAULT_COMBINE_CITES_PROMPT),
             ("shorten", "Shorten", self._shorten_settings, DEFAULT_SHORTEN_PROMPT),
             ("intro", "Introduction", self._introduction_settings, DEFAULT_INTRO_PROMPT),
@@ -7568,7 +7609,7 @@ class SettingsWindow(Adw.ApplicationWindow):
         thesaurus_widgets = self._prompt_editors.get("thesaurus")
         reference_widgets = self._prompt_editors.get("reference")
         ask_widgets = self._prompt_editors.get("ask")
-        improve_widgets = self._prompt_editors.get("improve")
+        improve_widgets = self._prompt_editors.get("improve-generated")
         combine_widgets = self._prompt_editors.get("combine")
         shorten_widgets = self._prompt_editors.get("shorten")
         intro_widgets = self._prompt_editors.get("intro")
@@ -7722,9 +7763,13 @@ class SettingsWindow(Adw.ApplicationWindow):
             disable_reasoning=translate_widgets.disable_reasoning_row.get_active(),
         )
         editor_action_profile_defaults = dict(self._editor_action_profile_defaults)
+        dropdowns_by_action_key: dict[str, Gtk.DropDown] = {}
+        for widgets in self._prompt_editors.values():
+            if not widgets.default_profile_dropdowns:
+                continue
+            dropdowns_by_action_key.update(widgets.default_profile_dropdowns)
         for key in PROFILE_BACKED_COMMAND_KEYS:
-            widgets = self._prompt_editors.get(key)
-            dropdown = widgets.default_profile_dropdown if widgets else None
+            dropdown = dropdowns_by_action_key.get(key)
             selected = int(dropdown.get_selected()) if dropdown is not None else 0
             if selected <= 0:
                 editor_action_profile_defaults[key] = None
@@ -7815,7 +7860,7 @@ class SettingsWindow(Adw.ApplicationWindow):
         tavily_api_key_row = None
         disable_reasoning_row = Adw.SwitchRow(title="Disable reasoning")
         disable_reasoning_row.set_active(bool(settings.disable_reasoning))
-        default_profile_dropdown = None
+        default_profile_dropdowns: dict[str, Gtk.DropDown] = {}
 
         if uses_shared_profiles:
             profile_group = Adw.PreferencesGroup(title="Default Model Profile")
@@ -7831,25 +7876,42 @@ class SettingsWindow(Adw.ApplicationWindow):
             profile_box.set_margin_start(12)
             profile_box.set_margin_end(12)
 
-            caption = Gtk.Label(
-                label="Choose the default profile used by this command. Its reasoning setting will also be used.",
-                xalign=0,
-            )
+            caption_text = "Choose the default profile used by this command. Its reasoning setting will also be used."
+            profile_keys = (key,)
+            if key == "improve-generated":
+                caption_text = (
+                    "Choose the default profiles used by Improve Generated and Improve Selected. "
+                    "Both commands share the Improve prompt below."
+                )
+                profile_keys = ("improve-generated", "improve-selected")
+
+            caption = Gtk.Label(label=caption_text, xalign=0)
             caption.add_css_class("caption")
             caption.add_css_class("dim-label")
             caption.set_wrap(True)
             caption.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
             profile_box.append(caption)
 
-            default_profile_dropdown = Gtk.DropDown(model=self._profile_dropdown_model(include_unset=True))
-            selected_profile_key = self._editor_action_profile_defaults.get(key)
-            selected_index = (
-                MODEL_PROFILE_IDS.index(selected_profile_key) + 1
-                if selected_profile_key in MODEL_PROFILE_IDS
-                else 0
-            )
-            default_profile_dropdown.set_selected(selected_index)
-            profile_box.append(default_profile_dropdown)
+            for profile_key in profile_keys:
+                if len(profile_keys) > 1:
+                    profile_label = Gtk.Label(
+                        label=PROFILE_BACKED_COMMAND_TITLES.get(profile_key, profile_key.replace("-", " ").title()),
+                        xalign=0,
+                    )
+                    profile_label.add_css_class("caption")
+                    profile_label.add_css_class("dim-label")
+                    profile_box.append(profile_label)
+
+                dropdown = Gtk.DropDown(model=self._profile_dropdown_model(include_unset=True))
+                selected_profile_key = self._editor_action_profile_defaults.get(profile_key)
+                selected_index = (
+                    MODEL_PROFILE_IDS.index(selected_profile_key) + 1
+                    if selected_profile_key in MODEL_PROFILE_IDS
+                    else 0
+                )
+                dropdown.set_selected(selected_index)
+                profile_box.append(dropdown)
+                default_profile_dropdowns[profile_key] = dropdown
 
             profile_row.set_child(profile_box)
             profile_group.add(profile_row)
@@ -7897,7 +7959,7 @@ class SettingsWindow(Adw.ApplicationWindow):
             disable_reasoning_row=disable_reasoning_row,
             prompt_buffer=buffer,
             ask_prompt_buffer=ask_prompt_buffer,
-            default_profile_dropdown=default_profile_dropdown,
+            default_profile_dropdowns=default_profile_dropdowns or None,
         )
         return page
 
