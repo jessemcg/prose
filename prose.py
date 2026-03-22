@@ -121,6 +121,9 @@ CONFIG_KEY_TRANSLATE_MODEL_ID = "translate_model_id"
 CONFIG_KEY_TRANSLATE_API_KEY = "translate_api_key"
 CONFIG_KEY_TRANSLATE_PROMPT = "translate_prompt"
 CONFIG_KEY_TRANSLATE_DISABLE_REASONING = "translate_disable_reasoning"
+CONFIG_KEY_MODEL_PROFILES = "model_profiles"
+CONFIG_KEY_COMMAND_DEFAULT_PROFILES = "command_default_profiles"
+CONFIG_KEY_EDITOR_COMMAND_DEFAULT_PROFILES = "editor_command_default_profiles"
 CONFIG_KEY_RT_PREFIX = "rt_prefix"
 CONFIG_KEY_CT_PREFIX = "ct_prefix"
 CONFIG_KEY_WORD_SUBSTITUTIONS = "word_substitutions"
@@ -138,6 +141,7 @@ DEFAULT_SPELLINGSTYLE_PROMPT = (
     "Revise the source text for spelling, grammar, and style. Preserve meaning and facts. "
     "Return only the revised text."
 )
+DEFAULT_IMPROVE_PROMPT = "Improve the following text for clarity and precision while preserving meaning."
 DEFAULT_IMPROVE1_PROMPT = "Improve the following text for clarity and precision while preserving meaning."
 DEFAULT_IMPROVE2_PROMPT = "Improve the following text for clarity and precision while preserving meaning."
 DEFAULT_COMBINE_CITES_PROMPT = ""
@@ -185,6 +189,30 @@ DEFAULT_RT_PREFIX = "2"
 DEFAULT_CT_PREFIX = "2"
 MAX_WORD_SUBSTITUTIONS = 3
 MAX_PINNED_EDITOR_ACTIONS = 5
+UNSET_PROFILE_LABEL = "Choose a profile..."
+MODEL_PROFILE_IDS = ("profile1", "profile2", "profile3", "profile4", "profile5")
+DEFAULT_MODEL_PROFILE_NICKNAMES = {
+    "profile1": "Profile 1",
+    "profile2": "Profile 2",
+    "profile3": "Profile 3",
+    "profile4": "Profile 4",
+    "profile5": "Profile 5",
+}
+PROFILE_BACKED_COMMAND_TITLES = {
+    "proof": "Proof Reading",
+    "improve": "Improve",
+    "combine": "Combine Cites",
+    "thesaurus": "Thesaurus",
+    "shorten": "Shorten",
+    "intro": "Introduction",
+    "intro-reply": "Introduction for Reply",
+    "conclusion": "Conclusion",
+    "concl-no-issues": "Concl. No Issues",
+    "topic-sentence": "Topic Sentence",
+    "concl-section": "Concl. Section",
+    "translate": "Translate",
+}
+PROFILE_BACKED_COMMAND_KEYS = tuple(PROFILE_BACKED_COMMAND_TITLES.keys())
 CITATION_NUMBER_WORDS = {
     "zero": "0",
     "one": "1",
@@ -484,6 +512,29 @@ def _action_command(
     )
 
 
+def _format_action_param(variant: GLib.Variant) -> str:
+    printed = variant.print_(True)
+    if variant.is_of_type(GLib.VariantType.new("i")):
+        return f"<int32 {printed}>"
+    return f"<{printed}>"
+
+
+@dataclass
+class ModelProfile:
+    key: str
+    nickname: str
+    api_url: str
+    model_id: str
+    api_key: str
+    disable_reasoning: bool
+
+    def display_name(self) -> str:
+        return self.nickname.strip() or DEFAULT_MODEL_PROFILE_NICKNAMES.get(self.key, self.key.title())
+
+    def is_configured(self) -> bool:
+        return bool(self.api_url.strip() and self.api_key.strip())
+
+
 @dataclass
 class ProofreadSettings:
     api_url: str
@@ -730,6 +781,16 @@ class PromptEditorWidgets:
     disable_reasoning_row: Adw.SwitchRow
     prompt_buffer: Gtk.TextBuffer
     ask_prompt_buffer: Gtk.TextBuffer | None
+    default_profile_dropdown: Gtk.DropDown | None = None
+
+
+@dataclass
+class ModelProfileEditorWidgets:
+    nickname_row: Adw.EntryRow
+    api_url_row: Adw.EntryRow
+    model_row: Adw.EntryRow
+    api_key_row: Adw.PasswordEntryRow
+    disable_reasoning_row: Adw.SwitchRow
 
 
 @dataclass
@@ -752,29 +813,41 @@ class QuickActionDefinition:
     title: str
     action_name: str
     description: str
+    supports_profiles: bool = False
 
 
 EDITOR_QUICK_ACTIONS = (
     QuickActionDefinition(
+        key="improve",
+        label="Improve",
+        title="Improve",
+        action_name="improve",
+        description="Rewrite the latest SpellingStyle output using the selected model profile.",
+        supports_profiles=True,
+    ),
+    QuickActionDefinition(
         key="shorten",
-        label="Shorten",
+        label="Shorten Selection",
         title="Shorten",
         action_name="transform-shorten",
         description="Shorten selected text while preserving meaning.",
+        supports_profiles=True,
     ),
     QuickActionDefinition(
         key="topic-sentence",
-        label="Topic Sent.",
+        label="Topic Sentence",
         title="Topic Sentence",
         action_name="transform-topic-sentence",
         description="Generate a topic sentence from the current paragraph.",
+        supports_profiles=True,
     ),
     QuickActionDefinition(
         key="concl-section",
-        label="Section Concl.",
+        label="Section Conclusion",
         title="Section Conclusion",
         action_name="transform-concl-section",
         description="Write a concise conclusion for the current section.",
+        supports_profiles=True,
     ),
     QuickActionDefinition(
         key="add-case",
@@ -785,31 +858,35 @@ EDITOR_QUICK_ACTIONS = (
     ),
     QuickActionDefinition(
         key="intro",
-        label="Intro",
+        label="Introduction",
         title="Introduction",
         action_name="transform-introduction",
         description="Write an introduction from the current argument section.",
+        supports_profiles=True,
     ),
     QuickActionDefinition(
         key="intro-reply",
-        label="Intro Reply",
+        label="Introduction for Reply",
         title="Introduction for Reply",
         action_name="transform-introduction-reply",
         description="Write an introduction for a reply brief from the current argument section.",
+        supports_profiles=True,
     ),
     QuickActionDefinition(
         key="conclusion",
-        label="Concl.",
+        label="Conclusion",
         title="Conclusion",
         action_name="transform-conclusion",
         description="Write a conclusion from the current argument section.",
+        supports_profiles=True,
     ),
     QuickActionDefinition(
         key="concl-no-issues",
-        label="No Issues Concl.",
+        label="Conclusion Without Issues",
         title="Conclusion Without Issues",
         action_name="transform-concl-no-issues",
         description="Write a conclusion from the current issues-considered section.",
+        supports_profiles=True,
     ),
     QuickActionDefinition(
         key="quotes",
@@ -827,6 +904,12 @@ EDITOR_QUICK_ACTIONS = (
     ),
 )
 EDITOR_QUICK_ACTION_BY_KEY = {definition.key: definition for definition in EDITOR_QUICK_ACTIONS}
+EDITOR_QUICK_ACTION_BY_ACTION_NAME = {
+    definition.action_name: definition for definition in EDITOR_QUICK_ACTIONS
+}
+EDITOR_PROFILE_ACTION_KEYS = tuple(
+    definition.key for definition in EDITOR_QUICK_ACTIONS if definition.supports_profiles
+)
 DEFAULT_EDITOR_PINNED_ACTION_IDS = (
     "shorten",
     "topic-sentence",
@@ -834,6 +917,194 @@ DEFAULT_EDITOR_PINNED_ACTION_IDS = (
     "intro",
     "conclusion",
 )
+
+
+def _editor_command_items() -> list[tuple[str, str, str | None, str, bool]]:
+    commands: list[tuple[str, str, str | None, str, bool]] = [
+        ("Launch Writer", "launch-writer", None, "Open a Writer document via UNO.", False),
+        ("Direct Input", "direct-input", None, "Insert the source file text into Writer.", False),
+        ("Input RT", "input-rt", None, "Insert a formatted RT citation from the source file.", False),
+        ("Input CT", "input-ct", None, "Insert a formatted CT citation from the source file.", False),
+        (
+            "Direct Input No Trailing Space",
+            "direct-input-no-trailing-space",
+            None,
+            "Insert the source file text into Writer without trailing spaces.",
+            False,
+        ),
+        ("Combine Cites", "combine-cites", None, "Combine the first run of adjacent citations.", False),
+        ("SpellingStyle", "spellingstyle", None, "Stream model output into Writer.", False),
+        ("Improve", "improve", None, "Rewrite the latest SpellingStyle output.", False),
+        ("Improve Selected", "improve-selected", None, "Rewrite selected text in Writer.", True),
+        ("Keep Original", "keep-original", None, "Restore the last SpellingStyle output.", False),
+        ("Reference Lookup", "reference-lookup", None, "Look up a definition for the selected text.", False),
+        ("Focus Ask Field", "focus-ask", None, "Focus the Ask question field in the Editor view.", False),
+    ]
+    commands.extend(
+        (
+            definition.title,
+            definition.action_name,
+            None,
+            definition.description,
+            definition.supports_profiles,
+        )
+        for definition in EDITOR_QUICK_ACTIONS
+    )
+    return commands
+
+
+def _profile_default_lookup_key_for_action_name(action_name: str) -> str | None:
+    definition = EDITOR_QUICK_ACTION_BY_ACTION_NAME.get(action_name)
+    if definition is not None:
+        return definition.key
+    if action_name == "improve-selected":
+        return "improve"
+    return None
+
+
+def _credential_signature(api_url: str, model_id: str, api_key: str) -> tuple[str, str, str] | None:
+    cleaned_api_url = api_url.strip()
+    cleaned_model_id = model_id.strip()
+    cleaned_api_key = api_key.strip()
+    if not cleaned_api_url or not cleaned_api_key:
+        return None
+    return cleaned_api_url, cleaned_model_id, cleaned_api_key
+
+
+def _match_profile_key_for_settings(settings: Any, profiles: list[ModelProfile]) -> str | None:
+    signature = _credential_signature(
+        str(getattr(settings, "api_url", "") or ""),
+        str(getattr(settings, "model_id", "") or ""),
+        str(getattr(settings, "api_key", "") or ""),
+    )
+    if signature is None:
+        return None
+    for profile in profiles:
+        if _credential_signature(profile.api_url, profile.model_id, profile.api_key) == signature:
+            return profile.key
+    return None
+
+
+def _sanitize_model_profile(raw: Any, key: str, fallback_nickname: str) -> ModelProfile:
+    data = raw if isinstance(raw, dict) else {}
+    nickname = str(data.get("nickname", fallback_nickname) or "").strip() or fallback_nickname
+    return ModelProfile(
+        key=key,
+        nickname=nickname,
+        api_url=str(data.get("api_url", "") or "").strip(),
+        model_id=str(data.get("model_id", "") or "").strip(),
+        api_key=str(data.get("api_key", "") or "").strip(),
+        disable_reasoning=_coerce_bool_config(data.get("disable_reasoning"), False),
+    )
+
+
+def _legacy_profile_from_improve(prefix: str, nickname: str) -> ModelProfile:
+    raw = _read_config()
+    return ModelProfile(
+        key="",
+        nickname=nickname,
+        api_url=str(raw.get(f"{prefix}_api_url", "") or "").strip(),
+        model_id=str(raw.get(f"{prefix}_model_id", "") or "").strip(),
+        api_key=str(raw.get(f"{prefix}_api_key", "") or "").strip(),
+        disable_reasoning=_coerce_bool_config(raw.get(f"{prefix}_disable_reasoning"), False),
+    )
+
+
+def load_model_profiles() -> list[ModelProfile]:
+    raw = _read_config()
+    raw_profiles = raw.get(CONFIG_KEY_MODEL_PROFILES)
+    if isinstance(raw_profiles, list) and raw_profiles:
+        profiles: list[ModelProfile] = []
+        for index, key in enumerate(MODEL_PROFILE_IDS):
+            fallback = DEFAULT_MODEL_PROFILE_NICKNAMES[key]
+            entry = raw_profiles[index] if index < len(raw_profiles) else {}
+            profiles.append(_sanitize_model_profile(entry, key, fallback))
+        return profiles
+
+    legacy_first = _legacy_profile_from_improve("improve1", "Improve 1")
+    legacy_first.key = "profile1"
+    legacy_second = _legacy_profile_from_improve("improve2", "Improve 2")
+    legacy_second.key = "profile2"
+    return [
+        legacy_first,
+        legacy_second,
+        ModelProfile(
+            key="profile3",
+            nickname=DEFAULT_MODEL_PROFILE_NICKNAMES["profile3"],
+            api_url="",
+            model_id="",
+            api_key="",
+            disable_reasoning=False,
+        ),
+        ModelProfile(
+            key="profile4",
+            nickname=DEFAULT_MODEL_PROFILE_NICKNAMES["profile4"],
+            api_url="",
+            model_id="",
+            api_key="",
+            disable_reasoning=False,
+        ),
+        ModelProfile(
+            key="profile5",
+            nickname=DEFAULT_MODEL_PROFILE_NICKNAMES["profile5"],
+            api_url="",
+            model_id="",
+            api_key="",
+            disable_reasoning=False,
+        ),
+    ]
+
+
+def save_model_profiles(profiles: list[ModelProfile]) -> None:
+    data = _read_config()
+    data[CONFIG_KEY_MODEL_PROFILES] = [
+        {
+            "nickname": profile.display_name(),
+            "api_url": profile.api_url,
+            "model_id": profile.model_id,
+            "api_key": profile.api_key,
+            "disable_reasoning": bool(profile.disable_reasoning),
+        }
+        for profile in profiles[: len(MODEL_PROFILE_IDS)]
+    ]
+    _write_config(data)
+
+
+def _sanitize_editor_action_profile_defaults(raw: Any) -> dict[str, str | None]:
+    defaults: dict[str, str | None] = {}
+    source = raw if isinstance(raw, dict) else {}
+    for key in PROFILE_BACKED_COMMAND_KEYS:
+        candidate = str(source.get(key, "") or "").strip()
+        defaults[key] = candidate if candidate in MODEL_PROFILE_IDS else None
+    return defaults
+
+
+def load_editor_action_profile_defaults(
+    profiles: list[ModelProfile],
+    settings_by_key: dict[str, Any],
+) -> dict[str, str | None]:
+    raw = _read_config()
+    defaults = _sanitize_editor_action_profile_defaults(raw.get(CONFIG_KEY_COMMAND_DEFAULT_PROFILES))
+    legacy_defaults = _sanitize_editor_action_profile_defaults(raw.get(CONFIG_KEY_EDITOR_COMMAND_DEFAULT_PROFILES))
+    for key in PROFILE_BACKED_COMMAND_KEYS:
+        if defaults[key] is None and legacy_defaults[key] is not None:
+            defaults[key] = legacy_defaults[key]
+        if defaults[key] is None:
+            matched_profile_key = _match_profile_key_for_settings(settings_by_key.get(key), profiles)
+            if matched_profile_key is not None:
+                defaults[key] = matched_profile_key
+    return defaults
+
+
+def save_editor_action_profile_defaults(defaults: dict[str, str | None]) -> None:
+    data = _read_config()
+    sanitized = _sanitize_editor_action_profile_defaults(defaults)
+    data[CONFIG_KEY_COMMAND_DEFAULT_PROFILES] = {
+        key: value
+        for key, value in sanitized.items()
+        if value in MODEL_PROFILE_IDS
+    }
+    _write_config(data)
 
 
 def load_proofread_settings() -> ProofreadSettings:
@@ -1346,6 +1617,24 @@ class ProseWindow(Adw.ApplicationWindow):
         self._topic_sentence_settings = load_topic_sentence_settings()
         self._concl_section_settings = load_concl_section_settings()
         self._translate_settings = load_translate_settings()
+        self._model_profiles = load_model_profiles()
+        self._editor_action_profile_defaults = load_editor_action_profile_defaults(
+            self._model_profiles,
+            {
+                "proof": self._proof_settings,
+                "improve": self._improve1_settings,
+                "combine": self._combine_cites_settings,
+                "thesaurus": self._thesaurus_settings,
+                "shorten": self._shorten_settings,
+                "intro": self._introduction_settings,
+                "intro-reply": self._introduction_reply_settings,
+                "conclusion": self._conclusion_settings,
+                "concl-no-issues": self._concl_no_issues_settings,
+                "topic-sentence": self._topic_sentence_settings,
+                "concl-section": self._concl_section_settings,
+                "translate": self._translate_settings,
+            },
+        )
         self._prefix_settings = load_prefix_settings()
         self._editor_source_file = load_editor_source_file()
         self._last_odt_path = load_last_odt_file()
@@ -1613,6 +1902,49 @@ class ProseWindow(Adw.ApplicationWindow):
             flow_box.remove(child)
             child = next_child
 
+    def _model_profile_by_key(self, profile_key: str) -> ModelProfile | None:
+        for profile in self._model_profiles:
+            if profile.key == profile_key:
+                return profile
+        return None
+
+    def _model_profile_by_nickname(self, nickname: str) -> ModelProfile | None:
+        requested = nickname.strip()
+        if not requested:
+            return None
+        for profile in self._model_profiles:
+            if profile.display_name() == requested:
+                return profile
+        lowered = requested.lower()
+        for profile in self._model_profiles:
+            if profile.display_name().lower() == lowered:
+                return profile
+        return None
+
+    def _command_title(self, action_key: str) -> str:
+        return PROFILE_BACKED_COMMAND_TITLES.get(action_key, action_key.replace("-", " ").title())
+
+    def _default_profile_key_for_action(self, action_key: str) -> str | None:
+        default_key = self._editor_action_profile_defaults.get(action_key)
+        return default_key if default_key in MODEL_PROFILE_IDS else None
+
+    def _default_profile_for_action(self, action_key: str) -> ModelProfile | None:
+        default_key = self._default_profile_key_for_action(action_key)
+        if default_key is None:
+            return None
+        return self._model_profile_by_key(default_key)
+
+    def _resolve_profile_for_action(self, action_key: str, profile_nickname: str | None) -> ModelProfile | None:
+        if profile_nickname:
+            profile = self._model_profile_by_nickname(profile_nickname)
+            if profile is None:
+                self._show_toast(f'Unknown model profile "{profile_nickname}".')
+            return profile
+        profile = self._default_profile_for_action(action_key)
+        if profile is None:
+            self._show_toast(f'Choose a default model profile for "{self._command_title(action_key)}" in Settings.')
+        return profile
+
     def _build_quick_action_button(
         self,
         definition: QuickActionDefinition,
@@ -1630,10 +1962,66 @@ class ProseWindow(Adw.ApplicationWindow):
             button.connect("clicked", on_clicked)
         return button
 
+    def _build_profile_menu_content(
+        self,
+        definition: QuickActionDefinition,
+        close_popover: Gtk.Popover | None = None,
+    ) -> Gtk.Box:
+        content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        content.set_margin_top(8)
+        content.set_margin_bottom(8)
+        content.set_margin_start(8)
+        content.set_margin_end(8)
+        for profile in self._model_profiles:
+            button = Gtk.Button(label=profile.display_name())
+            button.add_css_class("flat")
+            button.set_halign(Gtk.Align.FILL)
+            button.set_action_name(f"app.{definition.action_name}")
+            button.set_action_target_value(GLib.Variant("s", profile.display_name()))
+            if close_popover is not None:
+                button.connect("clicked", lambda _button, current=close_popover: current.popdown())
+            content.append(button)
+        return content
+
+    def _build_quick_action_widget(
+        self,
+        definition: QuickActionDefinition,
+        *,
+        label: str | None = None,
+        close_popover: Gtk.Popover | None = None,
+    ) -> Gtk.Widget:
+        if not definition.supports_profiles:
+            return self._build_quick_action_button(
+                definition,
+                label=label,
+                on_clicked=(lambda _button, current=close_popover: current.popdown()) if close_popover else None,
+            )
+
+        split = Adw.SplitButton()
+        split.set_label(label or definition.label)
+        split.set_tooltip_text(definition.description)
+        split.add_css_class("flat")
+        split.add_css_class("transform-split-compact")
+        split.set_action_name(f"app.{definition.action_name}")
+        default_profile = self._default_profile_for_action(definition.key)
+        default_target = default_profile.display_name() if default_profile is not None else ""
+        split.set_action_target_value(GLib.Variant("s", default_target))
+        if close_popover is not None:
+            split.connect("clicked", lambda _button, current=close_popover: current.popdown())
+        profile_popover = Gtk.Popover()
+        profile_popover.set_autohide(True)
+        profile_popover.set_cascade_popdown(True)
+        profile_popover.set_position(Gtk.PositionType.BOTTOM)
+        profile_popover.set_child(self._build_profile_menu_content(definition, close_popover))
+        split.set_popover(profile_popover)
+        return split
+
     def _build_more_actions_button(
         self, definitions: list[QuickActionDefinition]
-    ) -> tuple[Gtk.MenuButton, list[Gtk.Button]]:
+    ) -> tuple[Gtk.MenuButton, list[Gtk.Widget]]:
         popover = Gtk.Popover()
+        popover.set_autohide(True)
+        popover.set_cascade_popdown(True)
         popover.set_position(Gtk.PositionType.BOTTOM)
 
         content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
@@ -1653,23 +2041,12 @@ class ProseWindow(Adw.ApplicationWindow):
         action_grid.set_row_spacing(6)
         action_grid.set_max_children_per_line(2)
 
-        action_buttons: list[Gtk.Button] = []
+        action_buttons: list[Gtk.Widget] = []
         for definition in definitions:
-            button = self._build_quick_action_button(
-                definition,
-                label=definition.label,
-                on_clicked=lambda _button, current=popover: current.popdown(),
-            )
-            action_grid.append(button)
-            action_buttons.append(button)
+            widget = self._build_quick_action_widget(definition, label=definition.label, close_popover=popover)
+            action_grid.append(widget)
+            action_buttons.append(widget)
         content.append(action_grid)
-
-        commands_btn = Gtk.Button(label="Editor Commands…")
-        commands_btn.add_css_class("flat")
-        commands_btn.add_css_class("link")
-        commands_btn.set_halign(Gtk.Align.START)
-        commands_btn.connect("clicked", self._on_more_commands_clicked, popover)
-        content.append(commands_btn)
 
         popover.set_child(content)
 
@@ -1680,10 +2057,6 @@ class ProseWindow(Adw.ApplicationWindow):
         more_button.add_css_class("transform-pill")
         more_button.add_css_class("transform-pill-compact")
         return more_button, action_buttons
-
-    def _on_more_commands_clicked(self, _button: Gtk.Button, popover: Gtk.Popover) -> None:
-        popover.popdown()
-        self._on_open_editor_commands()
 
     def _rebuild_transform_action_buttons(self) -> None:
         flow_box = self._transform_actions_wrap
@@ -1701,9 +2074,9 @@ class ProseWindow(Adw.ApplicationWindow):
         for key in ordered_keys:
             definition = EDITOR_QUICK_ACTION_BY_KEY[key]
             if key in pinned_set:
-                button = self._build_quick_action_button(definition)
-                flow_box.append(button)
-                action_buttons.append(button)
+                widget = self._build_quick_action_widget(definition)
+                flow_box.append(widget)
+                action_buttons.append(widget)
             else:
                 remaining_actions.append(definition)
 
@@ -1751,6 +2124,11 @@ class ProseWindow(Adw.ApplicationWindow):
 .transform-pill-compact button {{
   padding-left: 10px;
   padding-right: 10px;
+  min-height: 28px;
+  font-size: 0.85rem;
+}}
+.transform-split-compact,
+.transform-split-compact button {{
   min-height: 28px;
   font-size: 0.85rem;
 }}
@@ -1957,7 +2335,6 @@ class ProseWindow(Adw.ApplicationWindow):
     def _ensure_menu(self) -> None:
         menu = Gio.Menu()
         menu.append("Settings", "app.settings")
-        menu.append("Editor Commands", "app.editor-commands")
         menu.append("Keyboard Shortcuts", "app.show-shortcuts")
         self._menu_button.set_menu_model(menu)
 
@@ -1971,6 +2348,11 @@ class ProseWindow(Adw.ApplicationWindow):
         def _add_action(name: str, handler: Callable[[], None]) -> None:
             action = Gio.SimpleAction.new(name, None)
             action.connect("activate", lambda _action, _param: handler())
+            app.add_action(action)
+
+        def _add_string_action(name: str, handler: Callable[[str], None]) -> None:
+            action = Gio.SimpleAction.new(name, GLib.VariantType.new("s"))
+            action.connect("activate", lambda _action, param: handler(param.get_string() if param else ""))
             app.add_action(action)
 
         _add_action("launch-writer", lambda: self._on_launch_clicked(None))
@@ -1987,20 +2369,39 @@ class ProseWindow(Adw.ApplicationWindow):
         _add_action("save-prefixes", lambda: self._on_save_prefixes_clicked(None))
         _add_action("combine-cites", lambda: self._on_combine_cites_clicked(None))
         _add_action("spellingstyle", lambda: self._on_spellingstyle_clicked(None))
-        _add_action("improve1", lambda: self._on_improve1_clicked(None))
-        _add_action("improve2", lambda: self._on_improve2_clicked(None))
-        _add_action("improve-selected", lambda: self._on_improve_selected_clicked(None))
+        _add_string_action("improve", lambda nickname: self._on_improve_clicked(None, nickname))
+        _add_action(
+            "improve1",
+            lambda: self._on_improve_clicked(
+                None,
+                (self._model_profile_by_key("profile1").display_name() if self._model_profile_by_key("profile1") else None),
+            ),
+        )
+        _add_action(
+            "improve2",
+            lambda: self._on_improve_clicked(
+                None,
+                (self._model_profile_by_key("profile2").display_name() if self._model_profile_by_key("profile2") else None),
+            ),
+        )
+        _add_string_action("improve-selected", lambda nickname: self._on_improve_selected_clicked(None, nickname))
         _add_action("keep-original", lambda: self._on_keep_original_clicked(None))
         _add_action("reference-lookup", lambda: self._on_reference_clicked(None))
-        _add_action("transform-shorten", lambda: self._on_shorten_clicked(None))
+        _add_string_action("transform-shorten", lambda nickname: self._on_shorten_clicked(None, nickname))
         _add_action("transform-wrap-quotes", lambda: self._on_wrap_quotes_clicked(None))
         _add_action("transform-translate", lambda: self._on_translate_clicked(None))
-        _add_action("transform-topic-sentence", lambda: self._on_topic_sentence_clicked(None))
-        _add_action("transform-introduction", lambda: self._on_introduction_clicked(None))
-        _add_action("transform-introduction-reply", lambda: self._on_introduction_reply_clicked(None))
-        _add_action("transform-conclusion", lambda: self._on_conclusion_clicked(None))
-        _add_action("transform-concl-no-issues", lambda: self._on_concl_no_issues_clicked(None))
-        _add_action("transform-concl-section", lambda: self._on_concl_section_clicked(None))
+        _add_string_action("transform-topic-sentence", lambda nickname: self._on_topic_sentence_clicked(None, nickname))
+        _add_string_action("transform-introduction", lambda nickname: self._on_introduction_clicked(None, nickname))
+        _add_string_action(
+            "transform-introduction-reply",
+            lambda nickname: self._on_introduction_reply_clicked(None, nickname),
+        )
+        _add_string_action("transform-conclusion", lambda nickname: self._on_conclusion_clicked(None, nickname))
+        _add_string_action(
+            "transform-concl-no-issues",
+            lambda nickname: self._on_concl_no_issues_clicked(None, nickname),
+        )
+        _add_string_action("transform-concl-section", lambda nickname: self._on_concl_section_clicked(None, nickname))
         _add_action("add-case", lambda: self._on_add_case_clicked(None))
         _add_action("request-changes", lambda: self._on_request_clicked(None))
         _add_action("view-last-json", lambda: self._on_view_json_clicked(None))
@@ -2064,6 +2465,7 @@ class ProseWindow(Adw.ApplicationWindow):
             return
         win = SettingsWindow(
             self,
+            self._model_profiles,
             self._proof_settings,
             self._spelling_settings,
             self._improve1_settings,
@@ -2080,6 +2482,7 @@ class ProseWindow(Adw.ApplicationWindow):
             self._topic_sentence_settings,
             self._concl_section_settings,
             self._translate_settings,
+            self._editor_action_profile_defaults,
             self._editor_pinned_action_ids,
             self._libreoffice_python_path,
             self._concordance_file_path,
@@ -2101,6 +2504,7 @@ class ProseWindow(Adw.ApplicationWindow):
 
     def _on_settings_saved(
         self,
+        model_profiles: list[ModelProfile],
         proof_settings: ProofreadSettings,
         spelling_settings: SpellingStyleSettings,
         improve1_settings: Improve1Settings,
@@ -2117,10 +2521,12 @@ class ProseWindow(Adw.ApplicationWindow):
         topic_sentence_settings: TopicSentenceSettings,
         concl_section_settings: ConclSectionSettings,
         translate_settings: TranslateSettings,
+        editor_action_profile_defaults: dict[str, str | None],
         editor_pinned_action_ids: list[str],
         libreoffice_python_path: Path | None,
         concordance_file_path: Path | None,
     ) -> None:
+        self._model_profiles = model_profiles
         self._proof_settings = proof_settings
         self._spelling_settings = spelling_settings
         self._improve1_settings = improve1_settings
@@ -2137,11 +2543,13 @@ class ProseWindow(Adw.ApplicationWindow):
         self._topic_sentence_settings = topic_sentence_settings
         self._concl_section_settings = concl_section_settings
         self._translate_settings = translate_settings
+        self._editor_action_profile_defaults = _sanitize_editor_action_profile_defaults(editor_action_profile_defaults)
         self._editor_pinned_action_ids = _sanitize_editor_pinned_actions(editor_pinned_action_ids)
         self._libreoffice_python_path = libreoffice_python_path.expanduser().resolve(strict=False) if libreoffice_python_path else None
         self._concordance_file_path = (
             concordance_file_path.expanduser().resolve(strict=False) if concordance_file_path else None
         )
+        save_model_profiles(model_profiles)
         save_proofread_settings(proof_settings)
         save_spellingstyle_settings(spelling_settings)
         save_improve1_settings(improve1_settings)
@@ -2158,6 +2566,7 @@ class ProseWindow(Adw.ApplicationWindow):
         save_topic_sentence_settings(topic_sentence_settings)
         save_concl_section_settings(concl_section_settings)
         save_translate_settings(translate_settings)
+        save_editor_action_profile_defaults(self._editor_action_profile_defaults)
         save_editor_pinned_actions(self._editor_pinned_action_ids)
         save_libreoffice_python_path(self._libreoffice_python_path)
         save_concordance_file_path(self._concordance_file_path)
@@ -2294,8 +2703,11 @@ class ProseWindow(Adw.ApplicationWindow):
     def _on_request_clicked(self, _button: Gtk.Button) -> None:
         if self._busy:
             return
-        if not self._proof_settings.is_configured():
-            self._show_toast("Add API URL, API key, and prompt in Settings. Model ID may be required.")
+        profile = self._resolve_profile_for_action("proof", None)
+        if profile is None:
+            return
+        if not profile.is_configured():
+            self._show_toast(f'Configure the "{profile.display_name()}" model profile in Settings first.')
             return
         desktop = self._get_desktop()
         if not desktop:
@@ -2313,8 +2725,8 @@ class ProseWindow(Adw.ApplicationWindow):
             end = start
             self._end_spin.set_value(start)
         self._set_busy(True)
-        self._status_label.set_label("Reading page range…")
-        thread = threading.Thread(target=self._gather_and_request, args=(doc, start, end), daemon=True)
+        self._status_label.set_label(f"Reading page range with {profile.display_name()}…")
+        thread = threading.Thread(target=self._gather_and_request, args=(doc, start, end, profile), daemon=True)
         thread.start()
 
     def _on_spellingstyle_clicked(self, _button: Gtk.Button) -> None:
@@ -2525,8 +2937,11 @@ class ProseWindow(Adw.ApplicationWindow):
     def _on_combine_cites_clicked(self, _button: Gtk.Button) -> None:
         if self._busy:
             return
-        if not self._combine_cites_settings.is_configured():
-            self._show_toast("Add Combine Cites API URL, API key, and prompt in Settings. Model ID may be required.")
+        profile = self._resolve_profile_for_action("combine", None)
+        if profile is None:
+            return
+        if not profile.is_configured():
+            self._show_toast(f'Configure the "{profile.display_name()}" model profile in Settings first.')
             return
         desktop = self._get_desktop()
         if not desktop:
@@ -2545,15 +2960,18 @@ class ProseWindow(Adw.ApplicationWindow):
         self._combine_cites_doc = doc
         self._combine_cites_cursor = cite_cursor
         self._set_busy(True)
-        self._status_label.set_label("Combining citations…")
-        thread = threading.Thread(target=self._run_combine_cites, args=(cite_text,), daemon=True)
+        self._status_label.set_label(f"Combining citations with {profile.display_name()}…")
+        thread = threading.Thread(target=self._run_combine_cites, args=(cite_text, profile), daemon=True)
         thread.start()
 
-    def _on_improve1_clicked(self, _button: Gtk.Button) -> None:
+    def _on_improve_clicked(self, _button: Gtk.Button | None, profile_nickname: str | None = None) -> None:
         if self._busy:
             return
-        if not self._improve1_settings.is_configured():
-            self._show_toast("Add Improve 1 API URL, API key, and prompt in Settings. Model ID may be required.")
+        profile = self._resolve_profile_for_action("improve", profile_nickname)
+        if profile is None:
+            return
+        if not profile.is_configured():
+            self._show_toast(f'Configure the "{profile.display_name()}" model profile in Settings first.')
             return
         source_text = self._get_spelling_output_text().strip()
         if not source_text:
@@ -2571,47 +2989,21 @@ class ProseWindow(Adw.ApplicationWindow):
             self._show_toast("Unable to select the last SpellingStyle range.")
             return
         if not self._prepare_improve_insertion(doc):
-            self._show_toast("Unable to prepare Improve 1 insertion point.")
+            self._show_toast("Unable to prepare Improve insertion point.")
             return
         self._set_busy(True)
-        self._status_label.set_label("Improving SpellingStyle output…")
-        thread = threading.Thread(target=self._run_improve1, args=(source_text,), daemon=True)
+        self._status_label.set_label(f"Improving SpellingStyle output with {profile.display_name()}…")
+        thread = threading.Thread(target=self._run_improve, args=(source_text, profile), daemon=True)
         thread.start()
 
-    def _on_improve2_clicked(self, _button: Gtk.Button) -> None:
+    def _on_improve_selected_clicked(self, _button: Gtk.Button | None, profile_nickname: str | None = None) -> None:
         if self._busy:
             return
-        if not self._improve2_settings.is_configured():
-            self._show_toast("Add Improve 2 API URL, API key, and prompt in Settings. Model ID may be required.")
+        profile = self._resolve_profile_for_action("improve", profile_nickname)
+        if profile is None:
             return
-        source_text = self._get_spelling_output_text().strip()
-        if not source_text:
-            self._show_toast("SpellingStyle output is empty.")
-            return
-        desktop = self._get_desktop()
-        if not desktop:
-            self._show_toast("Unable to reach LibreOffice listener. Is the service running?")
-            return
-        doc = self._get_active_writer(desktop)
-        if not doc:
-            self._show_toast("Open a Writer document (File → Launch Writer).")
-            return
-        if not self._select_spellingstyle_range(doc):
-            self._show_toast("Unable to select the last streamed range.")
-            return
-        if not self._prepare_improve_insertion(doc):
-            self._show_toast("Unable to prepare Improve 2 insertion point.")
-            return
-        self._set_busy(True)
-        self._status_label.set_label("Improving SpellingStyle output (Improve 2)…")
-        thread = threading.Thread(target=self._run_improve2, args=(source_text,), daemon=True)
-        thread.start()
-
-    def _on_improve_selected_clicked(self, _button: Gtk.Button) -> None:
-        if self._busy:
-            return
-        if not self._improve1_settings.is_configured():
-            self._show_toast("Add Improve 1 API URL, API key, and prompt in Settings. Model ID may be required.")
+        if not profile.is_configured():
+            self._show_toast(f'Configure the "{profile.display_name()}" model profile in Settings first.')
             return
         desktop = self._get_desktop()
         if not desktop:
@@ -2631,8 +3023,8 @@ class ProseWindow(Adw.ApplicationWindow):
             self._show_toast("Unable to prepare selected text replacement.")
             return
         self._set_busy(True)
-        self._status_label.set_label("Improving selected text…")
-        thread = threading.Thread(target=self._run_improve_selected, args=(source_text,), daemon=True)
+        self._status_label.set_label(f"Improving selected text with {profile.display_name()}…")
+        thread = threading.Thread(target=self._run_improve_selected, args=(source_text, profile), daemon=True)
         thread.start()
 
     def _on_keep_original_clicked(self, _button: Gtk.Button) -> None:
@@ -2671,8 +3063,11 @@ class ProseWindow(Adw.ApplicationWindow):
     def _on_thesaurus_clicked(self, _button: Gtk.Button) -> None:
         if self._busy:
             return
-        if not self._thesaurus_settings.is_configured():
-            self._show_toast("Add Thesaurus API URL, API key, and prompt in Settings. Model ID may be required.")
+        profile = self._resolve_profile_for_action("thesaurus", None)
+        if profile is None:
+            return
+        if not profile.is_configured():
+            self._show_toast(f'Configure the "{profile.display_name()}" model profile in Settings first.')
             return
         desktop = self._get_desktop()
         if not desktop:
@@ -2692,8 +3087,8 @@ class ProseWindow(Adw.ApplicationWindow):
         self._thesaurus_words = []
         self._render_thesaurus_words()
         self._set_busy(True)
-        self._status_label.set_label("Fetching thesaurus alternatives…")
-        thread = threading.Thread(target=self._run_thesaurus, args=(source_text,), daemon=True)
+        self._status_label.set_label(f"Fetching thesaurus alternatives with {profile.display_name()}…")
+        thread = threading.Thread(target=self._run_thesaurus, args=(source_text, profile), daemon=True)
         thread.start()
 
     def _on_reference_button_clicked(self, _button: Gtk.Button) -> None:
@@ -2749,11 +3144,14 @@ class ProseWindow(Adw.ApplicationWindow):
         if hasattr(self, "_reference_query_entry"):
             self._reference_query_entry.grab_focus()
 
-    def _on_shorten_clicked(self, _button: Gtk.Button) -> None:
+    def _on_shorten_clicked(self, _button: Gtk.Button | None, profile_nickname: str | None = None) -> None:
         if self._busy:
             return
-        if not self._shorten_settings.is_configured():
-            self._show_toast("Add Shorten API URL, API key, and prompt in Settings. Model ID may be required.")
+        profile = self._resolve_profile_for_action("shorten", profile_nickname)
+        if profile is None:
+            return
+        if not profile.is_configured():
+            self._show_toast(f'Configure the "{profile.display_name()}" model profile in Settings first.')
             return
         desktop = self._get_desktop()
         if not desktop:
@@ -2773,8 +3171,8 @@ class ProseWindow(Adw.ApplicationWindow):
             self._show_toast("Unable to prepare selected text replacement.")
             return
         self._set_busy(True)
-        self._status_label.set_label("Shortening selection…")
-        thread = threading.Thread(target=self._run_shorten, args=(source_text,), daemon=True)
+        self._status_label.set_label(f"Shortening selection with {profile.display_name()}…")
+        thread = threading.Thread(target=self._run_shorten, args=(source_text, profile), daemon=True)
         thread.start()
 
     def _on_wrap_quotes_clicked(self, _button: Gtk.Button) -> None:
@@ -2799,8 +3197,11 @@ class ProseWindow(Adw.ApplicationWindow):
     def _on_translate_clicked(self, _button: Gtk.Button) -> None:
         if self._busy:
             return
-        if not self._translate_settings.is_configured():
-            self._show_toast("Add Translate API URL, API key, and prompt in Settings. Model ID may be required.")
+        profile = self._resolve_profile_for_action("translate", None)
+        if profile is None:
+            return
+        if not profile.is_configured():
+            self._show_toast(f'Configure the "{profile.display_name()}" model profile in Settings first.')
             return
         desktop = self._get_desktop()
         if not desktop:
@@ -2811,8 +3212,8 @@ class ProseWindow(Adw.ApplicationWindow):
             self._show_toast("Open a Writer document (File → Launch Writer).")
             return
         self._set_busy(True)
-        self._status_label.set_label("Translating document to Spanish…")
-        thread = threading.Thread(target=self._run_translate_document, args=(doc,), daemon=True)
+        self._status_label.set_label(f"Translating document to Spanish with {profile.display_name()}…")
+        thread = threading.Thread(target=self._run_translate_document, args=(doc, profile), daemon=True)
         thread.start()
 
     def _on_add_case_clicked(self, _button: Gtk.Button) -> None:
@@ -2872,11 +3273,14 @@ class ProseWindow(Adw.ApplicationWindow):
         self._set_busy(False)
         return GLib.SOURCE_REMOVE
 
-    def _on_topic_sentence_clicked(self, _button: Gtk.Button) -> None:
+    def _on_topic_sentence_clicked(self, _button: Gtk.Button | None, profile_nickname: str | None = None) -> None:
         if self._busy:
             return
-        if not self._topic_sentence_settings.is_configured():
-            self._show_toast("Add Topic Sentence API URL, API key, and prompt in Settings. Model ID may be required.")
+        profile = self._resolve_profile_for_action("topic-sentence", profile_nickname)
+        if profile is None:
+            return
+        if not profile.is_configured():
+            self._show_toast(f'Configure the "{profile.display_name()}" model profile in Settings first.')
             return
         desktop = self._get_desktop()
         if not desktop:
@@ -2895,15 +3299,18 @@ class ProseWindow(Adw.ApplicationWindow):
             return
         self._set_spelling_output_text("")
         self._set_busy(True)
-        self._status_label.set_label("Creating topic sentence…")
-        thread = threading.Thread(target=self._run_topic_sentence, args=(source_text,), daemon=True)
+        self._status_label.set_label(f"Creating topic sentence with {profile.display_name()}…")
+        thread = threading.Thread(target=self._run_topic_sentence, args=(source_text, profile), daemon=True)
         thread.start()
 
-    def _on_introduction_clicked(self, _button: Gtk.Button) -> None:
+    def _on_introduction_clicked(self, _button: Gtk.Button | None, profile_nickname: str | None = None) -> None:
         if self._busy:
             return
-        if not self._introduction_settings.is_configured():
-            self._show_toast("Add Introduction API URL, API key, and prompt in Settings. Model ID may be required.")
+        profile = self._resolve_profile_for_action("intro", profile_nickname)
+        if profile is None:
+            return
+        if not profile.is_configured():
+            self._show_toast(f'Configure the "{profile.display_name()}" model profile in Settings first.')
             return
         desktop = self._get_desktop()
         if not desktop:
@@ -2922,17 +3329,18 @@ class ProseWindow(Adw.ApplicationWindow):
             return
         self._set_spelling_output_text("")
         self._set_busy(True)
-        self._status_label.set_label("Writing introduction…")
-        thread = threading.Thread(target=self._run_introduction, args=(source_text,), daemon=True)
+        self._status_label.set_label(f"Writing introduction with {profile.display_name()}…")
+        thread = threading.Thread(target=self._run_introduction, args=(source_text, profile), daemon=True)
         thread.start()
 
-    def _on_introduction_reply_clicked(self, _button: Gtk.Button) -> None:
+    def _on_introduction_reply_clicked(self, _button: Gtk.Button | None, profile_nickname: str | None = None) -> None:
         if self._busy:
             return
-        if not self._introduction_reply_settings.is_configured():
-            self._show_toast(
-                "Add Introduction for Reply API URL, API key, and prompt in Settings. Model ID may be required."
-            )
+        profile = self._resolve_profile_for_action("intro-reply", profile_nickname)
+        if profile is None:
+            return
+        if not profile.is_configured():
+            self._show_toast(f'Configure the "{profile.display_name()}" model profile in Settings first.')
             return
         desktop = self._get_desktop()
         if not desktop:
@@ -2951,15 +3359,18 @@ class ProseWindow(Adw.ApplicationWindow):
             return
         self._set_spelling_output_text("")
         self._set_busy(True)
-        self._status_label.set_label("Writing introduction for reply…")
-        thread = threading.Thread(target=self._run_introduction_reply, args=(source_text,), daemon=True)
+        self._status_label.set_label(f"Writing introduction for reply with {profile.display_name()}…")
+        thread = threading.Thread(target=self._run_introduction_reply, args=(source_text, profile), daemon=True)
         thread.start()
 
-    def _on_conclusion_clicked(self, _button: Gtk.Button) -> None:
+    def _on_conclusion_clicked(self, _button: Gtk.Button | None, profile_nickname: str | None = None) -> None:
         if self._busy:
             return
-        if not self._conclusion_settings.is_configured():
-            self._show_toast("Add Conclusion API URL, API key, and prompt in Settings. Model ID may be required.")
+        profile = self._resolve_profile_for_action("conclusion", profile_nickname)
+        if profile is None:
+            return
+        if not profile.is_configured():
+            self._show_toast(f'Configure the "{profile.display_name()}" model profile in Settings first.')
             return
         desktop = self._get_desktop()
         if not desktop:
@@ -2978,17 +3389,18 @@ class ProseWindow(Adw.ApplicationWindow):
             return
         self._set_spelling_output_text("")
         self._set_busy(True)
-        self._status_label.set_label("Writing conclusion…")
-        thread = threading.Thread(target=self._run_conclusion, args=(source_text,), daemon=True)
+        self._status_label.set_label(f"Writing conclusion with {profile.display_name()}…")
+        thread = threading.Thread(target=self._run_conclusion, args=(source_text, profile), daemon=True)
         thread.start()
 
-    def _on_concl_no_issues_clicked(self, _button: Gtk.Button) -> None:
+    def _on_concl_no_issues_clicked(self, _button: Gtk.Button | None, profile_nickname: str | None = None) -> None:
         if self._busy:
             return
-        if not self._concl_no_issues_settings.is_configured():
-            self._show_toast(
-                "Add Concl. No Issues API URL, API key, and prompt in Settings. Model ID may be required."
-            )
+        profile = self._resolve_profile_for_action("concl-no-issues", profile_nickname)
+        if profile is None:
+            return
+        if not profile.is_configured():
+            self._show_toast(f'Configure the "{profile.display_name()}" model profile in Settings first.')
             return
         desktop = self._get_desktop()
         if not desktop:
@@ -3007,15 +3419,18 @@ class ProseWindow(Adw.ApplicationWindow):
             return
         self._set_spelling_output_text("")
         self._set_busy(True)
-        self._status_label.set_label("Writing conclusion (no issues)…")
-        thread = threading.Thread(target=self._run_conclusion_no_issues, args=(source_text,), daemon=True)
+        self._status_label.set_label(f"Writing conclusion without issues with {profile.display_name()}…")
+        thread = threading.Thread(target=self._run_conclusion_no_issues, args=(source_text, profile), daemon=True)
         thread.start()
 
-    def _on_concl_section_clicked(self, _button: Gtk.Button) -> None:
+    def _on_concl_section_clicked(self, _button: Gtk.Button | None, profile_nickname: str | None = None) -> None:
         if self._busy:
             return
-        if not self._concl_section_settings.is_configured():
-            self._show_toast("Add Concl. Section API URL, API key, and prompt in Settings. Model ID may be required.")
+        profile = self._resolve_profile_for_action("concl-section", profile_nickname)
+        if profile is None:
+            return
+        if not profile.is_configured():
+            self._show_toast(f'Configure the "{profile.display_name()}" model profile in Settings first.')
             return
         desktop = self._get_desktop()
         if not desktop:
@@ -3035,21 +3450,21 @@ class ProseWindow(Adw.ApplicationWindow):
             return
         self._set_spelling_output_text("")
         self._set_busy(True)
-        self._status_label.set_label("Writing section conclusion…")
-        thread = threading.Thread(target=self._run_concl_section, args=(source_text,), daemon=True)
+        self._status_label.set_label(f"Writing section conclusion with {profile.display_name()}…")
+        thread = threading.Thread(target=self._run_concl_section, args=(source_text, profile), daemon=True)
         thread.start()
 
     # Thesaurus pipeline -------------------------------------------------
-    def _run_thesaurus(self, source_text: str) -> None:
-        payload = self._compose_thesaurus_payload(source_text)
+    def _run_thesaurus(self, source_text: str, profile: ModelProfile) -> None:
+        payload = self._compose_thesaurus_payload(source_text, profile)
         try:
-            words = self._call_thesaurus(payload)
+            words = self._call_thesaurus(payload, profile)
         except Exception as exc:  # noqa: BLE001
             GLib.idle_add(self._on_thesaurus_failed, str(exc))
             return
         GLib.idle_add(self._on_thesaurus_ready, words)
 
-    def _compose_thesaurus_payload(self, source_text: str) -> dict[str, Any]:
+    def _compose_thesaurus_payload(self, source_text: str, profile: ModelProfile) -> dict[str, Any]:
         prompt = self._thesaurus_settings.prompt or DEFAULT_THESAURUS_PROMPT
         content = f"{prompt}\n\n{source_text}" if prompt else source_text
         payload = {
@@ -3060,15 +3475,15 @@ class ProseWindow(Adw.ApplicationWindow):
         }
         return self._add_model_id(
             payload,
-            self._thesaurus_settings.model_id,
-            disable_reasoning=self._thesaurus_settings.disable_reasoning,
+            profile.model_id,
+            disable_reasoning=profile.disable_reasoning,
         )
 
-    def _call_thesaurus(self, payload: dict[str, Any]) -> list[str]:
+    def _call_thesaurus(self, payload: dict[str, Any], profile: ModelProfile) -> list[str]:
         raw = self._post_json_and_read(
             payload,
-            self._thesaurus_settings.api_url,
-            self._thesaurus_settings.api_key,
+            profile.api_url,
+            profile.api_key,
         )
         parts = list(self._extract_response_text(raw))
         if not parts:
@@ -3216,6 +3631,7 @@ class ProseWindow(Adw.ApplicationWindow):
     def _on_reference_finished(self, message: str) -> bool:
         self._set_busy(False)
         self._status_label.set_label(message)
+        self._trim_reference_output_edges()
         return False
 
     def _on_reference_failed(self, message: str) -> bool:
@@ -3742,16 +4158,16 @@ class ProseWindow(Adw.ApplicationWindow):
                 if text is not None:
                     yield text
 
-    def _run_combine_cites(self, cite_text: str) -> None:
-        payload = self._compose_combine_cites_payload(cite_text)
+    def _run_combine_cites(self, cite_text: str, profile: ModelProfile) -> None:
+        payload = self._compose_combine_cites_payload(cite_text, profile)
         try:
-            combined_text = self._call_combine_cites(payload)
+            combined_text = self._call_combine_cites(payload, profile)
         except Exception as exc:  # noqa: BLE001
             GLib.idle_add(self._on_combine_cites_failed, str(exc))
             return
         GLib.idle_add(self._apply_combined_cites, combined_text)
 
-    def _compose_combine_cites_payload(self, cite_text: str) -> dict[str, Any]:
+    def _compose_combine_cites_payload(self, cite_text: str, profile: ModelProfile) -> dict[str, Any]:
         prompt = self._combine_cites_settings.prompt or DEFAULT_COMBINE_CITES_PROMPT
         content = f"{prompt}\n\n{cite_text}" if prompt else cite_text
         payload = {
@@ -3762,15 +4178,15 @@ class ProseWindow(Adw.ApplicationWindow):
         }
         return self._add_model_id(
             payload,
-            self._combine_cites_settings.model_id,
-            disable_reasoning=self._combine_cites_settings.disable_reasoning,
+            profile.model_id,
+            disable_reasoning=profile.disable_reasoning,
         )
 
-    def _call_combine_cites(self, payload: dict[str, Any]) -> str:
+    def _call_combine_cites(self, payload: dict[str, Any], profile: ModelProfile) -> str:
         raw = self._post_json_and_read(
             payload,
-            self._combine_cites_settings.api_url,
-            self._combine_cites_settings.api_key,
+            profile.api_url,
+            profile.api_key,
         )
         parts = list(self._extract_response_text(raw))
         combined_text = "".join(parts).strip()
@@ -4183,6 +4599,27 @@ class ProseWindow(Adw.ApplicationWindow):
     def _normalize_newlines(self, text: str) -> str:
         return text.replace("\r\n", "\n").replace("\r", "\n")
 
+    def _normalize_generated_output_chunk(self, text: str, *, is_first_chunk: bool) -> str:
+        normalized = self._normalize_newlines(text)
+        if is_first_chunk:
+            normalized = normalized.lstrip()
+        return normalized
+
+    def _normalize_generated_output_text(self, text: str) -> str:
+        return self._normalize_newlines(text).strip()
+
+    def _trim_spelling_output_edges(self) -> None:
+        current = self._get_spelling_output_text()
+        cleaned = self._normalize_generated_output_text(current)
+        if cleaned != current:
+            self._set_spelling_output_text(cleaned)
+
+    def _trim_reference_output_edges(self) -> None:
+        current = self._reference_output_text or ""
+        cleaned = self._normalize_generated_output_text(current)
+        if cleaned != current:
+            self._set_reference_output_text(cleaned)
+
     def _split_text_for_paragraphs(self, text: str, pending_newlines: int) -> tuple[list[tuple[str, str]], int]:
         normalized = self._normalize_newlines(text)
         if pending_newlines:
@@ -4385,14 +4822,20 @@ class ProseWindow(Adw.ApplicationWindow):
                 button.set_sensitive(not busy)
 
     # Proofreading pipeline ----------------------------------------------
-    def _gather_and_request(self, doc: XTextDocument, start: int, end: int) -> None:  # type: ignore[type-arg]
+    def _gather_and_request(
+        self,
+        doc: XTextDocument,  # type: ignore[type-arg]
+        start: int,
+        end: int,
+        profile: ModelProfile,
+    ) -> None:
         page_texts = self._extract_page_texts(doc, start, end)
         if not page_texts:
             GLib.idle_add(self._on_request_failed, "No text found for the selected page range.")
             return
-        payload = self._compose_llm_payload(page_texts, start, end)
+        payload = self._compose_llm_payload(page_texts, start, end, profile)
         try:
-            suggestions = self._call_llm(payload)
+            suggestions = self._call_llm(payload, profile)
         except Exception as exc:  # noqa: BLE001
             GLib.idle_add(self._on_llm_failed, str(exc))
             return
@@ -4539,12 +4982,18 @@ class ProseWindow(Adw.ApplicationWindow):
             for part in content.get("parts", []) or []:
                 if isinstance(part, dict) and part.get("text"):
                     parts.append(str(part["text"]))
-        output = "".join(parts).strip()
+        output = self._normalize_generated_output_text("".join(parts))
         if not output:
             raise ValueError("Gemini returned empty output.")
         return output
 
-    def _compose_llm_payload(self, pages: Iterable[tuple[int, str]], start: int, end: int) -> dict[str, Any]:
+    def _compose_llm_payload(
+        self,
+        pages: Iterable[tuple[int, str]],
+        start: int,
+        end: int,
+        profile: ModelProfile,
+    ) -> dict[str, Any]:
         system_prompt = self._proof_settings.prompt or DEFAULT_PROMPT
         instructions = (
             "Return a JSON array of suggested edits for ONLY the provided Writer page range. "
@@ -4576,15 +5025,15 @@ class ProseWindow(Adw.ApplicationWindow):
         }
         return self._add_model_id(
             payload,
-            self._proof_settings.model_id,
-            disable_reasoning=self._proof_settings.disable_reasoning,
+            profile.model_id,
+            disable_reasoning=profile.disable_reasoning,
         )
 
-    def _call_llm(self, payload: dict[str, Any]) -> list[Suggestion]:
+    def _call_llm(self, payload: dict[str, Any], profile: ModelProfile) -> list[Suggestion]:
         raw = self._post_json_and_read(
             payload,
-            self._proof_settings.api_url,
-            self._proof_settings.api_key,
+            profile.api_url,
+            profile.api_key,
         )
         self._last_raw_response = raw
         suggestions = self._parse_suggestions(raw)
@@ -4839,40 +5288,30 @@ class ProseWindow(Adw.ApplicationWindow):
             return
         GLib.idle_add(self._on_spellingstyle_finished, "SpellingStyle complete.")
 
-    def _run_improve1(self, source_text: str) -> None:
-        payload = self._compose_improve1_payload(source_text)
+    def _run_improve(self, source_text: str, profile: ModelProfile) -> None:
+        payload = self._compose_improve_payload(source_text, profile)
         try:
-            for chunk in self._stream_improve1(payload):
+            for chunk in self._stream_custom(payload, profile.api_url, profile.api_key):
                 GLib.idle_add(self._append_improve1_text, chunk)
         except Exception as exc:  # noqa: BLE001
             GLib.idle_add(self._on_spellingstyle_failed, str(exc))
             return
-        GLib.idle_add(self._on_improve1_finished, "Improve 1 complete.")
+        GLib.idle_add(self._on_improve_finished, "Improve complete.")
 
-    def _run_improve2(self, source_text: str) -> None:
-        payload = self._compose_improve2_payload(source_text)
+    def _run_improve_selected(self, source_text: str, profile: ModelProfile) -> None:
+        payload = self._compose_improve_payload(source_text, profile)
         try:
-            for chunk in self._stream_improve2(payload):
-                GLib.idle_add(self._append_improve1_text, chunk)
-        except Exception as exc:  # noqa: BLE001
-            GLib.idle_add(self._on_spellingstyle_failed, str(exc))
-            return
-        GLib.idle_add(self._on_improve2_finished, "Improve 2 complete.")
-
-    def _run_improve_selected(self, source_text: str) -> None:
-        payload = self._compose_improve1_payload(source_text)
-        try:
-            for chunk in self._stream_improve1(payload):
+            for chunk in self._stream_custom(payload, profile.api_url, profile.api_key):
                 GLib.idle_add(self._append_improve1_text, chunk)
         except Exception as exc:  # noqa: BLE001
             GLib.idle_add(self._on_spellingstyle_failed, str(exc))
             return
         GLib.idle_add(self._on_improve_selected_finished, "Improve Selected complete.")
 
-    def _run_shorten(self, source_text: str) -> None:
-        payload = self._compose_shorten_payload(source_text)
+    def _run_shorten(self, source_text: str, profile: ModelProfile) -> None:
+        payload = self._compose_shorten_payload(source_text, profile)
         try:
-            for chunk in self._stream_custom(payload, self._shorten_settings.api_url, self._shorten_settings.api_key):
+            for chunk in self._stream_custom(payload, profile.api_url, profile.api_key):
                 GLib.idle_add(self._append_improve1_text, chunk)
                 GLib.idle_add(self._append_spelling_output_text, chunk)
         except Exception as exc:  # noqa: BLE001
@@ -4880,12 +5319,10 @@ class ProseWindow(Adw.ApplicationWindow):
             return
         GLib.idle_add(self._on_shorten_finished, "Shorten complete.")
 
-    def _run_topic_sentence(self, source_text: str) -> None:
-        payload = self._compose_topic_sentence_payload(source_text)
+    def _run_topic_sentence(self, source_text: str, profile: ModelProfile) -> None:
+        payload = self._compose_topic_sentence_payload(source_text, profile)
         try:
-            for chunk in self._stream_custom(
-                payload, self._topic_sentence_settings.api_url, self._topic_sentence_settings.api_key
-            ):
+            for chunk in self._stream_custom(payload, profile.api_url, profile.api_key):
                 GLib.idle_add(self._append_editor_text, chunk)
                 GLib.idle_add(self._append_spelling_output_text, chunk)
         except Exception as exc:  # noqa: BLE001
@@ -4893,23 +5330,21 @@ class ProseWindow(Adw.ApplicationWindow):
             return
         GLib.idle_add(self._on_topic_sentence_finished, "Topic sentence complete.")
 
-    def _run_introduction(self, source_text: str) -> None:
-        payload = self._compose_introduction_payload(source_text)
+    def _run_introduction(self, source_text: str, profile: ModelProfile) -> None:
+        payload = self._compose_introduction_payload(source_text, profile)
         try:
-            if self._is_gemini_generate_content_url(self._introduction_settings.api_url):
+            if self._is_gemini_generate_content_url(profile.api_url):
                 prompt = self._introduction_settings.prompt or DEFAULT_INTRO_PROMPT
                 combined = f"{prompt}\n\n{source_text}" if prompt else source_text
                 output = self._call_gemini_generate_content(
-                    self._introduction_settings.api_url,
-                    self._introduction_settings.api_key,
+                    profile.api_url,
+                    profile.api_key,
                     combined,
                 )
                 GLib.idle_add(self._append_editor_text, output)
                 GLib.idle_add(self._append_spelling_output_text, output)
             else:
-                for chunk in self._stream_custom(
-                    payload, self._introduction_settings.api_url, self._introduction_settings.api_key
-                ):
+                for chunk in self._stream_custom(payload, profile.api_url, profile.api_key):
                     GLib.idle_add(self._append_editor_text, chunk)
                     GLib.idle_add(self._append_spelling_output_text, chunk)
         except Exception as exc:  # noqa: BLE001
@@ -4917,23 +5352,21 @@ class ProseWindow(Adw.ApplicationWindow):
             return
         GLib.idle_add(self._on_introduction_finished, "Introduction complete.")
 
-    def _run_introduction_reply(self, source_text: str) -> None:
-        payload = self._compose_introduction_reply_payload(source_text)
+    def _run_introduction_reply(self, source_text: str, profile: ModelProfile) -> None:
+        payload = self._compose_introduction_reply_payload(source_text, profile)
         try:
-            if self._is_gemini_generate_content_url(self._introduction_reply_settings.api_url):
+            if self._is_gemini_generate_content_url(profile.api_url):
                 prompt = self._introduction_reply_settings.prompt or DEFAULT_INTRO_REPLY_PROMPT
                 combined = f"{prompt}\n\n{source_text}" if prompt else source_text
                 output = self._call_gemini_generate_content(
-                    self._introduction_reply_settings.api_url,
-                    self._introduction_reply_settings.api_key,
+                    profile.api_url,
+                    profile.api_key,
                     combined,
                 )
                 GLib.idle_add(self._append_editor_text, output)
                 GLib.idle_add(self._append_spelling_output_text, output)
             else:
-                for chunk in self._stream_custom(
-                    payload, self._introduction_reply_settings.api_url, self._introduction_reply_settings.api_key
-                ):
+                for chunk in self._stream_custom(payload, profile.api_url, profile.api_key):
                     GLib.idle_add(self._append_editor_text, chunk)
                     GLib.idle_add(self._append_spelling_output_text, chunk)
         except Exception as exc:  # noqa: BLE001
@@ -4941,23 +5374,21 @@ class ProseWindow(Adw.ApplicationWindow):
             return
         GLib.idle_add(self._on_introduction_finished, "Introduction for reply complete.")
 
-    def _run_conclusion(self, source_text: str) -> None:
-        payload = self._compose_conclusion_payload(source_text)
+    def _run_conclusion(self, source_text: str, profile: ModelProfile) -> None:
+        payload = self._compose_conclusion_payload(source_text, profile)
         try:
-            if self._is_gemini_generate_content_url(self._conclusion_settings.api_url):
+            if self._is_gemini_generate_content_url(profile.api_url):
                 prompt = self._conclusion_settings.prompt or DEFAULT_CONCLUSION_PROMPT
                 combined = f"{prompt}\n\n{source_text}" if prompt else source_text
                 output = self._call_gemini_generate_content(
-                    self._conclusion_settings.api_url,
-                    self._conclusion_settings.api_key,
+                    profile.api_url,
+                    profile.api_key,
                     combined,
                 )
                 GLib.idle_add(self._append_editor_text, output)
                 GLib.idle_add(self._append_spelling_output_text, output)
             else:
-                for chunk in self._stream_custom(
-                    payload, self._conclusion_settings.api_url, self._conclusion_settings.api_key
-                ):
+                for chunk in self._stream_custom(payload, profile.api_url, profile.api_key):
                     GLib.idle_add(self._append_editor_text, chunk)
                     GLib.idle_add(self._append_spelling_output_text, chunk)
         except Exception as exc:  # noqa: BLE001
@@ -4965,23 +5396,21 @@ class ProseWindow(Adw.ApplicationWindow):
             return
         GLib.idle_add(self._on_conclusion_finished, "Conclusion complete.")
 
-    def _run_conclusion_no_issues(self, source_text: str) -> None:
-        payload = self._compose_conclusion_no_issues_payload(source_text)
+    def _run_conclusion_no_issues(self, source_text: str, profile: ModelProfile) -> None:
+        payload = self._compose_conclusion_no_issues_payload(source_text, profile)
         try:
-            if self._is_gemini_generate_content_url(self._concl_no_issues_settings.api_url):
+            if self._is_gemini_generate_content_url(profile.api_url):
                 prompt = self._concl_no_issues_settings.prompt or DEFAULT_CONCL_NO_ISSUES_PROMPT
                 combined = f"{prompt}\n\n{source_text}" if prompt else source_text
                 output = self._call_gemini_generate_content(
-                    self._concl_no_issues_settings.api_url,
-                    self._concl_no_issues_settings.api_key,
+                    profile.api_url,
+                    profile.api_key,
                     combined,
                 )
                 GLib.idle_add(self._append_editor_text, output)
                 GLib.idle_add(self._append_spelling_output_text, output)
             else:
-                for chunk in self._stream_custom(
-                    payload, self._concl_no_issues_settings.api_url, self._concl_no_issues_settings.api_key
-                ):
+                for chunk in self._stream_custom(payload, profile.api_url, profile.api_key):
                     GLib.idle_add(self._append_editor_text, chunk)
                     GLib.idle_add(self._append_spelling_output_text, chunk)
         except Exception as exc:  # noqa: BLE001
@@ -4989,12 +5418,10 @@ class ProseWindow(Adw.ApplicationWindow):
             return
         GLib.idle_add(self._on_conclusion_no_issues_finished, "Conclusion (no issues) complete.")
 
-    def _run_concl_section(self, source_text: str) -> None:
-        payload = self._compose_concl_section_payload(source_text)
+    def _run_concl_section(self, source_text: str, profile: ModelProfile) -> None:
+        payload = self._compose_concl_section_payload(source_text, profile)
         try:
-            for chunk in self._stream_custom(
-                payload, self._concl_section_settings.api_url, self._concl_section_settings.api_key
-            ):
+            for chunk in self._stream_custom(payload, profile.api_url, profile.api_key):
                 GLib.idle_add(self._append_editor_text, chunk)
                 GLib.idle_add(self._append_spelling_output_text, chunk)
         except Exception as exc:  # noqa: BLE001
@@ -5002,7 +5429,7 @@ class ProseWindow(Adw.ApplicationWindow):
             return
         GLib.idle_add(self._on_concl_section_finished, "Section conclusion complete.")
 
-    def _run_translate_document(self, doc: XTextDocument) -> None:  # type: ignore[type-arg]
+    def _run_translate_document(self, doc: XTextDocument, profile: ModelProfile) -> None:  # type: ignore[type-arg]
         try:
             paragraphs = self._collect_document_paragraph_texts(doc)
             if not paragraphs:
@@ -5013,7 +5440,7 @@ class ProseWindow(Adw.ApplicationWindow):
                 if not source_text.strip():
                     translated_paragraphs.append(source_text)
                     continue
-                translated_text = self._translate_unit_text(source_text, strict=False)
+                translated_text = self._translate_unit_text(source_text, strict=False, profile=profile)
                 if not translated_text.strip():
                     translated_text = source_text
                 translated_paragraphs.append(translated_text)
@@ -5055,14 +5482,14 @@ class ProseWindow(Adw.ApplicationWindow):
         except Exception as exc:  # noqa: BLE001
             raise ValueError(f"Unable to replace document text: {exc}") from exc
 
-    def _translate_paragraph_by_sentences(self, paragraph: str) -> str:
+    def _translate_paragraph_by_sentences(self, paragraph: str, profile: ModelProfile) -> str:
         parts = self._split_paragraph_for_translation_fallback(paragraph)
         translated_parts: list[str] = []
         for part in parts:
             if not part.strip():
                 translated_parts.append(part)
                 continue
-            translated = self._translate_unit_text(part, strict=True)
+            translated = self._translate_unit_text(part, strict=True, profile=profile)
             if self._translation_looks_truncated(part, translated):
                 return paragraph
             translated_parts.append(translated)
@@ -5304,9 +5731,9 @@ class ProseWindow(Adw.ApplicationWindow):
             batches.append(current)
         return batches
 
-    def _translate_unit_text(self, source_text: str, strict: bool) -> str:
+    def _translate_unit_text(self, source_text: str, strict: bool, profile: ModelProfile) -> str:
         prompt = self._build_translate_instructions(strict, expect_json=False)
-        if self._translate_settings.api_url.rstrip("/").endswith("/responses"):
+        if profile.api_url.rstrip("/").endswith("/responses"):
             payload = {
                 "input": (
                     f"{prompt}\n\n"
@@ -5318,13 +5745,13 @@ class ProseWindow(Adw.ApplicationWindow):
             }
             payload = self._add_model_id(
                 payload,
-                self._translate_settings.model_id,
-                disable_reasoning=self._translate_settings.disable_reasoning,
+                profile.model_id,
+                disable_reasoning=profile.disable_reasoning,
             )
             return self._call_responses_text(
                 payload,
-                self._translate_settings.api_url,
-                self._translate_settings.api_key,
+                profile.api_url,
+                profile.api_key,
             )
         payload = {
             "messages": [
@@ -5341,17 +5768,17 @@ class ProseWindow(Adw.ApplicationWindow):
         }
         payload = self._add_model_id(
             payload,
-            self._translate_settings.model_id,
-            disable_reasoning=self._translate_settings.disable_reasoning,
+            profile.model_id,
+            disable_reasoning=profile.disable_reasoning,
         )
         return self._call_chat_text(
             payload,
-            self._translate_settings.api_url,
-            self._translate_settings.api_key,
+            profile.api_url,
+            profile.api_key,
         )
 
-    def _translate_batch(self, batch: list[tuple[int, str, Any]]) -> dict[int, str]:
-        translated = self._translate_batch_once(batch, strict=False)
+    def _translate_batch(self, batch: list[tuple[int, str, Any]], profile: ModelProfile) -> dict[int, str]:
+        translated = self._translate_batch_once(batch, strict=False, profile=profile)
         source_by_index = {index: text for index, text, _cursor in batch}
         suspect = self._find_suspect_translations(source_by_index, translated)
         if not suspect:
@@ -5359,7 +5786,7 @@ class ProseWindow(Adw.ApplicationWindow):
         for index in sorted(suspect):
             source_text = source_by_index[index]
             single_item = [(index, source_text, None)]
-            translated.update(self._translate_batch_once(single_item, strict=True))
+            translated.update(self._translate_batch_once(single_item, strict=True, profile=profile))
         suspect_after_retry = self._find_suspect_translations(source_by_index, translated)
         if suspect_after_retry:
             for index in suspect_after_retry:
@@ -5368,24 +5795,29 @@ class ProseWindow(Adw.ApplicationWindow):
             self._translate_fallback_count = current_count + len(suspect_after_retry)
         return translated
 
-    def _translate_batch_once(self, batch: list[tuple[int, str, Any]], strict: bool) -> dict[int, str]:
+    def _translate_batch_once(
+        self,
+        batch: list[tuple[int, str, Any]],
+        strict: bool,
+        profile: ModelProfile,
+    ) -> dict[int, str]:
         source_payload = [{"index": index, "text": text} for index, text, _cursor in batch]
         instructions = self._build_translate_instructions(strict)
         source_json = json.dumps(source_payload, ensure_ascii=False)
-        if self._translate_settings.api_url.rstrip("/").endswith("/responses"):
+        if profile.api_url.rstrip("/").endswith("/responses"):
             request_payload = {
                 "input": f"{instructions}\n\nSOURCE:\n{source_json}",
                 "stream": False,
             }
             request_payload = self._add_model_id(
                 request_payload,
-                self._translate_settings.model_id,
-                disable_reasoning=self._translate_settings.disable_reasoning,
+                profile.model_id,
+                disable_reasoning=profile.disable_reasoning,
             )
             raw_output = self._call_responses_text(
                 request_payload,
-                self._translate_settings.api_url,
-                self._translate_settings.api_key,
+                profile.api_url,
+                profile.api_key,
             )
         else:
             request_payload = {
@@ -5397,13 +5829,13 @@ class ProseWindow(Adw.ApplicationWindow):
             }
             request_payload = self._add_model_id(
                 request_payload,
-                self._translate_settings.model_id,
-                disable_reasoning=self._translate_settings.disable_reasoning,
+                profile.model_id,
+                disable_reasoning=profile.disable_reasoning,
             )
             raw_output = self._call_chat_text(
                 request_payload,
-                self._translate_settings.api_url,
-                self._translate_settings.api_key,
+                profile.api_url,
+                profile.api_key,
             )
         return self._parse_translation_batch(raw_output, {index for index, _text, _cursor in batch})
 
@@ -5482,14 +5914,14 @@ class ProseWindow(Adw.ApplicationWindow):
 
     def _call_chat_text(self, payload: dict[str, Any], api_url: str, api_key: str) -> str:
         raw = self._post_json_and_read(payload, api_url, api_key)
-        text = "".join(self._extract_response_text(raw)).strip()
+        text = self._normalize_generated_output_text("".join(self._extract_response_text(raw)))
         if not text:
             raise ValueError("Translate returned empty output.")
         return text
 
     def _call_responses_text(self, payload: dict[str, Any], api_url: str, api_key: str) -> str:
         raw = self._post_json_and_read(payload, api_url, api_key)
-        text = "".join(self._extract_responses_text(raw)).strip()
+        text = self._normalize_generated_output_text("".join(self._extract_responses_text(raw)))
         if not text:
             raise ValueError("Translate returned empty output.")
         return text
@@ -5547,23 +5979,22 @@ class ProseWindow(Adw.ApplicationWindow):
             disable_reasoning=self._spelling_settings.disable_reasoning,
         )
 
-    def _compose_improve1_payload(self, source_text: str) -> dict[str, Any]:
-        system_prompt = self._improve1_settings.prompt or DEFAULT_IMPROVE1_PROMPT
-        payload = {
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": source_text},
-            ],
-            "stream": True,
-        }
-        return self._add_model_id(
-            payload,
-            self._improve1_settings.model_id,
-            disable_reasoning=self._improve1_settings.disable_reasoning,
+    def _compose_improve_payload(self, source_text: str, profile: ModelProfile) -> dict[str, Any]:
+        return self._compose_profile_prompt_payload(
+            source_text,
+            self._improve1_settings.prompt,
+            DEFAULT_IMPROVE_PROMPT,
+            profile,
         )
 
-    def _compose_improve2_payload(self, source_text: str) -> dict[str, Any]:
-        system_prompt = self._improve2_settings.prompt or DEFAULT_IMPROVE2_PROMPT
+    def _compose_profile_prompt_payload(
+        self,
+        source_text: str,
+        prompt_text: str,
+        default_prompt: str,
+        profile: ModelProfile,
+    ) -> dict[str, Any]:
+        system_prompt = prompt_text or default_prompt
         payload = {
             "messages": [
                 {"role": "system", "content": system_prompt},
@@ -5573,113 +6004,64 @@ class ProseWindow(Adw.ApplicationWindow):
         }
         return self._add_model_id(
             payload,
-            self._improve2_settings.model_id,
-            disable_reasoning=self._improve2_settings.disable_reasoning,
+            profile.model_id,
+            disable_reasoning=profile.disable_reasoning,
         )
 
-    def _compose_shorten_payload(self, source_text: str) -> dict[str, Any]:
-        system_prompt = self._shorten_settings.prompt or DEFAULT_SHORTEN_PROMPT
-        payload = {
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": source_text},
-            ],
-            "stream": True,
-        }
-        return self._add_model_id(
-            payload,
-            self._shorten_settings.model_id,
-            disable_reasoning=self._shorten_settings.disable_reasoning,
+    def _compose_shorten_payload(self, source_text: str, profile: ModelProfile) -> dict[str, Any]:
+        return self._compose_profile_prompt_payload(
+            source_text,
+            self._shorten_settings.prompt,
+            DEFAULT_SHORTEN_PROMPT,
+            profile,
         )
 
-    def _compose_topic_sentence_payload(self, source_text: str) -> dict[str, Any]:
-        system_prompt = self._topic_sentence_settings.prompt or DEFAULT_TOPIC_SENTENCE_PROMPT
-        payload = {
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": source_text},
-            ],
-            "stream": True,
-        }
-        return self._add_model_id(
-            payload,
-            self._topic_sentence_settings.model_id,
-            disable_reasoning=self._topic_sentence_settings.disable_reasoning,
+    def _compose_topic_sentence_payload(self, source_text: str, profile: ModelProfile) -> dict[str, Any]:
+        return self._compose_profile_prompt_payload(
+            source_text,
+            self._topic_sentence_settings.prompt,
+            DEFAULT_TOPIC_SENTENCE_PROMPT,
+            profile,
         )
 
-    def _compose_introduction_payload(self, source_text: str) -> dict[str, Any]:
-        system_prompt = self._introduction_settings.prompt or DEFAULT_INTRO_PROMPT
-        payload = {
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": source_text},
-            ],
-            "stream": True,
-        }
-        return self._add_model_id(
-            payload,
-            self._introduction_settings.model_id,
-            disable_reasoning=self._introduction_settings.disable_reasoning,
+    def _compose_introduction_payload(self, source_text: str, profile: ModelProfile) -> dict[str, Any]:
+        return self._compose_profile_prompt_payload(
+            source_text,
+            self._introduction_settings.prompt,
+            DEFAULT_INTRO_PROMPT,
+            profile,
         )
 
-    def _compose_introduction_reply_payload(self, source_text: str) -> dict[str, Any]:
-        system_prompt = self._introduction_reply_settings.prompt or DEFAULT_INTRO_REPLY_PROMPT
-        payload = {
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": source_text},
-            ],
-            "stream": True,
-        }
-        return self._add_model_id(
-            payload,
-            self._introduction_reply_settings.model_id,
-            disable_reasoning=self._introduction_reply_settings.disable_reasoning,
+    def _compose_introduction_reply_payload(self, source_text: str, profile: ModelProfile) -> dict[str, Any]:
+        return self._compose_profile_prompt_payload(
+            source_text,
+            self._introduction_reply_settings.prompt,
+            DEFAULT_INTRO_REPLY_PROMPT,
+            profile,
         )
 
-    def _compose_conclusion_payload(self, source_text: str) -> dict[str, Any]:
-        system_prompt = self._conclusion_settings.prompt or DEFAULT_CONCLUSION_PROMPT
-        payload = {
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": source_text},
-            ],
-            "stream": True,
-        }
-        return self._add_model_id(
-            payload,
-            self._conclusion_settings.model_id,
-            disable_reasoning=self._conclusion_settings.disable_reasoning,
+    def _compose_conclusion_payload(self, source_text: str, profile: ModelProfile) -> dict[str, Any]:
+        return self._compose_profile_prompt_payload(
+            source_text,
+            self._conclusion_settings.prompt,
+            DEFAULT_CONCLUSION_PROMPT,
+            profile,
         )
 
-    def _compose_conclusion_no_issues_payload(self, source_text: str) -> dict[str, Any]:
-        system_prompt = self._concl_no_issues_settings.prompt or DEFAULT_CONCL_NO_ISSUES_PROMPT
-        payload = {
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": source_text},
-            ],
-            "stream": True,
-        }
-        return self._add_model_id(
-            payload,
-            self._concl_no_issues_settings.model_id,
-            disable_reasoning=self._concl_no_issues_settings.disable_reasoning,
+    def _compose_conclusion_no_issues_payload(self, source_text: str, profile: ModelProfile) -> dict[str, Any]:
+        return self._compose_profile_prompt_payload(
+            source_text,
+            self._concl_no_issues_settings.prompt,
+            DEFAULT_CONCL_NO_ISSUES_PROMPT,
+            profile,
         )
 
-    def _compose_concl_section_payload(self, source_text: str) -> dict[str, Any]:
-        system_prompt = self._concl_section_settings.prompt or DEFAULT_CONCL_SECTION_PROMPT
-        payload = {
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": source_text},
-            ],
-            "stream": True,
-        }
-        return self._add_model_id(
-            payload,
-            self._concl_section_settings.model_id,
-            disable_reasoning=self._concl_section_settings.disable_reasoning,
+    def _compose_concl_section_payload(self, source_text: str, profile: ModelProfile) -> dict[str, Any]:
+        return self._compose_profile_prompt_payload(
+            source_text,
+            self._concl_section_settings.prompt,
+            DEFAULT_CONCL_SECTION_PROMPT,
+            profile,
         )
 
     def _stream_spellingstyle(self, payload: dict[str, Any]) -> Iterable[str]:
@@ -5687,20 +6069,6 @@ class ProseWindow(Adw.ApplicationWindow):
             payload,
             self._spelling_settings.api_url,
             self._spelling_settings.api_key,
-        )
-
-    def _stream_improve1(self, payload: dict[str, Any]) -> Iterable[str]:
-        yield from self._stream_custom(
-            payload,
-            self._improve1_settings.api_url,
-            self._improve1_settings.api_key,
-        )
-
-    def _stream_improve2(self, payload: dict[str, Any]) -> Iterable[str]:
-        yield from self._stream_custom(
-            payload,
-            self._improve2_settings.api_url,
-            self._improve2_settings.api_key,
         )
 
     def _stream_custom(self, payload: dict[str, Any], api_url: str, api_key: str) -> Iterable[str]:
@@ -5712,6 +6080,7 @@ class ProseWindow(Adw.ApplicationWindow):
         }
         attempted_without_thinking = False
         attempted_without_reasoning_effort = False
+        saw_output = False
         while True:
             data = json.dumps(payload).encode("utf-8")
             req = urllib.request.Request(api_url, data=data, headers=headers, method="POST")
@@ -5721,7 +6090,11 @@ class ProseWindow(Adw.ApplicationWindow):
                     if "text/event-stream" not in content_type:
                         raw = resp.read().decode("utf-8", errors="ignore")
                         for chunk in self._extract_response_text(raw):
-                            yield chunk
+                            cleaned = self._normalize_generated_output_chunk(chunk, is_first_chunk=not saw_output)
+                            if not cleaned:
+                                continue
+                            saw_output = True
+                            yield cleaned
                         return
                     for raw_line in resp:
                         line = raw_line.decode("utf-8", errors="ignore").strip()
@@ -5736,7 +6109,11 @@ class ProseWindow(Adw.ApplicationWindow):
                             continue
                         chunk = self._extract_stream_delta(data_obj)
                         if chunk:
-                            yield chunk
+                            cleaned = self._normalize_generated_output_chunk(chunk, is_first_chunk=not saw_output)
+                            if not cleaned:
+                                continue
+                            saw_output = True
+                            yield cleaned
                 return
             except urllib.error.HTTPError as exc:
                 detail = ""
@@ -5767,6 +6144,7 @@ class ProseWindow(Adw.ApplicationWindow):
         }
         attempted_without_thinking = False
         attempted_without_reasoning_effort = False
+        saw_output = False
         while True:
             data = json.dumps(payload).encode("utf-8")
             req = urllib.request.Request(api_url, data=data, headers=headers, method="POST")
@@ -5776,7 +6154,11 @@ class ProseWindow(Adw.ApplicationWindow):
                     if "text/event-stream" not in content_type:
                         raw = resp.read().decode("utf-8", errors="ignore")
                         for chunk in self._extract_responses_text(raw):
-                            yield chunk
+                            cleaned = self._normalize_generated_output_chunk(chunk, is_first_chunk=not saw_output)
+                            if not cleaned:
+                                continue
+                            saw_output = True
+                            yield cleaned
                         return
                     for raw_line in resp:
                         line = raw_line.decode("utf-8", errors="ignore").strip()
@@ -5791,7 +6173,11 @@ class ProseWindow(Adw.ApplicationWindow):
                             continue
                         chunk = self._extract_responses_delta(data_obj)
                         if chunk:
-                            yield chunk
+                            cleaned = self._normalize_generated_output_chunk(chunk, is_first_chunk=not saw_output)
+                            if not cleaned:
+                                continue
+                            saw_output = True
+                            yield cleaned
                 return
             except urllib.error.HTTPError as exc:
                 detail = ""
@@ -5926,10 +6312,11 @@ class ProseWindow(Adw.ApplicationWindow):
                 "_editor_pending_newlines",
             )
             self._ensure_single_trailing_space(self._editor_insert_doc, self._editor_insert_cursor)
+        self._trim_spelling_output_edges()
         self._capture_spellingstyle_range_end()
         return False
 
-    def _on_improve1_finished(self, message: str) -> bool:
+    def _on_improve_finished(self, message: str) -> bool:
         self._set_busy(False)
         self._status_label.set_label(message)
         if self._improve_insert_doc and self._improve_insert_cursor:
@@ -5955,19 +6342,6 @@ class ProseWindow(Adw.ApplicationWindow):
         self._capture_improve1_range_end()
         return False
 
-    def _on_improve2_finished(self, message: str) -> bool:
-        self._set_busy(False)
-        self._status_label.set_label(message)
-        if self._improve_insert_doc and self._improve_insert_cursor:
-            self._flush_pending_newlines(
-                self._improve_insert_doc,
-                self._improve_insert_cursor,
-                "_improve_pending_newlines",
-            )
-            self._ensure_single_trailing_space(self._improve_insert_doc, self._improve_insert_cursor)
-        self._capture_improve2_range_end()
-        return False
-
     def _on_shorten_finished(self, message: str) -> bool:
         self._set_busy(False)
         self._status_label.set_label(message)
@@ -5978,6 +6352,7 @@ class ProseWindow(Adw.ApplicationWindow):
                 "_improve_pending_newlines",
             )
             self._ensure_single_trailing_space(self._improve_insert_doc, self._improve_insert_cursor)
+        self._trim_spelling_output_edges()
         self._capture_improve1_range_end()
         return False
 
@@ -5991,6 +6366,7 @@ class ProseWindow(Adw.ApplicationWindow):
                 "_editor_pending_newlines",
             )
             self._ensure_single_trailing_space(self._editor_insert_doc, self._editor_insert_cursor)
+        self._trim_spelling_output_edges()
         self._capture_spellingstyle_range_end()
         return False
 
@@ -6004,6 +6380,7 @@ class ProseWindow(Adw.ApplicationWindow):
                 "_editor_pending_newlines",
             )
             self._ensure_single_trailing_space(self._editor_insert_doc, self._editor_insert_cursor)
+        self._trim_spelling_output_edges()
         self._capture_spellingstyle_range_end()
         return False
 
@@ -6017,6 +6394,7 @@ class ProseWindow(Adw.ApplicationWindow):
                 "_editor_pending_newlines",
             )
             self._ensure_single_trailing_space(self._editor_insert_doc, self._editor_insert_cursor)
+        self._trim_spelling_output_edges()
         self._capture_spellingstyle_range_end()
         return False
 
@@ -6030,6 +6408,7 @@ class ProseWindow(Adw.ApplicationWindow):
                 "_editor_pending_newlines",
             )
             self._ensure_single_trailing_space(self._editor_insert_doc, self._editor_insert_cursor)
+        self._trim_spelling_output_edges()
         self._capture_spellingstyle_range_end()
         return False
 
@@ -6043,6 +6422,7 @@ class ProseWindow(Adw.ApplicationWindow):
                 "_editor_pending_newlines",
             )
             self._ensure_single_trailing_space(self._editor_insert_doc, self._editor_insert_cursor)
+        self._trim_spelling_output_edges()
         self._capture_spellingstyle_range_end()
         return False
 
@@ -6367,6 +6747,7 @@ class SettingsWindow(Adw.ApplicationWindow):
     def __init__(
         self,
         parent: ProseWindow,
+        model_profiles: list[ModelProfile],
         proof_settings: ProofreadSettings,
         spelling_settings: SpellingStyleSettings,
         improve1_settings: Improve1Settings,
@@ -6383,6 +6764,7 @@ class SettingsWindow(Adw.ApplicationWindow):
         topic_sentence_settings: TopicSentenceSettings,
         concl_section_settings: ConclSectionSettings,
         translate_settings: TranslateSettings,
+        editor_action_profile_defaults: dict[str, str | None],
         editor_pinned_action_ids: list[str],
         libreoffice_python_path: Path | None,
         concordance_file_path: Path | None,
@@ -6391,6 +6773,7 @@ class SettingsWindow(Adw.ApplicationWindow):
         on_copy_normal_profile: Callable[[], tuple[bool, str]],
         on_save: Callable[
             [
+                list[ModelProfile],
                 ProofreadSettings,
                 SpellingStyleSettings,
                 Improve1Settings,
@@ -6407,6 +6790,7 @@ class SettingsWindow(Adw.ApplicationWindow):
                 TopicSentenceSettings,
                 ConclSectionSettings,
                 TranslateSettings,
+                dict[str, str | None],
                 list[str],
                 Path | None,
                 Path | None,
@@ -6419,6 +6803,7 @@ class SettingsWindow(Adw.ApplicationWindow):
         self._on_save = on_save
         self._on_source_change = on_source_change
         self._on_copy_normal_profile = on_copy_normal_profile
+        self._model_profiles = model_profiles
         self._proof_settings = proof_settings
         self._spelling_settings = spelling_settings
         self._improve1_settings = improve1_settings
@@ -6435,6 +6820,7 @@ class SettingsWindow(Adw.ApplicationWindow):
         self._topic_sentence_settings = topic_sentence_settings
         self._concl_section_settings = concl_section_settings
         self._translate_settings = translate_settings
+        self._editor_action_profile_defaults = _sanitize_editor_action_profile_defaults(editor_action_profile_defaults)
         self._editor_action_order = _ordered_editor_quick_action_keys(editor_pinned_action_ids)
         pinned_action_set = set(_sanitize_editor_pinned_actions(editor_pinned_action_ids))
         self._quick_action_enabled = {
@@ -6444,6 +6830,7 @@ class SettingsWindow(Adw.ApplicationWindow):
         self._libreoffice_python_path = libreoffice_python_path
         self._concordance_file_path = concordance_file_path
         self._editor_source_file = editor_source_file
+        self._model_profile_editors: dict[str, ModelProfileEditorWidgets] = {}
         self._prompt_editors: dict[str, PromptEditorWidgets] = {}
         self._prompt_row_keys: dict[Gtk.ListBoxRow, str] = {}
         self._source_row_guard = False
@@ -6520,15 +6907,239 @@ class SettingsWindow(Adw.ApplicationWindow):
         profile_row.add_suffix(profile_copy_btn)
         source_group.add(profile_row)
 
-        quick_actions_group = Adw.PreferencesGroup(
-            title="Quick Actions",
-            description=(
+        split = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+        split.set_hexpand(True)
+        split.set_vexpand(False)
+
+        prompt_list = Gtk.ListBox()
+        prompt_list.set_selection_mode(Gtk.SelectionMode.SINGLE)
+        prompt_list.add_css_class("navigation-sidebar")
+        prompt_list.connect("row-selected", self._on_prompt_row_selected)
+
+        prompt_list_scroller = Gtk.ScrolledWindow()
+        prompt_list_scroller.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        prompt_list_scroller.set_min_content_width(220)
+        prompt_list_scroller.set_size_request(220, 720)
+        prompt_list_scroller.set_child(prompt_list)
+
+        prompt_stack = Gtk.Stack()
+        prompt_stack.set_hexpand(True)
+        prompt_stack.set_vexpand(True)
+        prompt_stack.set_transition_type(Gtk.StackTransitionType.SLIDE_LEFT_RIGHT)
+        self._prompt_stack = prompt_stack
+        self._prompt_list = prompt_list
+
+        first_row: Gtk.ListBoxRow | None = None
+
+        profiles_row = Gtk.ListBoxRow()
+        profiles_row_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        profiles_row_box.set_margin_top(8)
+        profiles_row_box.set_margin_bottom(8)
+        profiles_row_box.set_margin_start(12)
+        profiles_row_box.set_margin_end(12)
+        profiles_row_box.append(Gtk.Label(label="Model Profiles", xalign=0))
+        profiles_row.set_child(profiles_row_box)
+        prompt_list.append(profiles_row)
+        self._prompt_row_keys[profiles_row] = "model-profiles"
+        prompt_stack.add_named(self._build_model_profiles_page(), "model-profiles")
+        first_row = profiles_row
+
+        prompt_definitions = [
+            ("proof", "Proof Reading", self._proof_settings, DEFAULT_PROMPT),
+            ("spelling", "SpellingStyle", self._spelling_settings, DEFAULT_SPELLINGSTYLE_PROMPT),
+            ("thesaurus", "Thesaurus", self._thesaurus_settings, DEFAULT_THESAURUS_PROMPT),
+            ("reference", "Reference", self._reference_settings, DEFAULT_REFERENCE_PROMPT),
+            ("ask", "Ask Field", self._ask_settings, DEFAULT_ASK_PROMPT),
+            ("improve", "Improve", self._improve1_settings, DEFAULT_IMPROVE_PROMPT),
+            ("combine", "Combine Cites", self._combine_cites_settings, DEFAULT_COMBINE_CITES_PROMPT),
+            ("shorten", "Shorten", self._shorten_settings, DEFAULT_SHORTEN_PROMPT),
+            ("intro", "Introduction", self._introduction_settings, DEFAULT_INTRO_PROMPT),
+            ("intro-reply", "Introduction for Reply", self._introduction_reply_settings, DEFAULT_INTRO_REPLY_PROMPT),
+            ("conclusion", "Conclusion", self._conclusion_settings, DEFAULT_CONCLUSION_PROMPT),
+            ("concl-no-issues", "Concl. No Issues", self._concl_no_issues_settings, DEFAULT_CONCL_NO_ISSUES_PROMPT),
+            ("topic-sentence", "Topic Sentence", self._topic_sentence_settings, DEFAULT_TOPIC_SENTENCE_PROMPT),
+            ("concl-section", "Concl. Section", self._concl_section_settings, DEFAULT_CONCL_SECTION_PROMPT),
+            ("translate", "Translate", self._translate_settings, DEFAULT_TRANSLATE_PROMPT),
+        ]
+        for key, title, settings, default_prompt in prompt_definitions:
+            row = Gtk.ListBoxRow()
+            row_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+            row_box.set_margin_top(8)
+            row_box.set_margin_bottom(8)
+            row_box.set_margin_start(12)
+            row_box.set_margin_end(12)
+            label = Gtk.Label(label=title, xalign=0)
+            row_box.append(label)
+            row.set_child(row_box)
+            prompt_list.append(row)
+            self._prompt_row_keys[row] = key
+            if first_row is None:
+                first_row = row
+
+            page = self._build_prompt_page(key, title, settings, default_prompt)
+            prompt_stack.add_named(page, key)
+
+        quick_actions_row = Gtk.ListBoxRow()
+        quick_actions_row_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        quick_actions_row_box.set_margin_top(8)
+        quick_actions_row_box.set_margin_bottom(8)
+        quick_actions_row_box.set_margin_start(12)
+        quick_actions_row_box.set_margin_end(12)
+        quick_actions_row_box.append(Gtk.Label(label="Quick Actions", xalign=0))
+        quick_actions_row.set_child(quick_actions_row_box)
+        prompt_list.append(quick_actions_row)
+        self._prompt_row_keys[quick_actions_row] = "quick-actions"
+        prompt_stack.add_named(self._build_quick_actions_page(), "quick-actions")
+
+        editor_commands_row = Gtk.ListBoxRow()
+        editor_commands_row_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        editor_commands_row_box.set_margin_top(8)
+        editor_commands_row_box.set_margin_bottom(8)
+        editor_commands_row_box.set_margin_start(12)
+        editor_commands_row_box.set_margin_end(12)
+        editor_commands_row_box.append(Gtk.Label(label="Editor Commands", xalign=0))
+        editor_commands_row.set_child(editor_commands_row_box)
+        prompt_list.append(editor_commands_row)
+        self._prompt_row_keys[editor_commands_row] = "editor-commands"
+        prompt_stack.add_named(self._build_editor_commands_page(), "editor-commands")
+
+        if first_row is not None:
+            prompt_list.select_row(first_row)
+            prompt_stack.set_visible_child_name(self._prompt_row_keys[first_row])
+
+        split.append(prompt_list_scroller)
+        split.append(prompt_stack)
+        box.append(split)
+
+        content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        scrolled = Gtk.ScrolledWindow()
+        scrolled.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
+        scrolled.set_hexpand(True)
+        scrolled.set_vexpand(True)
+        scrolled.set_child(box)
+        content.append(scrolled)
+
+        buttons = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        buttons.set_margin_top(6)
+        buttons.set_margin_bottom(12)
+        buttons.set_margin_start(12)
+        buttons.set_margin_end(12)
+        buttons.set_halign(Gtk.Align.END)
+        close_btn = Gtk.Button(label="Close")
+        close_btn.add_css_class("flat")
+        close_btn.connect("clicked", self._on_close_clicked)
+        buttons.append(close_btn)
+        save_btn = Gtk.Button(label="Save Settings")
+        save_btn.add_css_class("suggested-action")
+        save_btn.add_css_class("flat")
+        save_btn.set_action_name("app.save-settings")
+        buttons.append(save_btn)
+        content.append(buttons)
+
+        view.set_content(content)
+        self.set_content(view)
+
+    def set_source_file(self, path: Path | None) -> None:
+        self._set_editor_source_file(path, notify=False)
+
+    def _profile_dropdown_model(self, include_unset: bool = False) -> Gtk.StringList:
+        labels = [profile.display_name() for profile in self._model_profiles]
+        if include_unset:
+            labels = [UNSET_PROFILE_LABEL, *labels]
+        return Gtk.StringList.new(labels)
+
+    def _build_model_profiles_page(self) -> Gtk.Widget:
+        page_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+        page_box.set_margin_top(12)
+        page_box.set_margin_bottom(12)
+        page_box.set_margin_start(12)
+        page_box.set_margin_end(12)
+        page_box.set_vexpand(True)
+
+        title_label = Gtk.Label(label="Model Profiles", xalign=0)
+        title_label.add_css_class("title-3")
+        page_box.append(title_label)
+
+        info_label = Gtk.Label(
+            label=(
+                "Set up up to five shared model profiles here. Eligible editor actions reuse these profiles "
+                "and keep only their own prompts."
+            ),
+            xalign=0,
+        )
+        info_label.add_css_class("dim-label")
+        info_label.set_wrap(True)
+        info_label.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
+        page_box.append(info_label)
+
+        for profile in self._model_profiles:
+            group = Adw.PreferencesGroup(title=profile.display_name())
+            group.add_css_class("list-stack")
+
+            nickname_row = Adw.EntryRow(title="Nickname")
+            nickname_row.set_text(profile.display_name())
+            group.add(nickname_row)
+
+            api_url_row = Adw.EntryRow(title="API URL")
+            api_url_row.set_text(profile.api_url)
+            group.add(api_url_row)
+
+            model_row = Adw.EntryRow(title="Model ID (optional)")
+            model_row.set_text(profile.model_id)
+            group.add(model_row)
+
+            api_key_row = Adw.PasswordEntryRow(title="API Key")
+            api_key_row.set_text(profile.api_key)
+            group.add(api_key_row)
+
+            disable_reasoning_row = Adw.SwitchRow(title="Disable reasoning")
+            disable_reasoning_row.set_active(bool(profile.disable_reasoning))
+            group.add(disable_reasoning_row)
+
+            self._model_profile_editors[profile.key] = ModelProfileEditorWidgets(
+                nickname_row=nickname_row,
+                api_url_row=api_url_row,
+                model_row=model_row,
+                api_key_row=api_key_row,
+                disable_reasoning_row=disable_reasoning_row,
+            )
+            page_box.append(group)
+
+        page = Gtk.ScrolledWindow()
+        page.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        page.set_hexpand(True)
+        page.set_vexpand(True)
+        page.set_child(page_box)
+        return page
+
+    def _build_quick_actions_page(self) -> Gtk.Widget:
+        page_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+        page_box.set_margin_top(12)
+        page_box.set_margin_bottom(12)
+        page_box.set_margin_start(12)
+        page_box.set_margin_end(12)
+        page_box.set_valign(Gtk.Align.START)
+
+        title_label = Gtk.Label(label="Quick Actions", xalign=0)
+        title_label.add_css_class("title-3")
+        page_box.append(title_label)
+
+        info_label = Gtk.Label(
+            label=(
                 f"Pin up to {MAX_PINNED_EDITOR_ACTIONS} actions for the Editor toolbar. "
                 "Use the arrows to change their order."
             ),
+            xalign=0,
         )
+        info_label.add_css_class("dim-label")
+        info_label.set_wrap(True)
+        info_label.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
+        page_box.append(info_label)
+
+        quick_actions_group = Adw.PreferencesGroup(title="Pinned Editor Actions")
         quick_actions_group.add_css_class("list-stack")
-        box.append(quick_actions_group)
+        quick_actions_group.set_hexpand(True)
+        page_box.append(quick_actions_group)
 
         quick_actions_row = Adw.PreferencesRow()
         quick_actions_row.set_selectable(False)
@@ -6557,107 +7168,121 @@ class SettingsWindow(Adw.ApplicationWindow):
         quick_actions_row.set_child(quick_actions_content)
         quick_actions_group.add(quick_actions_row)
         self._rebuild_quick_action_rows()
+        return page_box
 
-        split = Gtk.Paned(orientation=Gtk.Orientation.HORIZONTAL)
-        split.set_hexpand(True)
-        split.set_vexpand(True)
-        split.set_shrink_start_child(False)
-        split.set_shrink_end_child(False)
-        split.set_resize_start_child(False)
-        split.set_resize_end_child(True)
+    def _build_editor_commands_page(self) -> Gtk.Widget:
+        page_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+        page_box.set_margin_top(12)
+        page_box.set_margin_bottom(12)
+        page_box.set_margin_start(12)
+        page_box.set_margin_end(12)
+        page_box.set_valign(Gtk.Align.START)
 
-        prompt_list = Gtk.ListBox()
-        prompt_list.set_selection_mode(Gtk.SelectionMode.SINGLE)
-        prompt_list.add_css_class("navigation-sidebar")
-        prompt_list.connect("row-selected", self._on_prompt_row_selected)
+        title_label = Gtk.Label(label="Editor Commands", xalign=0)
+        title_label.add_css_class("title-3")
+        page_box.append(title_label)
 
-        prompt_list_scroller = Gtk.ScrolledWindow()
-        prompt_list_scroller.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
-        prompt_list_scroller.set_min_content_width(220)
-        prompt_list_scroller.set_child(prompt_list)
+        info_label = Gtk.Label(
+            label=(
+                "Use Run to trigger actions inside the open Prose window. "
+                "Use Copy Command to place the GApplication call on your clipboard."
+            ),
+            xalign=0,
+        )
+        info_label.add_css_class("dim-label")
+        info_label.set_wrap(True)
+        info_label.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
+        page_box.append(info_label)
 
-        prompt_stack = Gtk.Stack()
-        prompt_stack.set_hexpand(True)
-        prompt_stack.set_vexpand(True)
-        prompt_stack.set_transition_type(Gtk.StackTransitionType.SLIDE_LEFT_RIGHT)
-        self._prompt_stack = prompt_stack
-        self._prompt_list = prompt_list
+        actions_group = Adw.PreferencesGroup(title="Editor Actions")
+        actions_group.add_css_class("list-stack")
+        page_box.append(actions_group)
 
-        prompt_definitions = [
-            ("proof", "Proof Reading", self._proof_settings, DEFAULT_PROMPT),
-            ("spelling", "SpellingStyle", self._spelling_settings, DEFAULT_SPELLINGSTYLE_PROMPT),
-            ("thesaurus", "Thesaurus", self._thesaurus_settings, DEFAULT_THESAURUS_PROMPT),
-            ("reference", "Reference", self._reference_settings, DEFAULT_REFERENCE_PROMPT),
-            ("ask", "Ask Field", self._ask_settings, DEFAULT_ASK_PROMPT),
-            ("improve1", "Improve 1", self._improve1_settings, DEFAULT_IMPROVE1_PROMPT),
-            ("improve2", "Improve 2", self._improve2_settings, DEFAULT_IMPROVE2_PROMPT),
-            ("combine", "Combine Cites", self._combine_cites_settings, DEFAULT_COMBINE_CITES_PROMPT),
-            ("shorten", "Shorten", self._shorten_settings, DEFAULT_SHORTEN_PROMPT),
-            ("intro", "Introduction", self._introduction_settings, DEFAULT_INTRO_PROMPT),
-            ("intro-reply", "Introduction for Reply", self._introduction_reply_settings, DEFAULT_INTRO_REPLY_PROMPT),
-            ("conclusion", "Conclusion", self._conclusion_settings, DEFAULT_CONCLUSION_PROMPT),
-            ("concl-no-issues", "Concl. No Issues", self._concl_no_issues_settings, DEFAULT_CONCL_NO_ISSUES_PROMPT),
-            ("topic-sentence", "Topic Sentence", self._topic_sentence_settings, DEFAULT_TOPIC_SENTENCE_PROMPT),
-            ("concl-section", "Concl. Section", self._concl_section_settings, DEFAULT_CONCL_SECTION_PROMPT),
-            ("translate", "Translate", self._translate_settings, DEFAULT_TRANSLATE_PROMPT),
-        ]
-        first_row: Gtk.ListBoxRow | None = None
-        for key, title, settings, default_prompt in prompt_definitions:
-            row = Gtk.ListBoxRow()
-            row_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-            row_box.set_margin_top(8)
-            row_box.set_margin_bottom(8)
-            row_box.set_margin_start(12)
-            row_box.set_margin_end(12)
-            label = Gtk.Label(label=title, xalign=0)
-            row_box.append(label)
-            row.set_child(row_box)
-            prompt_list.append(row)
-            self._prompt_row_keys[row] = key
-            if first_row is None:
-                first_row = row
+        for title, action_name, param, desc, supports_profiles in _editor_command_items():
+            row = self._build_settings_editor_command_row(
+                title,
+                action_name,
+                param,
+                desc,
+                supports_profiles=supports_profiles,
+            )
+            actions_group.add(row)
 
-            page = self._build_prompt_page(key, title, settings, default_prompt)
-            prompt_stack.add_named(page, key)
+        return page_box
 
-        if first_row is not None:
-            prompt_list.select_row(first_row)
-            prompt_stack.set_visible_child_name(self._prompt_row_keys[first_row])
+    def _build_settings_editor_command_row(
+        self,
+        title: str,
+        action_name: str,
+        param: str | None,
+        desc: str,
+        supports_profiles: bool = False,
+    ) -> Adw.ActionRow:
+        row = Adw.ActionRow(title=title, subtitle=desc)
+        row.set_activatable(False)
 
-        split.set_start_child(prompt_list_scroller)
-        split.set_end_child(prompt_stack)
-        box.append(split)
+        suffix = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        profile_dropdown = None
+        if supports_profiles:
+            profile_dropdown = Gtk.DropDown(model=self._profile_dropdown_model())
+            lookup_key = _profile_default_lookup_key_for_action_name(action_name)
+            selected_profile_key = self._editor_action_profile_defaults.get(lookup_key) if lookup_key else None
+            selected_index = MODEL_PROFILE_IDS.index(selected_profile_key) if selected_profile_key in MODEL_PROFILE_IDS else 0
+            profile_dropdown.set_selected(selected_index)
+            suffix.append(profile_dropdown)
 
-        content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        scrolled = Gtk.ScrolledWindow()
-        scrolled.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
-        scrolled.set_hexpand(True)
-        scrolled.set_vexpand(True)
-        scrolled.set_child(box)
-        content.append(scrolled)
+        run_btn = Gtk.Button(label="Run")
+        run_btn.add_css_class("suggested-action")
+        run_btn.add_css_class("flat")
+        run_btn.connect("clicked", self._on_settings_editor_command_run_clicked, action_name, profile_dropdown)
+        suffix.append(run_btn)
 
-        buttons = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-        buttons.set_margin_top(6)
-        buttons.set_margin_bottom(12)
-        buttons.set_margin_start(12)
-        buttons.set_margin_end(12)
-        buttons.set_halign(Gtk.Align.END)
-        close_btn = Gtk.Button(label="Close")
-        close_btn.add_css_class("flat")
-        close_btn.connect("clicked", self._on_close_clicked)
-        buttons.append(close_btn)
-        save_btn = Gtk.Button(label="Save Settings")
-        save_btn.add_css_class("suggested-action")
-        save_btn.add_css_class("flat")
-        save_btn.set_action_name("app.save-settings")
-        buttons.append(save_btn)
-        content.append(buttons)
+        copy_btn = Gtk.Button(label="Copy Command")
+        copy_btn.add_css_class("flat")
+        copy_btn.add_css_class("link")
+        copy_btn.connect("clicked", self._on_settings_editor_command_copy_clicked, action_name, param, profile_dropdown)
+        suffix.append(copy_btn)
 
-        view.set_content(content)
-        self.set_content(view)
+        row.add_suffix(suffix)
+        return row
 
-    def set_source_file(self, path: Path | None) -> None:
-        self._set_editor_source_file(path, notify=False)
+    def _on_settings_editor_command_run_clicked(
+        self,
+        _button: Gtk.Button,
+        action_name: str,
+        profile_dropdown: Gtk.DropDown | None,
+    ) -> None:
+        app = self.get_application()
+        if profile_dropdown is not None:
+            selected = int(profile_dropdown.get_selected())
+            nicknames = [profile.display_name() for profile in self._model_profiles]
+            if 0 <= selected < len(nicknames):
+                app.activate_action(action_name, GLib.Variant("s", nicknames[selected]))
+            return
+        app.activate_action(action_name, None)
+
+    def _on_settings_editor_command_copy_clicked(
+        self,
+        _button: Gtk.Button,
+        action_name: str,
+        param: str | None,
+        profile_dropdown: Gtk.DropDown | None,
+    ) -> None:
+        if profile_dropdown is not None:
+            selected = int(profile_dropdown.get_selected())
+            nicknames = [profile.display_name() for profile in self._model_profiles]
+            if 0 <= selected < len(nicknames):
+                param = _format_action_param(GLib.Variant("s", nicknames[selected]))
+        app = self.get_application()
+        object_path = ACTION_OBJECT_PATH
+        if isinstance(app, Gio.Application):
+            app_path = app.get_dbus_object_path()
+            if app_path:
+                object_path = app_path
+        command = _action_command(action_name, param, object_path)
+        display = Gdk.Display.get_default()
+        if display:
+            display.get_clipboard().set(command)
 
     def _on_choose_source_file(self, _button: Gtk.Button) -> None:
         dialog = Gtk.FileDialog(title="Choose a source text file")
@@ -6922,13 +7547,28 @@ class SettingsWindow(Adw.ApplicationWindow):
         self.close()
 
     def _on_save_clicked(self, _button: Gtk.Button) -> None:
+        model_profiles: list[ModelProfile] = []
+        for profile_key in MODEL_PROFILE_IDS:
+            widgets = self._model_profile_editors.get(profile_key)
+            if widgets is None:
+                continue
+            model_profiles.append(
+                ModelProfile(
+                    key=profile_key,
+                    nickname=widgets.nickname_row.get_text().strip() or DEFAULT_MODEL_PROFILE_NICKNAMES[profile_key],
+                    api_url=widgets.api_url_row.get_text().strip(),
+                    model_id=widgets.model_row.get_text().strip(),
+                    api_key=widgets.api_key_row.get_text().strip(),
+                    disable_reasoning=widgets.disable_reasoning_row.get_active(),
+                )
+            )
+
         proof_widgets = self._prompt_editors.get("proof")
         spelling_widgets = self._prompt_editors.get("spelling")
         thesaurus_widgets = self._prompt_editors.get("thesaurus")
         reference_widgets = self._prompt_editors.get("reference")
         ask_widgets = self._prompt_editors.get("ask")
-        improve1_widgets = self._prompt_editors.get("improve1")
-        improve2_widgets = self._prompt_editors.get("improve2")
+        improve_widgets = self._prompt_editors.get("improve")
         combine_widgets = self._prompt_editors.get("combine")
         shorten_widgets = self._prompt_editors.get("shorten")
         intro_widgets = self._prompt_editors.get("intro")
@@ -6945,8 +7585,7 @@ class SettingsWindow(Adw.ApplicationWindow):
                 thesaurus_widgets,
                 reference_widgets,
                 ask_widgets,
-                improve1_widgets,
-                improve2_widgets,
+                improve_widgets,
                 combine_widgets,
                 shorten_widgets,
                 intro_widgets,
@@ -6965,8 +7604,7 @@ class SettingsWindow(Adw.ApplicationWindow):
         thesaurus_prompt_text = self._prompt_text(thesaurus_widgets.prompt_buffer)
         reference_prompt_text = self._prompt_text(reference_widgets.prompt_buffer)
         ask_prompt_text = self._prompt_text(ask_widgets.prompt_buffer)
-        improve1_prompt_text = self._prompt_text(improve1_widgets.prompt_buffer)
-        improve2_prompt_text = self._prompt_text(improve2_widgets.prompt_buffer)
+        improve_prompt_text = self._prompt_text(improve_widgets.prompt_buffer)
         combine_prompt_text = self._prompt_text(combine_widgets.prompt_buffer)
         shorten_prompt_text = self._prompt_text(shorten_widgets.prompt_buffer)
         intro_prompt_text = self._prompt_text(intro_widgets.prompt_buffer)
@@ -7014,18 +7652,11 @@ class SettingsWindow(Adw.ApplicationWindow):
             disable_reasoning=ask_widgets.disable_reasoning_row.get_active(),
         )
         improve1_settings = Improve1Settings(
-            api_url=improve1_widgets.api_url_row.get_text().strip(),
-            model_id=improve1_widgets.model_row.get_text().strip(),
-            api_key=improve1_widgets.api_key_row.get_text().strip(),
-            prompt=improve1_prompt_text.strip() or DEFAULT_IMPROVE1_PROMPT,
-            disable_reasoning=improve1_widgets.disable_reasoning_row.get_active(),
-        )
-        improve2_settings = Improve2Settings(
-            api_url=improve2_widgets.api_url_row.get_text().strip(),
-            model_id=improve2_widgets.model_row.get_text().strip(),
-            api_key=improve2_widgets.api_key_row.get_text().strip(),
-            prompt=improve2_prompt_text.strip() or DEFAULT_IMPROVE2_PROMPT,
-            disable_reasoning=improve2_widgets.disable_reasoning_row.get_active(),
+            api_url=improve_widgets.api_url_row.get_text().strip(),
+            model_id=improve_widgets.model_row.get_text().strip(),
+            api_key=improve_widgets.api_key_row.get_text().strip(),
+            prompt=improve_prompt_text.strip() or DEFAULT_IMPROVE_PROMPT,
+            disable_reasoning=improve_widgets.disable_reasoning_row.get_active(),
         )
         combine_cites_settings = CombineCitesSettings(
             api_url=combine_widgets.api_url_row.get_text().strip(),
@@ -7090,12 +7721,26 @@ class SettingsWindow(Adw.ApplicationWindow):
             prompt=translate_prompt_text.strip() or DEFAULT_TRANSLATE_PROMPT,
             disable_reasoning=translate_widgets.disable_reasoning_row.get_active(),
         )
+        editor_action_profile_defaults = dict(self._editor_action_profile_defaults)
+        for key in PROFILE_BACKED_COMMAND_KEYS:
+            widgets = self._prompt_editors.get(key)
+            dropdown = widgets.default_profile_dropdown if widgets else None
+            selected = int(dropdown.get_selected()) if dropdown is not None else 0
+            if selected <= 0:
+                editor_action_profile_defaults[key] = None
+                continue
+            selected_index = selected - 1
+            if selected_index < 0 or selected_index >= len(MODEL_PROFILE_IDS):
+                editor_action_profile_defaults[key] = None
+                continue
+            editor_action_profile_defaults[key] = MODEL_PROFILE_IDS[selected_index]
         editor_pinned_action_ids = self._current_editor_pinned_actions()
         self._on_save(
+            model_profiles,
             proof_settings,
             spelling_settings,
             improve1_settings,
-            improve2_settings,
+            self._improve2_settings,
             combine_cites_settings,
             thesaurus_settings,
             reference_settings,
@@ -7108,6 +7753,7 @@ class SettingsWindow(Adw.ApplicationWindow):
             topic_sentence_settings,
             concl_section_settings,
             translate_settings,
+            editor_action_profile_defaults,
             editor_pinned_action_ids,
             self._libreoffice_python_path,
             self._concordance_file_path,
@@ -7155,32 +7801,75 @@ class SettingsWindow(Adw.ApplicationWindow):
         title_label.add_css_class("title-3")
         page_box.append(title_label)
 
-        credentials_group = Adw.PreferencesGroup(title="Credentials")
-        credentials_group.add_css_class("list-stack")
-        credentials_group.set_hexpand(True)
-        page_box.append(credentials_group)
+        uses_shared_profiles = key in PROFILE_BACKED_COMMAND_KEYS
 
         api_url_row = Adw.EntryRow(title="API URL")
         api_url_row.set_text(settings.api_url)
-        credentials_group.add(api_url_row)
 
         model_row = Adw.EntryRow(title="Model ID (optional)")
         model_row.set_text(settings.model_id)
-        credentials_group.add(model_row)
 
         api_key_row = Adw.PasswordEntryRow(title="API Key")
         api_key_row.set_text(settings.api_key)
-        credentials_group.add(api_key_row)
 
         tavily_api_key_row = None
-        if isinstance(settings, (ReferenceSettings, AskSettings)):
-            tavily_api_key_row = Adw.PasswordEntryRow(title="Tavily API Key")
-            tavily_api_key_row.set_text(settings.tavily_api_key)
-            credentials_group.add(tavily_api_key_row)
-
         disable_reasoning_row = Adw.SwitchRow(title="Disable reasoning")
         disable_reasoning_row.set_active(bool(settings.disable_reasoning))
-        credentials_group.add(disable_reasoning_row)
+        default_profile_dropdown = None
+
+        if uses_shared_profiles:
+            profile_group = Adw.PreferencesGroup(title="Default Model Profile")
+            profile_group.add_css_class("list-stack")
+            profile_group.set_hexpand(True)
+
+            profile_row = Adw.PreferencesRow()
+            profile_row.set_selectable(False)
+            profile_row.set_activatable(False)
+            profile_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+            profile_box.set_margin_top(10)
+            profile_box.set_margin_bottom(10)
+            profile_box.set_margin_start(12)
+            profile_box.set_margin_end(12)
+
+            caption = Gtk.Label(
+                label="Choose the default profile used by this command. Its reasoning setting will also be used.",
+                xalign=0,
+            )
+            caption.add_css_class("caption")
+            caption.add_css_class("dim-label")
+            caption.set_wrap(True)
+            caption.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
+            profile_box.append(caption)
+
+            default_profile_dropdown = Gtk.DropDown(model=self._profile_dropdown_model(include_unset=True))
+            selected_profile_key = self._editor_action_profile_defaults.get(key)
+            selected_index = (
+                MODEL_PROFILE_IDS.index(selected_profile_key) + 1
+                if selected_profile_key in MODEL_PROFILE_IDS
+                else 0
+            )
+            default_profile_dropdown.set_selected(selected_index)
+            profile_box.append(default_profile_dropdown)
+
+            profile_row.set_child(profile_box)
+            profile_group.add(profile_row)
+            page_box.append(profile_group)
+        else:
+            credentials_group = Adw.PreferencesGroup(title="Credentials")
+            credentials_group.add_css_class("list-stack")
+            credentials_group.set_hexpand(True)
+            page_box.append(credentials_group)
+
+            credentials_group.add(api_url_row)
+            credentials_group.add(model_row)
+            credentials_group.add(api_key_row)
+
+            if isinstance(settings, (ReferenceSettings, AskSettings)):
+                tavily_api_key_row = Adw.PasswordEntryRow(title="Tavily API Key")
+                tavily_api_key_row.set_text(settings.tavily_api_key)
+                credentials_group.add(tavily_api_key_row)
+
+            credentials_group.add(disable_reasoning_row)
 
         prompt_section = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
         prompt_section.set_hexpand(True)
@@ -7208,6 +7897,7 @@ class SettingsWindow(Adw.ApplicationWindow):
             disable_reasoning_row=disable_reasoning_row,
             prompt_buffer=buffer,
             ask_prompt_buffer=ask_prompt_buffer,
+            default_profile_dropdown=default_profile_dropdown,
         )
         return page
 
@@ -7240,6 +7930,7 @@ class SettingsWindow(Adw.ApplicationWindow):
 class EditorCommandsWindow(Adw.ApplicationWindow):
     def __init__(self, parent: ProseWindow) -> None:
         super().__init__(application=parent.get_application(), title="Editor Commands")
+        self._parent = parent
         self.set_default_size(900, 720)
         self.set_resizable(True)
         self._build_ui()
@@ -7261,35 +7952,10 @@ class EditorCommandsWindow(Adw.ApplicationWindow):
         )
         page.add(intro)
 
-        commands = [
-            ("Launch Writer", "launch-writer", None, "Open a Writer document via UNO."),
-            ("Direct Input", "direct-input", None, "Insert the source file text into Writer."),
-            ("Input RT", "input-rt", None, "Insert a formatted RT citation from the source file."),
-            ("Input CT", "input-ct", None, "Insert a formatted CT citation from the source file."),
-            (
-                "Direct Input No Trailing Space",
-                "direct-input-no-trailing-space",
-                None,
-                "Insert the source file text into Writer without trailing spaces.",
-            ),
-            ("Combine Cites", "combine-cites", None, "Combine the first run of adjacent citations."),
-            ("SpellingStyle", "spellingstyle", None, "Stream model output into Writer."),
-            ("Improve 1", "improve1", None, "Rewrite SpellingStyle output (pass 1)."),
-            ("Improve 2", "improve2", None, "Rewrite SpellingStyle output (pass 2)."),
-            ("Improve Selected", "improve-selected", None, "Rewrite selected text in Writer."),
-            ("Keep Original", "keep-original", None, "Restore the last SpellingStyle output."),
-            ("Reference Lookup", "reference-lookup", None, "Look up a definition for the selected text."),
-            ("Focus Ask Field", "focus-ask", None, "Focus the Ask question field in the Editor view."),
-        ]
-        commands.extend(
-            (definition.title, definition.action_name, None, definition.description)
-            for definition in EDITOR_QUICK_ACTIONS
-        )
-
         actions_group = Adw.PreferencesGroup(title="Editor Actions")
         page.add(actions_group)
-        for title, action_name, param, desc in commands:
-            row = self._build_action_row(title, action_name, param, desc)
+        for title, action_name, param, desc, supports_profiles in _editor_command_items():
+            row = self._build_action_row(title, action_name, param, desc, supports_profiles=supports_profiles)
             actions_group.add(row)
 
         scroller = Gtk.ScrolledWindow()
@@ -7305,38 +7971,61 @@ class EditorCommandsWindow(Adw.ApplicationWindow):
         param: str | None,
         desc: str,
         with_index: bool = False,
+        supports_profiles: bool = False,
     ) -> Adw.ActionRow:
         row = Adw.ActionRow(title=title, subtitle=desc)
         row.set_activatable(False)
 
         suffix = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         spin = None
+        profile_dropdown = None
         if with_index:
             spin = Gtk.SpinButton.new_with_range(0, 9999, 1)
             spin.set_value(0)
             spin.set_width_chars(4)
             suffix.append(spin)
+        elif supports_profiles:
+            profile_dropdown = Gtk.DropDown(
+                model=Gtk.StringList.new(
+                    [profile.display_name() for profile in self._parent._model_profiles]
+                )
+            )
+            lookup_key = _profile_default_lookup_key_for_action_name(action_name)
+            selected_profile_key = self._parent._editor_action_profile_defaults.get(lookup_key) if lookup_key else None
+            selected_index = MODEL_PROFILE_IDS.index(selected_profile_key) if selected_profile_key in MODEL_PROFILE_IDS else 0
+            profile_dropdown.set_selected(selected_index)
+            suffix.append(profile_dropdown)
 
         run_btn = Gtk.Button(label="Run")
         run_btn.add_css_class("suggested-action")
         run_btn.add_css_class("flat")
-        run_btn.connect("clicked", self._on_run_clicked, action_name, spin)
+        run_btn.connect("clicked", self._on_run_clicked, action_name, spin, profile_dropdown)
         suffix.append(run_btn)
 
         copy_btn = Gtk.Button(label="Copy Command")
         copy_btn.add_css_class("flat")
         copy_btn.add_css_class("link")
-        copy_btn.connect("clicked", self._on_copy_clicked, action_name, spin, param)
+        copy_btn.connect("clicked", self._on_copy_clicked, action_name, spin, param, profile_dropdown)
         suffix.append(copy_btn)
 
         row.add_suffix(suffix)
         return row
 
     def _on_run_clicked(
-        self, _button: Gtk.Button, action_name: str, spin: Gtk.SpinButton | None
+        self,
+        _button: Gtk.Button,
+        action_name: str,
+        spin: Gtk.SpinButton | None,
+        profile_dropdown: Gtk.DropDown | None,
     ) -> None:
         app = self.get_application()
         if spin is None:
+            if profile_dropdown is not None:
+                selected = int(profile_dropdown.get_selected())
+                nicknames = [profile.display_name() for profile in self._parent._model_profiles]
+                if 0 <= selected < len(nicknames):
+                    app.activate_action(action_name, GLib.Variant("s", nicknames[selected]))
+                return
             app.activate_action(action_name, None)
             return
         value = int(spin.get_value())
@@ -7348,9 +8037,15 @@ class EditorCommandsWindow(Adw.ApplicationWindow):
         action_name: str,
         spin: Gtk.SpinButton | None,
         param: str | None,
+        profile_dropdown: Gtk.DropDown | None,
     ) -> None:
         if spin is not None:
-            param = f"<int32 {int(spin.get_value())}>"
+            param = _format_action_param(GLib.Variant("i", int(spin.get_value())))
+        elif profile_dropdown is not None:
+            selected = int(profile_dropdown.get_selected())
+            nicknames = [profile.display_name() for profile in self._parent._model_profiles]
+            if 0 <= selected < len(nicknames):
+                param = _format_action_param(GLib.Variant("s", nicknames[selected]))
         app = self.get_application()
         object_path = ACTION_OBJECT_PATH
         if isinstance(app, Gio.Application):
