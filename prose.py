@@ -1690,6 +1690,11 @@ class ProseWindow(Adw.ApplicationWindow):
         self._busy = False
         self._last_raw_response: str | None = None
         self._json_window: Adw.ApplicationWindow | None = None
+        self._last_editor_request_raw: str | None = None
+        self._last_editor_request_title: str | None = None
+        self._last_editor_request_api_url: str | None = None
+        self._last_editor_request_timestamp: str | None = None
+        self._editor_prompt_window: Adw.ApplicationWindow | None = None
         self._editor_insert_cursor = None
         self._editor_insert_doc = None
         self._editor_insert_end = None
@@ -1827,9 +1832,19 @@ class ProseWindow(Adw.ApplicationWindow):
         output_section = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
         output_section.set_hexpand(True)
         output_section.set_vexpand(True)
+        output_header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         output_label = Gtk.Label(label="Original output", xalign=0)
         output_label.add_css_class("dim-label")
-        output_section.append(output_label)
+        output_label.set_hexpand(True)
+        output_header.append(output_label)
+
+        view_prompt_btn = Gtk.Button(label="View Last Prompt", icon_name="text-x-generic-symbolic")
+        view_prompt_btn.add_css_class("flat")
+        view_prompt_btn.set_sensitive(False)
+        view_prompt_btn.set_action_name("app.view-last-editor-prompt")
+        output_header.append(view_prompt_btn)
+        self._view_last_prompt_btn = view_prompt_btn
+        output_section.append(output_header)
 
         output_scroller = Gtk.ScrolledWindow()
         output_scroller.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
@@ -2446,6 +2461,7 @@ class ProseWindow(Adw.ApplicationWindow):
         _add_action("add-case", lambda: self._on_add_case_clicked(None))
         _add_action("request-changes", lambda: self._on_request_clicked(None))
         _add_action("view-last-json", lambda: self._on_view_json_clicked(None))
+        _add_action("view-last-editor-prompt", lambda: self._on_view_editor_prompt_clicked(None))
         _add_action("focus-ask", self._on_focus_ask)
         _add_action("show-shortcuts", self._on_show_shortcuts)
         _add_action("save-settings", self._on_action_save_settings)
@@ -3525,6 +3541,7 @@ class ProseWindow(Adw.ApplicationWindow):
             payload,
             profile.api_url,
             profile.api_key,
+            request_title="Thesaurus",
         )
         parts = list(self._extract_response_text(raw))
         if not parts:
@@ -3581,9 +3598,15 @@ class ProseWindow(Adw.ApplicationWindow):
                     payload,
                     self._reference_settings.api_url,
                     self._reference_settings.api_key,
+                    request_title="Look Up",
                 )
             else:
-                stream = self._stream_custom(payload, self._reference_settings.api_url, self._reference_settings.api_key)
+                stream = self._stream_custom(
+                    payload,
+                    self._reference_settings.api_url,
+                    self._reference_settings.api_key,
+                    request_title="Look Up",
+                )
             for chunk in stream:
                 received = True
                 GLib.idle_add(self._append_reference_output_text, chunk)
@@ -3600,9 +3623,19 @@ class ProseWindow(Adw.ApplicationWindow):
         try:
             received = False
             if self._ask_settings.api_url.rstrip("/").endswith("/responses"):
-                stream = self._stream_responses(payload, self._ask_settings.api_url, self._ask_settings.api_key)
+                stream = self._stream_responses(
+                    payload,
+                    self._ask_settings.api_url,
+                    self._ask_settings.api_key,
+                    request_title="Ask",
+                )
             else:
-                stream = self._stream_custom(payload, self._ask_settings.api_url, self._ask_settings.api_key)
+                stream = self._stream_custom(
+                    payload,
+                    self._ask_settings.api_url,
+                    self._ask_settings.api_key,
+                    request_title="Ask",
+                )
             for chunk in stream:
                 received = True
                 GLib.idle_add(self._append_reference_output_text, chunk)
@@ -4228,6 +4261,7 @@ class ProseWindow(Adw.ApplicationWindow):
             payload,
             profile.api_url,
             profile.api_key,
+            request_title="Combine Cites",
         )
         parts = list(self._extract_response_text(raw))
         combined_text = "".join(parts).strip()
@@ -4932,6 +4966,23 @@ class ProseWindow(Adw.ApplicationWindow):
             return True, attempted_without_thinking, True
         return False, attempted_without_thinking, attempted_without_reasoning_effort
 
+    def _remember_editor_request(self, title: str, api_url: str, payload: Any) -> None:
+        try:
+            raw = json.dumps(payload, ensure_ascii=False)
+        except Exception:
+            raw = str(payload)
+        self._last_editor_request_raw = raw
+        self._last_editor_request_title = title
+        self._last_editor_request_api_url = api_url
+        self._last_editor_request_timestamp = datetime.now().strftime("%B %d, %Y %I:%M:%S %p")
+        GLib.idle_add(self._set_editor_prompt_view_available, True)
+
+    def _set_editor_prompt_view_available(self, available: bool) -> bool:
+        button = getattr(self, "_view_last_prompt_btn", None)
+        if button is not None:
+            button.set_sensitive(available)
+        return False
+
     def _post_json_and_read(
         self,
         payload: dict[str, Any],
@@ -4939,6 +4990,7 @@ class ProseWindow(Adw.ApplicationWindow):
         api_key: str,
         *,
         accept: str | None = None,
+        request_title: str | None = None,
     ) -> str:
         headers = {
             "Content-Type": "application/json",
@@ -4951,6 +5003,8 @@ class ProseWindow(Adw.ApplicationWindow):
         attempted_without_thinking = False
         attempted_without_reasoning_effort = False
         while True:
+            if request_title:
+                self._remember_editor_request(request_title, api_url, payload)
             data = json.dumps(payload).encode("utf-8")
             req = urllib.request.Request(api_url, data=data, headers=headers, method="POST")
             try:
@@ -4980,7 +5034,13 @@ class ProseWindow(Adw.ApplicationWindow):
         lowered = api_url.lower()
         return "generativelanguage.googleapis.com" in lowered and ":generatecontent" in lowered
 
-    def _call_gemini_generate_content(self, api_url: str, api_key: str, text: str) -> str:
+    def _call_gemini_generate_content(
+        self,
+        api_url: str,
+        api_key: str,
+        text: str,
+        request_title: str | None = None,
+    ) -> str:
         headers = {
             "Content-Type": "application/json",
             "x-goog-api-key": api_key,
@@ -4995,6 +5055,8 @@ class ProseWindow(Adw.ApplicationWindow):
                 }
             ]
         }
+        if request_title:
+            self._remember_editor_request(request_title, api_url, payload)
         data = json.dumps(payload).encode("utf-8")
         req = urllib.request.Request(api_url, data=data, headers=headers, method="POST")
         try:
@@ -5332,7 +5394,7 @@ class ProseWindow(Adw.ApplicationWindow):
     def _run_improve(self, source_text: str, profile: ModelProfile) -> None:
         payload = self._compose_improve_payload(source_text, profile)
         try:
-            for chunk in self._stream_custom(payload, profile.api_url, profile.api_key):
+            for chunk in self._stream_custom(payload, profile.api_url, profile.api_key, request_title="Improve"):
                 GLib.idle_add(self._append_improve1_text, chunk)
         except Exception as exc:  # noqa: BLE001
             GLib.idle_add(self._on_spellingstyle_failed, str(exc))
@@ -5342,7 +5404,7 @@ class ProseWindow(Adw.ApplicationWindow):
     def _run_improve_selected(self, source_text: str, profile: ModelProfile) -> None:
         payload = self._compose_improve_payload(source_text, profile)
         try:
-            for chunk in self._stream_custom(payload, profile.api_url, profile.api_key):
+            for chunk in self._stream_custom(payload, profile.api_url, profile.api_key, request_title="Improve"):
                 GLib.idle_add(self._append_improve1_text, chunk)
         except Exception as exc:  # noqa: BLE001
             GLib.idle_add(self._on_spellingstyle_failed, str(exc))
@@ -5352,7 +5414,7 @@ class ProseWindow(Adw.ApplicationWindow):
     def _run_shorten(self, source_text: str, profile: ModelProfile) -> None:
         payload = self._compose_shorten_payload(source_text, profile)
         try:
-            for chunk in self._stream_custom(payload, profile.api_url, profile.api_key):
+            for chunk in self._stream_custom(payload, profile.api_url, profile.api_key, request_title="Shorten"):
                 GLib.idle_add(self._append_improve1_text, chunk)
                 GLib.idle_add(self._append_spelling_output_text, chunk)
         except Exception as exc:  # noqa: BLE001
@@ -5363,7 +5425,12 @@ class ProseWindow(Adw.ApplicationWindow):
     def _run_topic_sentence(self, source_text: str, profile: ModelProfile) -> None:
         payload = self._compose_topic_sentence_payload(source_text, profile)
         try:
-            for chunk in self._stream_custom(payload, profile.api_url, profile.api_key):
+            for chunk in self._stream_custom(
+                payload,
+                profile.api_url,
+                profile.api_key,
+                request_title="Topic Sentence",
+            ):
                 GLib.idle_add(self._append_editor_text, chunk)
                 GLib.idle_add(self._append_spelling_output_text, chunk)
         except Exception as exc:  # noqa: BLE001
@@ -5381,11 +5448,17 @@ class ProseWindow(Adw.ApplicationWindow):
                     profile.api_url,
                     profile.api_key,
                     combined,
+                    request_title="Introduction",
                 )
                 GLib.idle_add(self._append_editor_text, output)
                 GLib.idle_add(self._append_spelling_output_text, output)
             else:
-                for chunk in self._stream_custom(payload, profile.api_url, profile.api_key):
+                for chunk in self._stream_custom(
+                    payload,
+                    profile.api_url,
+                    profile.api_key,
+                    request_title="Introduction",
+                ):
                     GLib.idle_add(self._append_editor_text, chunk)
                     GLib.idle_add(self._append_spelling_output_text, chunk)
         except Exception as exc:  # noqa: BLE001
@@ -5403,11 +5476,17 @@ class ProseWindow(Adw.ApplicationWindow):
                     profile.api_url,
                     profile.api_key,
                     combined,
+                    request_title="Introduction Reply",
                 )
                 GLib.idle_add(self._append_editor_text, output)
                 GLib.idle_add(self._append_spelling_output_text, output)
             else:
-                for chunk in self._stream_custom(payload, profile.api_url, profile.api_key):
+                for chunk in self._stream_custom(
+                    payload,
+                    profile.api_url,
+                    profile.api_key,
+                    request_title="Introduction Reply",
+                ):
                     GLib.idle_add(self._append_editor_text, chunk)
                     GLib.idle_add(self._append_spelling_output_text, chunk)
         except Exception as exc:  # noqa: BLE001
@@ -5425,11 +5504,17 @@ class ProseWindow(Adw.ApplicationWindow):
                     profile.api_url,
                     profile.api_key,
                     combined,
+                    request_title="Conclusion",
                 )
                 GLib.idle_add(self._append_editor_text, output)
                 GLib.idle_add(self._append_spelling_output_text, output)
             else:
-                for chunk in self._stream_custom(payload, profile.api_url, profile.api_key):
+                for chunk in self._stream_custom(
+                    payload,
+                    profile.api_url,
+                    profile.api_key,
+                    request_title="Conclusion",
+                ):
                     GLib.idle_add(self._append_editor_text, chunk)
                     GLib.idle_add(self._append_spelling_output_text, chunk)
         except Exception as exc:  # noqa: BLE001
@@ -5447,11 +5532,17 @@ class ProseWindow(Adw.ApplicationWindow):
                     profile.api_url,
                     profile.api_key,
                     combined,
+                    request_title="Conclusion (No Issues)",
                 )
                 GLib.idle_add(self._append_editor_text, output)
                 GLib.idle_add(self._append_spelling_output_text, output)
             else:
-                for chunk in self._stream_custom(payload, profile.api_url, profile.api_key):
+                for chunk in self._stream_custom(
+                    payload,
+                    profile.api_url,
+                    profile.api_key,
+                    request_title="Conclusion (No Issues)",
+                ):
                     GLib.idle_add(self._append_editor_text, chunk)
                     GLib.idle_add(self._append_spelling_output_text, chunk)
         except Exception as exc:  # noqa: BLE001
@@ -5462,7 +5553,12 @@ class ProseWindow(Adw.ApplicationWindow):
     def _run_concl_section(self, source_text: str, profile: ModelProfile) -> None:
         payload = self._compose_concl_section_payload(source_text, profile)
         try:
-            for chunk in self._stream_custom(payload, profile.api_url, profile.api_key):
+            for chunk in self._stream_custom(
+                payload,
+                profile.api_url,
+                profile.api_key,
+                request_title="Section Conclusion",
+            ):
                 GLib.idle_add(self._append_editor_text, chunk)
                 GLib.idle_add(self._append_spelling_output_text, chunk)
         except Exception as exc:  # noqa: BLE001
@@ -5793,6 +5889,7 @@ class ProseWindow(Adw.ApplicationWindow):
                 payload,
                 profile.api_url,
                 profile.api_key,
+                request_title="Translate",
             )
         payload = {
             "messages": [
@@ -5816,6 +5913,7 @@ class ProseWindow(Adw.ApplicationWindow):
             payload,
             profile.api_url,
             profile.api_key,
+            request_title="Translate",
         )
 
     def _translate_batch(self, batch: list[tuple[int, str, Any]], profile: ModelProfile) -> dict[int, str]:
@@ -5859,6 +5957,7 @@ class ProseWindow(Adw.ApplicationWindow):
                 request_payload,
                 profile.api_url,
                 profile.api_key,
+                request_title="Translate",
             )
         else:
             request_payload = {
@@ -5877,6 +5976,7 @@ class ProseWindow(Adw.ApplicationWindow):
                 request_payload,
                 profile.api_url,
                 profile.api_key,
+                request_title="Translate",
             )
         return self._parse_translation_batch(raw_output, {index for index, _text, _cursor in batch})
 
@@ -5953,15 +6053,27 @@ class ProseWindow(Adw.ApplicationWindow):
             return True
         return False
 
-    def _call_chat_text(self, payload: dict[str, Any], api_url: str, api_key: str) -> str:
-        raw = self._post_json_and_read(payload, api_url, api_key)
+    def _call_chat_text(
+        self,
+        payload: dict[str, Any],
+        api_url: str,
+        api_key: str,
+        request_title: str | None = None,
+    ) -> str:
+        raw = self._post_json_and_read(payload, api_url, api_key, request_title=request_title)
         text = self._normalize_generated_output_text("".join(self._extract_response_text(raw)))
         if not text:
             raise ValueError("Translate returned empty output.")
         return text
 
-    def _call_responses_text(self, payload: dict[str, Any], api_url: str, api_key: str) -> str:
-        raw = self._post_json_and_read(payload, api_url, api_key)
+    def _call_responses_text(
+        self,
+        payload: dict[str, Any],
+        api_url: str,
+        api_key: str,
+        request_title: str | None = None,
+    ) -> str:
+        raw = self._post_json_and_read(payload, api_url, api_key, request_title=request_title)
         text = self._normalize_generated_output_text("".join(self._extract_responses_text(raw)))
         if not text:
             raise ValueError("Translate returned empty output.")
@@ -6110,9 +6222,16 @@ class ProseWindow(Adw.ApplicationWindow):
             payload,
             self._spelling_settings.api_url,
             self._spelling_settings.api_key,
+            request_title="SpellingStyle",
         )
 
-    def _stream_custom(self, payload: dict[str, Any], api_url: str, api_key: str) -> Iterable[str]:
+    def _stream_custom(
+        self,
+        payload: dict[str, Any],
+        api_url: str,
+        api_key: str,
+        request_title: str | None = None,
+    ) -> Iterable[str]:
         headers = {
             "Content-Type": "application/json",
             "Accept": "text/event-stream",
@@ -6123,6 +6242,8 @@ class ProseWindow(Adw.ApplicationWindow):
         attempted_without_reasoning_effort = False
         saw_output = False
         while True:
+            if request_title:
+                self._remember_editor_request(request_title, api_url, payload)
             data = json.dumps(payload).encode("utf-8")
             req = urllib.request.Request(api_url, data=data, headers=headers, method="POST")
             try:
@@ -6176,7 +6297,13 @@ class ProseWindow(Adw.ApplicationWindow):
                     raise ValueError(f"HTTP {exc.code}: {exc.reason or 'request failed'} - {detail}") from exc
                 raise ValueError(f"HTTP {exc.code}: {exc.reason or 'request failed'}") from exc
 
-    def _stream_responses(self, payload: dict[str, Any], api_url: str, api_key: str) -> Iterable[str]:
+    def _stream_responses(
+        self,
+        payload: dict[str, Any],
+        api_url: str,
+        api_key: str,
+        request_title: str | None = None,
+    ) -> Iterable[str]:
         headers = {
             "Content-Type": "application/json",
             "Accept": "text/event-stream",
@@ -6187,6 +6314,8 @@ class ProseWindow(Adw.ApplicationWindow):
         attempted_without_reasoning_effort = False
         saw_output = False
         while True:
+            if request_title:
+                self._remember_editor_request(request_title, api_url, payload)
             data = json.dumps(payload).encode("utf-8")
             req = urllib.request.Request(api_url, data=data, headers=headers, method="POST")
             try:
@@ -6700,6 +6829,72 @@ class ProseWindow(Adw.ApplicationWindow):
 
     def _on_json_window_closed(self, window: Adw.ApplicationWindow, *_args: object) -> bool:
         self._json_window = None
+        window.destroy()
+        return True
+
+    def _on_view_editor_prompt_clicked(self, _button: Gtk.Button | None) -> None:
+        if not self._last_editor_request_raw:
+            self._show_toast("No Editor prompt recorded yet.")
+            return
+        text = self._format_last_editor_prompt()
+        if self._editor_prompt_window:
+            try:
+                self._editor_prompt_window.destroy()
+            except Exception:
+                pass
+        title = self._last_editor_request_title or "Latest LLM Prompt"
+        window = Adw.ApplicationWindow(application=self.get_application(), title="Latest LLM Prompt")
+        window.set_default_size(900, 720)
+        view = Adw.ToolbarView()
+        header = Adw.HeaderBar()
+        header.set_title_widget(Gtk.Label(label="Latest LLM Prompt"))
+        header.set_show_end_title_buttons(True)
+        view.add_top_bar(header)
+        scroller = Gtk.ScrolledWindow()
+        scroller.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
+        scroller.set_vexpand(True)
+        scroller.set_hexpand(True)
+        textview = Gtk.TextView()
+        textview.set_monospace(True)
+        textview.set_wrap_mode(Gtk.WrapMode.WORD_CHAR)
+        textview.set_editable(False)
+        textview.set_cursor_visible(False)
+        textview.get_buffer().set_text(text)
+        scroller.set_child(textview)
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        box.set_margin_top(12)
+        box.set_margin_bottom(12)
+        box.set_margin_start(12)
+        box.set_margin_end(12)
+        title_label = Gtk.Label(label=title, xalign=0)
+        title_label.add_css_class("title-4")
+        title_label.set_wrap(True)
+        box.append(title_label)
+        box.append(scroller)
+        view.set_content(box)
+        window.set_content(view)
+        window.connect("close-request", self._on_editor_prompt_window_closed)
+        self._editor_prompt_window = window
+        window.present()
+
+    def _format_last_editor_prompt(self) -> str:
+        raw = self._last_editor_request_raw or ""
+        try:
+            formatted_payload = json.dumps(json.loads(raw), indent=2, ensure_ascii=False)
+        except Exception:
+            formatted_payload = raw
+        lines = [
+            f"Action: {self._last_editor_request_title or 'Unknown'}",
+            f"Timestamp: {self._last_editor_request_timestamp or 'Unknown'}",
+            f"API URL: {self._last_editor_request_api_url or 'Unknown'}",
+            "",
+            "Payload:",
+            formatted_payload,
+        ]
+        return "\n".join(lines)
+
+    def _on_editor_prompt_window_closed(self, window: Adw.ApplicationWindow, *_args: object) -> bool:
+        self._editor_prompt_window = None
         window.destroy()
         return True
 
