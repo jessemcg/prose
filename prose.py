@@ -5399,7 +5399,7 @@ class ProseWindow(Adw.ApplicationWindow):
         except Exception as exc:  # noqa: BLE001
             GLib.idle_add(self._on_spellingstyle_failed, str(exc))
             return
-        GLib.idle_add(self._on_improve_finished, "Improve Generated complete.")
+        GLib.idle_add(self._on_improve_finished, f"Improve Generated complete with {profile.display_name()}.")
 
     def _run_improve_selected(self, source_text: str, profile: ModelProfile) -> None:
         payload = self._compose_improve_payload(source_text, profile)
@@ -5409,7 +5409,10 @@ class ProseWindow(Adw.ApplicationWindow):
         except Exception as exc:  # noqa: BLE001
             GLib.idle_add(self._on_spellingstyle_failed, str(exc))
             return
-        GLib.idle_add(self._on_improve_selected_finished, "Improve Selected complete.")
+        GLib.idle_add(
+            self._on_improve_selected_finished,
+            f"Improve Selected complete with {profile.display_name()}.",
+        )
 
     def _run_shorten(self, source_text: str, profile: ModelProfile) -> None:
         payload = self._compose_shorten_payload(source_text, profile)
@@ -5420,7 +5423,7 @@ class ProseWindow(Adw.ApplicationWindow):
         except Exception as exc:  # noqa: BLE001
             GLib.idle_add(self._on_spellingstyle_failed, str(exc))
             return
-        GLib.idle_add(self._on_shorten_finished, "Shorten complete.")
+        GLib.idle_add(self._on_shorten_finished, f"Shorten complete with {profile.display_name()}.")
 
     def _run_topic_sentence(self, source_text: str, profile: ModelProfile) -> None:
         payload = self._compose_topic_sentence_payload(source_text, profile)
@@ -5436,7 +5439,10 @@ class ProseWindow(Adw.ApplicationWindow):
         except Exception as exc:  # noqa: BLE001
             GLib.idle_add(self._on_spellingstyle_failed, str(exc))
             return
-        GLib.idle_add(self._on_topic_sentence_finished, "Topic sentence complete.")
+        GLib.idle_add(
+            self._on_topic_sentence_finished,
+            f"Topic sentence complete with {profile.display_name()}.",
+        )
 
     def _run_introduction(self, source_text: str, profile: ModelProfile) -> None:
         payload = self._compose_introduction_payload(source_text, profile)
@@ -5464,7 +5470,7 @@ class ProseWindow(Adw.ApplicationWindow):
         except Exception as exc:  # noqa: BLE001
             GLib.idle_add(self._on_spellingstyle_failed, str(exc))
             return
-        GLib.idle_add(self._on_introduction_finished, "Introduction complete.")
+        GLib.idle_add(self._on_introduction_finished, f"Introduction complete with {profile.display_name()}.")
 
     def _run_introduction_reply(self, source_text: str, profile: ModelProfile) -> None:
         payload = self._compose_introduction_reply_payload(source_text, profile)
@@ -5492,7 +5498,10 @@ class ProseWindow(Adw.ApplicationWindow):
         except Exception as exc:  # noqa: BLE001
             GLib.idle_add(self._on_spellingstyle_failed, str(exc))
             return
-        GLib.idle_add(self._on_introduction_finished, "Introduction for reply complete.")
+        GLib.idle_add(
+            self._on_introduction_finished,
+            f"Introduction for reply complete with {profile.display_name()}.",
+        )
 
     def _run_conclusion(self, source_text: str, profile: ModelProfile) -> None:
         payload = self._compose_conclusion_payload(source_text, profile)
@@ -5520,7 +5529,7 @@ class ProseWindow(Adw.ApplicationWindow):
         except Exception as exc:  # noqa: BLE001
             GLib.idle_add(self._on_spellingstyle_failed, str(exc))
             return
-        GLib.idle_add(self._on_conclusion_finished, "Conclusion complete.")
+        GLib.idle_add(self._on_conclusion_finished, f"Conclusion complete with {profile.display_name()}.")
 
     def _run_conclusion_no_issues(self, source_text: str, profile: ModelProfile) -> None:
         payload = self._compose_conclusion_no_issues_payload(source_text, profile)
@@ -5548,7 +5557,10 @@ class ProseWindow(Adw.ApplicationWindow):
         except Exception as exc:  # noqa: BLE001
             GLib.idle_add(self._on_spellingstyle_failed, str(exc))
             return
-        GLib.idle_add(self._on_conclusion_no_issues_finished, "Conclusion (no issues) complete.")
+        GLib.idle_add(
+            self._on_conclusion_no_issues_finished,
+            f"Conclusion (no issues) complete with {profile.display_name()}.",
+        )
 
     def _run_concl_section(self, source_text: str, profile: ModelProfile) -> None:
         payload = self._compose_concl_section_payload(source_text, profile)
@@ -5564,7 +5576,10 @@ class ProseWindow(Adw.ApplicationWindow):
         except Exception as exc:  # noqa: BLE001
             GLib.idle_add(self._on_spellingstyle_failed, str(exc))
             return
-        GLib.idle_add(self._on_concl_section_finished, "Section conclusion complete.")
+        GLib.idle_add(
+            self._on_concl_section_finished,
+            f"Section conclusion complete with {profile.display_name()}.",
+        )
 
     def _run_translate_document(self, doc: XTextDocument, profile: ModelProfile) -> None:  # type: ignore[type-arg]
         try:
