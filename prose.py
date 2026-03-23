@@ -209,9 +209,9 @@ PROFILE_BACKED_COMMAND_TITLES = {
     "intro": "Introduction",
     "intro-reply": "Introduction for Reply",
     "conclusion": "Conclusion",
-    "concl-no-issues": "Concl. No Issues",
+    "concl-no-issues": "Conclusion No Issues",
     "topic-sentence": "Topic Sentence",
-    "concl-section": "Concl. Section",
+    "concl-section": "Section Conclusion",
     "translate": "Translate",
 }
 PROFILE_BACKED_COMMAND_KEYS = tuple(PROFILE_BACKED_COMMAND_TITLES.keys())
@@ -904,8 +904,8 @@ EDITOR_QUICK_ACTIONS = (
     ),
     QuickActionDefinition(
         key="concl-no-issues",
-        label="Conclusion Without Issues",
-        title="Conclusion Without Issues",
+        label="Conclusion No Issues",
+        title="Conclusion No Issues",
         action_name="transform-concl-no-issues",
         description="Write a conclusion from the current issues-considered section.",
         supports_profiles=True,
@@ -2010,12 +2010,58 @@ class ProseWindow(Adw.ApplicationWindow):
         button = Gtk.Button(label=label or definition.label)
         button.set_action_name(f"app.{definition.action_name}")
         button.set_tooltip_text(definition.description)
-        button.add_css_class("flat")
-        button.add_css_class("transform-pill")
-        button.add_css_class("transform-pill-compact")
+        self._apply_quick_action_button_classes(button)
         if on_clicked is not None:
             button.connect("clicked", on_clicked)
         return button
+
+    def _apply_quick_action_button_classes(
+        self,
+        widget: Gtk.Widget,
+        *,
+        segment_class: str | None = None,
+    ) -> None:
+        if isinstance(widget, Gtk.Button | Gtk.MenuButton):
+            widget.set_has_frame(False)
+        widget.add_css_class("flat")
+        widget.add_css_class("quick-action-button")
+        widget.add_css_class("quick-action-button-compact")
+        if segment_class is not None:
+            widget.add_css_class(segment_class)
+
+    def _build_quick_action_split_widget(
+        self,
+        definition: QuickActionDefinition,
+        *,
+        label: str | None = None,
+        close_popover: Gtk.Popover | None = None,
+    ) -> Gtk.Box:
+        container = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
+
+        main_button = Gtk.Button(label=label or definition.label)
+        main_button.set_action_name(f"app.{definition.action_name}")
+        main_button.set_tooltip_text(definition.description)
+        self._apply_quick_action_button_classes(main_button, segment_class="quick-action-split-main")
+        default_profile = self._default_profile_for_action(definition.key)
+        default_target = default_profile.display_name() if default_profile is not None else ""
+        main_button.set_action_target_value(GLib.Variant("s", default_target))
+        if close_popover is not None:
+            main_button.connect("clicked", lambda _button, current=close_popover: current.popdown())
+
+        profile_popover = Gtk.Popover()
+        profile_popover.set_autohide(True)
+        profile_popover.set_cascade_popdown(True)
+        profile_popover.set_position(Gtk.PositionType.BOTTOM)
+        profile_popover.set_child(self._build_profile_menu_content(definition, close_popover))
+
+        menu_button = Gtk.MenuButton(icon_name="pan-down-symbolic")
+        menu_button.set_tooltip_text(f"Choose a profile for {definition.title}.")
+        menu_button.set_popover(profile_popover)
+        self._apply_quick_action_button_classes(menu_button, segment_class="quick-action-split-menu")
+
+        container.append(main_button)
+        container.append(menu_button)
+        return container
 
     def _build_profile_menu_content(
         self,
@@ -2029,7 +2075,9 @@ class ProseWindow(Adw.ApplicationWindow):
         content.set_margin_end(8)
         for profile in self._model_profiles:
             button = Gtk.Button(label=profile.display_name())
-            button.add_css_class("flat")
+            self._apply_quick_action_button_classes(button)
+            button.add_css_class("quick-action-profile-button")
+            button.set_hexpand(True)
             button.set_halign(Gtk.Align.FILL)
             button.set_action_name(f"app.{definition.action_name}")
             button.set_action_target_value(GLib.Variant("s", profile.display_name()))
@@ -2051,25 +2099,11 @@ class ProseWindow(Adw.ApplicationWindow):
                 label=label,
                 on_clicked=(lambda _button, current=close_popover: current.popdown()) if close_popover else None,
             )
-
-        split = Adw.SplitButton()
-        split.set_label(label or definition.label)
-        split.set_tooltip_text(definition.description)
-        split.add_css_class("flat")
-        split.add_css_class("transform-split-compact")
-        split.set_action_name(f"app.{definition.action_name}")
-        default_profile = self._default_profile_for_action(definition.key)
-        default_target = default_profile.display_name() if default_profile is not None else ""
-        split.set_action_target_value(GLib.Variant("s", default_target))
-        if close_popover is not None:
-            split.connect("clicked", lambda _button, current=close_popover: current.popdown())
-        profile_popover = Gtk.Popover()
-        profile_popover.set_autohide(True)
-        profile_popover.set_cascade_popdown(True)
-        profile_popover.set_position(Gtk.PositionType.BOTTOM)
-        profile_popover.set_child(self._build_profile_menu_content(definition, close_popover))
-        split.set_popover(profile_popover)
-        return split
+        return self._build_quick_action_split_widget(
+            definition,
+            label=label,
+            close_popover=close_popover,
+        )
 
     def _build_more_actions_button(
         self, definitions: list[QuickActionDefinition]
@@ -2108,9 +2142,7 @@ class ProseWindow(Adw.ApplicationWindow):
         more_button = Gtk.MenuButton(label="More")
         more_button.set_tooltip_text("Show more editor actions")
         more_button.set_popover(popover)
-        more_button.add_css_class("flat")
-        more_button.add_css_class("transform-pill")
-        more_button.add_css_class("transform-pill-compact")
+        self._apply_quick_action_button_classes(more_button)
         return more_button, action_buttons
 
     def _rebuild_transform_action_buttons(self) -> None:
@@ -2169,23 +2201,43 @@ class ProseWindow(Adw.ApplicationWindow):
   background-color: @card_bg_color;
   color: @view_fg_color;
 }}
-.transform-pill,
-.transform-pill button {{
-  border-radius: 999px;
+button.transform-pill {{
+  border-radius: {SPELLING_OUTPUT_CORNER_RADIUS_PX}px;
   padding-left: 14px;
   padding-right: 14px;
 }}
-.transform-pill-compact,
-.transform-pill-compact button {{
+button.transform-pill-compact {{
   padding-left: 10px;
   padding-right: 10px;
   min-height: 28px;
   font-size: 0.85rem;
 }}
-.transform-split-compact,
-.transform-split-compact button {{
+button.quick-action-button,
+menubutton.quick-action-button > button {{
+  border-radius: {SPELLING_OUTPUT_CORNER_RADIUS_PX}px;
+  padding-left: 14px;
+  padding-right: 14px;
+}}
+button.quick-action-button.quick-action-button-compact,
+menubutton.quick-action-button.quick-action-button-compact > button {{
+  padding-left: 10px;
+  padding-right: 10px;
   min-height: 28px;
   font-size: 0.85rem;
+}}
+button.quick-action-split-main {{
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+  padding-right: 8px;
+}}
+menubutton.quick-action-split-menu > button {{
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+  padding-left: 8px;
+  padding-right: 8px;
+}}
+button.quick-action-profile-button {{
+  border-radius: {SPELLING_OUTPUT_CORNER_RADIUS_PX}px;
 }}
 .reference-output {{
   font-size: {REFERENCE_OUTPUT_FONT_SIZE_PX}px;
@@ -7207,9 +7259,9 @@ class SettingsWindow(Adw.ApplicationWindow):
             ("intro", "Introduction", self._introduction_settings, DEFAULT_INTRO_PROMPT),
             ("intro-reply", "Introduction for Reply", self._introduction_reply_settings, DEFAULT_INTRO_REPLY_PROMPT),
             ("conclusion", "Conclusion", self._conclusion_settings, DEFAULT_CONCLUSION_PROMPT),
-            ("concl-no-issues", "Concl. No Issues", self._concl_no_issues_settings, DEFAULT_CONCL_NO_ISSUES_PROMPT),
+            ("concl-no-issues", "Conclusion No Issues", self._concl_no_issues_settings, DEFAULT_CONCL_NO_ISSUES_PROMPT),
             ("topic-sentence", "Topic Sentence", self._topic_sentence_settings, DEFAULT_TOPIC_SENTENCE_PROMPT),
-            ("concl-section", "Concl. Section", self._concl_section_settings, DEFAULT_CONCL_SECTION_PROMPT),
+            ("concl-section", "Section Conclusion", self._concl_section_settings, DEFAULT_CONCL_SECTION_PROMPT),
             ("translate", "Translate", self._translate_settings, DEFAULT_TRANSLATE_PROMPT),
         ]
         for key, title, settings, default_prompt in prompt_definitions:
