@@ -191,16 +191,14 @@ DEFAULT_CT_PREFIX = "2"
 MAX_WORD_SUBSTITUTIONS = 3
 MAX_PINNED_EDITOR_ACTIONS = 5
 UNSET_PROFILE_LABEL = "Choose a profile..."
-MODEL_PROFILE_IDS = ("profile1", "profile2", "profile3", "profile4", "profile5")
+MODEL_PROFILE_IDS = ("profile1", "profile2", "profile3", "profile4")
 DEFAULT_MODEL_PROFILE_NICKNAMES = {
     "profile1": "Profile 1",
     "profile2": "Profile 2",
     "profile3": "Profile 3",
     "profile4": "Profile 4",
-    "profile5": "Profile 5",
 }
 PROFILE_BACKED_COMMAND_TITLES = {
-    "proof": "Proof Reading",
     "improve-generated": "Improve Generated",
     "improve-selected": "Improve Selected",
     "combine": "Combine Cites",
@@ -537,13 +535,14 @@ def _format_action_param(variant: GLib.Variant) -> str:
 class ModelProfile:
     key: str
     nickname: str
+    abbreviation: str
     api_url: str
     model_id: str
     api_key: str
     disable_reasoning: bool
 
     def display_name(self) -> str:
-        return self.nickname.strip() or DEFAULT_MODEL_PROFILE_NICKNAMES.get(self.key, self.key.title())
+        return self.nickname.strip() or _default_profile_nickname(self.key)
 
     def is_configured(self) -> bool:
         return bool(self.api_url.strip() and self.api_key.strip())
@@ -801,6 +800,7 @@ class PromptEditorWidgets:
 @dataclass
 class ModelProfileEditorWidgets:
     nickname_row: Adw.EntryRow
+    abbreviation_row: Adw.EntryRow
     api_url_row: Adw.EntryRow
     model_row: Adw.EntryRow
     api_key_row: Adw.PasswordEntryRow
@@ -1005,6 +1005,16 @@ def _credential_signature(api_url: str, model_id: str, api_key: str) -> tuple[st
     return cleaned_api_url, cleaned_model_id, cleaned_api_key
 
 
+def _default_profile_nickname(profile_key: str) -> str:
+    fallback = DEFAULT_MODEL_PROFILE_NICKNAMES.get(profile_key)
+    if fallback:
+        return fallback
+    match = re.fullmatch(r"profile(\d+)", profile_key or "")
+    if match:
+        return f"Profile {match.group(1)}"
+    return profile_key.title()
+
+
 def _match_profile_key_for_settings(settings: Any, profiles: list[ModelProfile]) -> str | None:
     signature = _credential_signature(
         str(getattr(settings, "api_url", "") or ""),
@@ -1025,6 +1035,7 @@ def _sanitize_model_profile(raw: Any, key: str, fallback_nickname: str) -> Model
     return ModelProfile(
         key=key,
         nickname=nickname,
+        abbreviation=str(data.get("abbreviation", "") or "").strip(),
         api_url=str(data.get("api_url", "") or "").strip(),
         model_id=str(data.get("model_id", "") or "").strip(),
         api_key=str(data.get("api_key", "") or "").strip(),
@@ -1037,11 +1048,36 @@ def _legacy_profile_from_improve(prefix: str, nickname: str) -> ModelProfile:
     return ModelProfile(
         key="",
         nickname=nickname,
+        abbreviation="",
         api_url=str(raw.get(f"{prefix}_api_url", "") or "").strip(),
         model_id=str(raw.get(f"{prefix}_model_id", "") or "").strip(),
         api_key=str(raw.get(f"{prefix}_api_key", "") or "").strip(),
         disable_reasoning=_coerce_bool_config(raw.get(f"{prefix}_disable_reasoning"), False),
     )
+
+
+def _legacy_default_profile_key_for_command(command_key: str, raw: dict[str, Any] | None = None) -> str | None:
+    data = raw if raw is not None else _read_config()
+    for container_key in (CONFIG_KEY_COMMAND_DEFAULT_PROFILES, CONFIG_KEY_EDITOR_COMMAND_DEFAULT_PROFILES):
+        container = data.get(container_key)
+        if not isinstance(container, dict):
+            continue
+        candidate = str(container.get(command_key, "") or "").strip()
+        if re.fullmatch(r"profile\d+", candidate):
+            return candidate
+    return None
+
+
+def _raw_model_profile_by_key(raw_profiles: Any, profile_key: str) -> ModelProfile | None:
+    if not isinstance(raw_profiles, list):
+        return None
+    match = re.fullmatch(r"profile(\d+)", profile_key or "")
+    if match is None:
+        return None
+    index = int(match.group(1)) - 1
+    if index < 0 or index >= len(raw_profiles):
+        return None
+    return _sanitize_model_profile(raw_profiles[index], profile_key, _default_profile_nickname(profile_key))
 
 
 def load_model_profiles() -> list[ModelProfile]:
@@ -1065,6 +1101,7 @@ def load_model_profiles() -> list[ModelProfile]:
         ModelProfile(
             key="profile3",
             nickname=DEFAULT_MODEL_PROFILE_NICKNAMES["profile3"],
+            abbreviation="",
             api_url="",
             model_id="",
             api_key="",
@@ -1073,14 +1110,7 @@ def load_model_profiles() -> list[ModelProfile]:
         ModelProfile(
             key="profile4",
             nickname=DEFAULT_MODEL_PROFILE_NICKNAMES["profile4"],
-            api_url="",
-            model_id="",
-            api_key="",
-            disable_reasoning=False,
-        ),
-        ModelProfile(
-            key="profile5",
-            nickname=DEFAULT_MODEL_PROFILE_NICKNAMES["profile5"],
+            abbreviation="",
             api_url="",
             model_id="",
             api_key="",
@@ -1094,6 +1124,7 @@ def save_model_profiles(profiles: list[ModelProfile]) -> None:
     data[CONFIG_KEY_MODEL_PROFILES] = [
         {
             "nickname": profile.display_name(),
+            "abbreviation": profile.abbreviation.strip(),
             "api_url": profile.api_url,
             "model_id": profile.model_id,
             "api_key": profile.api_key,
@@ -1148,12 +1179,27 @@ def save_editor_action_profile_defaults(defaults: dict[str, str | None]) -> None
 
 def load_proofread_settings() -> ProofreadSettings:
     raw = _read_config()
-    return ProofreadSettings(
+    settings = ProofreadSettings(
         api_url=str(raw.get(CONFIG_KEY_PROOFREAD_API_URL, "") or "").strip(),
         model_id=str(raw.get(CONFIG_KEY_PROOFREAD_MODEL_ID, "") or "").strip(),
         api_key=str(raw.get(CONFIG_KEY_PROOFREAD_API_KEY, "") or "").strip(),
         prompt=str(raw.get(CONFIG_KEY_PROOFREAD_PROMPT, DEFAULT_PROMPT) or DEFAULT_PROMPT).strip(),
         disable_reasoning=_coerce_bool_config(raw.get(CONFIG_KEY_PROOFREAD_DISABLE_REASONING), False),
+    )
+    if settings.api_url.strip() and settings.api_key.strip():
+        return settings
+
+    legacy_profile_key = _legacy_default_profile_key_for_command("proof", raw)
+    legacy_profile = _raw_model_profile_by_key(raw.get(CONFIG_KEY_MODEL_PROFILES), legacy_profile_key or "")
+    if legacy_profile is None or not legacy_profile.is_configured():
+        return settings
+
+    return ProofreadSettings(
+        api_url=legacy_profile.api_url,
+        model_id=legacy_profile.model_id,
+        api_key=legacy_profile.api_key,
+        prompt=settings.prompt or DEFAULT_PROMPT,
+        disable_reasoning=legacy_profile.disable_reasoning,
     )
 
 
@@ -1661,7 +1707,6 @@ class ProseWindow(Adw.ApplicationWindow):
         self._editor_action_profile_defaults = load_editor_action_profile_defaults(
             self._model_profiles,
             {
-                "proof": self._proof_settings,
                 "improve-generated": self._improve1_settings,
                 "combine": self._combine_cites_settings,
                 "thesaurus": self._thesaurus_settings,
@@ -1718,6 +1763,8 @@ class ProseWindow(Adw.ApplicationWindow):
         self._rt_prefix_entry: Gtk.Entry | None = None
         self._ct_prefix_entry: Gtk.Entry | None = None
         self._substitution_rows: list[tuple[Gtk.Entry, Gtk.Entry]] = []
+        self._improve_profile_chip_box: Gtk.Box | None = None
+        self._improve_profile_chip_buttons: list[Gtk.Button] = []
         self._transform_action_buttons: list[Gtk.Widget] = []
         self._transform_actions_wrap: Gtk.FlowBox | None = None
         self._build_ui()
@@ -1838,12 +1885,13 @@ class ProseWindow(Adw.ApplicationWindow):
         output_label.set_hexpand(True)
         output_header.append(output_label)
 
-        view_prompt_btn = Gtk.Button(label="View Last Prompt", icon_name="text-x-generic-symbolic")
-        view_prompt_btn.add_css_class("flat")
-        view_prompt_btn.set_sensitive(False)
-        view_prompt_btn.set_action_name("app.view-last-editor-prompt")
-        output_header.append(view_prompt_btn)
-        self._view_last_prompt_btn = view_prompt_btn
+        improve_profile_chip_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
+        improve_profile_chip_box.set_halign(Gtk.Align.END)
+        improve_profile_chip_box.set_visible(False)
+        output_header.append(improve_profile_chip_box)
+        self._improve_profile_chip_box = improve_profile_chip_box
+        self._rebuild_improve_profile_chips()
+
         output_section.append(output_header)
 
         output_scroller = Gtk.ScrolledWindow()
@@ -1957,6 +2005,13 @@ class ProseWindow(Adw.ApplicationWindow):
             flow_box.remove(child)
             child = next_child
 
+    def _clear_box(self, box: Gtk.Box) -> None:
+        child = box.get_first_child()
+        while child is not None:
+            next_child = child.get_next_sibling()
+            box.remove(child)
+            child = next_child
+
     def _model_profile_by_key(self, profile_key: str) -> ModelProfile | None:
         for profile in self._model_profiles:
             if profile.key == profile_key:
@@ -1988,6 +2043,62 @@ class ProseWindow(Adw.ApplicationWindow):
         if default_key is None:
             return None
         return self._model_profile_by_key(default_key)
+
+    def _proofread_runtime_profile(self) -> ModelProfile:
+        nickname = self._proof_settings.model_id.strip() or "Proof Reading"
+        return ModelProfile(
+            key="proof",
+            nickname=nickname,
+            abbreviation="",
+            api_url=self._proof_settings.api_url,
+            model_id=self._proof_settings.model_id,
+            api_key=self._proof_settings.api_key,
+            disable_reasoning=self._proof_settings.disable_reasoning,
+        )
+
+    def _configured_improve_profiles(self) -> list[ModelProfile]:
+        return [profile for profile in self._model_profiles if profile.is_configured()]
+
+    def _profile_slot_label(self, profile: ModelProfile) -> str:
+        abbreviation = profile.abbreviation.strip()
+        if abbreviation:
+            return abbreviation
+        try:
+            return str(MODEL_PROFILE_IDS.index(profile.key) + 1)
+        except ValueError:
+            return profile.display_name()[:1] or "?"
+
+    def _improve_profile_chip_tooltip(self, profile: ModelProfile) -> str:
+        tooltip = f"Improve Generated with {profile.display_name()}."
+        if profile.model_id.strip():
+            tooltip = f"{tooltip}\nModel: {profile.model_id.strip()}"
+        if profile.key == self._default_profile_key_for_action("improve-generated"):
+            tooltip = f"{tooltip}\nDefault Improve Generated profile."
+        return tooltip
+
+    def _rebuild_improve_profile_chips(self) -> None:
+        box = self._improve_profile_chip_box
+        if box is None:
+            return
+
+        self._clear_box(box)
+        self._improve_profile_chip_buttons = []
+        profiles = self._configured_improve_profiles()
+        box.set_visible(bool(profiles))
+        if not profiles:
+            return
+
+        for profile in profiles:
+            button = Gtk.Button(label=self._profile_slot_label(profile))
+            button.add_css_class("flat")
+            button.add_css_class("improve-profile-chip")
+            button.set_tooltip_text(self._improve_profile_chip_tooltip(profile))
+            button.connect("clicked", self._on_improve_clicked, profile.display_name())
+            box.append(button)
+            self._improve_profile_chip_buttons.append(button)
+
+        for button in self._improve_profile_chip_buttons:
+            button.set_sensitive(not self._busy)
 
     def _resolve_profile_for_action(self, action_key: str, profile_nickname: str | None) -> ModelProfile | None:
         if profile_nickname:
@@ -2239,6 +2350,14 @@ menubutton.quick-action-split-menu > button {{
 button.quick-action-profile-button {{
   border-radius: {SPELLING_OUTPUT_CORNER_RADIUS_PX}px;
 }}
+button.improve-profile-chip {{
+  min-height: 24px;
+  min-width: 24px;
+  padding-left: 6px;
+  padding-right: 6px;
+  border-radius: 8px;
+  font-size: 0.8rem;
+}}
 .reference-output {{
   font-size: {REFERENCE_OUTPUT_FONT_SIZE_PX}px;
 }}
@@ -2441,6 +2560,7 @@ button.quick-action-profile-button {{
 
     def _ensure_menu(self) -> None:
         menu = Gio.Menu()
+        menu.append("Prompt Audit", "app.view-last-editor-prompt")
         menu.append("Settings", "app.settings")
         menu.append("Keyboard Shortcuts", "app.show-shortcuts")
         self._menu_button.set_menu_model(menu)
@@ -2514,6 +2634,9 @@ button.quick-action-profile-button {{
         _add_action("request-changes", lambda: self._on_request_clicked(None))
         _add_action("view-last-json", lambda: self._on_view_json_clicked(None))
         _add_action("view-last-editor-prompt", lambda: self._on_view_editor_prompt_clicked(None))
+        prompt_audit_action = app.lookup_action("view-last-editor-prompt")
+        if prompt_audit_action is not None:
+            prompt_audit_action.set_enabled(False)
         _add_action("focus-ask", self._on_focus_ask)
         _add_action("show-shortcuts", self._on_show_shortcuts)
         _add_action("save-settings", self._on_action_save_settings)
@@ -2680,6 +2803,7 @@ button.quick-action-profile-button {{
         save_libreoffice_python_path(self._libreoffice_python_path)
         save_concordance_file_path(self._concordance_file_path)
         self._rebuild_transform_action_buttons()
+        self._rebuild_improve_profile_chips()
         _import_uno_from_candidates(self._libreoffice_python_path, force_retry=True)
         self._ctx = None
         self._desktop = None
@@ -2812,12 +2936,10 @@ button.quick-action-profile-button {{
     def _on_request_clicked(self, _button: Gtk.Button) -> None:
         if self._busy:
             return
-        profile = self._resolve_profile_for_action("proof", None)
-        if profile is None:
+        if not self._proof_settings.is_configured():
+            self._show_toast("Add Proof Reading API URL, API key, and prompt in Settings. Model ID may be required.")
             return
-        if not profile.is_configured():
-            self._show_toast(f'Configure the "{profile.display_name()}" model profile in Settings first.')
-            return
+        profile = self._proofread_runtime_profile()
         desktop = self._get_desktop()
         if not desktop:
             self._show_toast("Unable to reach LibreOffice listener. Is the service running?")
@@ -4944,6 +5066,9 @@ button.quick-action-profile-button {{
             self._thesaurus_btn.set_sensitive(not busy)
         if hasattr(self, "_reference_btn"):
             self._reference_btn.set_sensitive(not busy)
+        if hasattr(self, "_improve_profile_chip_buttons"):
+            for button in self._improve_profile_chip_buttons:
+                button.set_sensitive(not busy)
         if hasattr(self, "_transform_action_buttons"):
             for button in self._transform_action_buttons:
                 button.set_sensitive(not busy)
@@ -5030,9 +5155,9 @@ button.quick-action-profile-button {{
         GLib.idle_add(self._set_editor_prompt_view_available, True)
 
     def _set_editor_prompt_view_available(self, available: bool) -> bool:
-        button = getattr(self, "_view_last_prompt_btn", None)
-        if button is not None:
-            button.set_sensitive(available)
+        action = self.get_application().lookup_action("view-last-editor-prompt")
+        if action is not None:
+            action.set_enabled(available)
         return False
 
     def _post_json_and_read(
@@ -7365,8 +7490,8 @@ class SettingsWindow(Adw.ApplicationWindow):
 
         info_label = Gtk.Label(
             label=(
-                "Set up up to five shared model profiles here. Eligible editor actions reuse these profiles "
-                "and keep only their own prompts."
+                "Set up up to four shared model profiles here. Proof Reading now keeps its own credentials, "
+                "while eligible editor actions reuse these shared profiles and keep only their own prompts."
             ),
             xalign=0,
         )
@@ -7382,6 +7507,10 @@ class SettingsWindow(Adw.ApplicationWindow):
             nickname_row = Adw.EntryRow(title="Nickname")
             nickname_row.set_text(profile.display_name())
             group.add(nickname_row)
+
+            abbreviation_row = Adw.EntryRow(title="Abbreviation (optional)")
+            abbreviation_row.set_text(profile.abbreviation)
+            group.add(abbreviation_row)
 
             api_url_row = Adw.EntryRow(title="API URL")
             api_url_row.set_text(profile.api_url)
@@ -7401,6 +7530,7 @@ class SettingsWindow(Adw.ApplicationWindow):
 
             self._model_profile_editors[profile.key] = ModelProfileEditorWidgets(
                 nickname_row=nickname_row,
+                abbreviation_row=abbreviation_row,
                 api_url_row=api_url_row,
                 model_row=model_row,
                 api_key_row=api_key_row,
@@ -7859,6 +7989,7 @@ class SettingsWindow(Adw.ApplicationWindow):
                 ModelProfile(
                     key=profile_key,
                     nickname=widgets.nickname_row.get_text().strip() or DEFAULT_MODEL_PROFILE_NICKNAMES[profile_key],
+                    abbreviation=widgets.abbreviation_row.get_text().strip(),
                     api_url=widgets.api_url_row.get_text().strip(),
                     model_id=widgets.model_row.get_text().strip(),
                     api_key=widgets.api_key_row.get_text().strip(),
