@@ -1882,15 +1882,7 @@ class ProseWindow(Adw.ApplicationWindow):
         output_header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         output_label = Gtk.Label(label="Original output", xalign=0)
         output_label.add_css_class("dim-label")
-        output_label.set_hexpand(True)
         output_header.append(output_label)
-
-        improve_profile_chip_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
-        improve_profile_chip_box.set_halign(Gtk.Align.END)
-        improve_profile_chip_box.set_visible(False)
-        output_header.append(improve_profile_chip_box)
-        self._improve_profile_chip_box = improve_profile_chip_box
-        self._rebuild_improve_profile_chips()
 
         output_section.append(output_header)
 
@@ -1913,6 +1905,22 @@ class ProseWindow(Adw.ApplicationWindow):
         output_scroller.set_child(output_view)
         output_section.append(output_scroller)
         self._spelling_output_buffer = output_buffer
+
+        regenerate_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        regenerate_row.set_hexpand(True)
+
+        regenerate_label = Gtk.Label(label="Regenerate with:", xalign=0)
+        regenerate_label.add_css_class("dim-label")
+        regenerate_row.append(regenerate_label)
+
+        improve_profile_chip_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
+        improve_profile_chip_box.set_halign(Gtk.Align.START)
+        improve_profile_chip_box.set_visible(False)
+        regenerate_row.append(improve_profile_chip_box)
+        self._improve_profile_chip_box = improve_profile_chip_box
+        self._rebuild_improve_profile_chips()
+
+        output_section.append(regenerate_row)
 
         thesaurus_section = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
         thesaurus_section.set_hexpand(True)
