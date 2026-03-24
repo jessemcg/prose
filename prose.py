@@ -213,6 +213,18 @@ PROFILE_BACKED_COMMAND_TITLES = {
     "translate": "Translate",
 }
 PROFILE_BACKED_COMMAND_KEYS = tuple(PROFILE_BACKED_COMMAND_TITLES.keys())
+REGENERATE_INSERT_MODE_BY_ACTION = {
+    "improve-generated": "improve",
+    "improve-selected": "improve",
+    "shorten": "improve",
+    "topic-sentence": "editor",
+    "intro": "editor",
+    "intro-reply": "editor",
+    "conclusion": "editor",
+    "concl-no-issues": "editor",
+    "concl-section": "editor",
+}
+REGENERATE_SOURCE_BUFFER_ACTION_KEYS = frozenset({"improve-generated", "improve-selected"})
 CITATION_NUMBER_WORDS = {
     "zero": "0",
     "one": "1",
@@ -786,6 +798,14 @@ class TranslateSettings:
 
 
 @dataclass
+class RegenerateContext:
+    action_key: str
+    command_title: str
+    source_text: str
+    insert_mode: str
+
+
+@dataclass
 class PromptEditorWidgets:
     api_url_row: Adw.EntryRow
     model_row: Adw.EntryRow
@@ -849,8 +869,8 @@ EDITOR_QUICK_ACTIONS = (
     ),
     QuickActionDefinition(
         key="shorten",
-        label="Shorten Selection",
-        title="Shorten",
+        label="Shorten Selected",
+        title="Shorten Selected",
         action_name="transform-shorten",
         description="Shorten selected text while preserving meaning.",
         supports_profiles=True,
@@ -888,8 +908,8 @@ EDITOR_QUICK_ACTIONS = (
     ),
     QuickActionDefinition(
         key="intro-reply",
-        label="Introduction for Reply",
-        title="Introduction for Reply",
+        label="Introduction Reply",
+        title="Introduction Reply",
         action_name="transform-introduction-reply",
         description="Write an introduction for a reply brief from the current argument section.",
         supports_profiles=True,
@@ -1749,6 +1769,8 @@ class ProseWindow(Adw.ApplicationWindow):
         self._last_insert_len = 0
         self._editor_pending_newlines = 0
         self._improve_pending_newlines = 0
+        self._pending_regenerate_context: RegenerateContext | None = None
+        self._last_regenerate_context: RegenerateContext | None = None
         self._spelling_output_buffer: Gtk.TextBuffer | None = None
         self._css_provider: Gtk.CssProvider | None = None
         self._thesaurus_words: list[str] = []
@@ -1763,8 +1785,9 @@ class ProseWindow(Adw.ApplicationWindow):
         self._rt_prefix_entry: Gtk.Entry | None = None
         self._ct_prefix_entry: Gtk.Entry | None = None
         self._substitution_rows: list[tuple[Gtk.Entry, Gtk.Entry]] = []
-        self._improve_profile_chip_box: Gtk.Box | None = None
-        self._improve_profile_chip_buttons: list[Gtk.Button] = []
+        self._regenerate_label: Gtk.Label | None = None
+        self._regenerate_profile_chip_box: Gtk.Box | None = None
+        self._regenerate_profile_chip_buttons: list[Gtk.Button] = []
         self._transform_action_buttons: list[Gtk.Widget] = []
         self._transform_actions_wrap: Gtk.FlowBox | None = None
         self._build_ui()
@@ -1909,16 +1932,17 @@ class ProseWindow(Adw.ApplicationWindow):
         regenerate_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         regenerate_row.set_hexpand(True)
 
-        regenerate_label = Gtk.Label(label="Regenerate with:", xalign=0)
+        regenerate_label = Gtk.Label(label="Try again with:", xalign=0)
         regenerate_label.add_css_class("dim-label")
         regenerate_row.append(regenerate_label)
+        self._regenerate_label = regenerate_label
 
-        improve_profile_chip_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
-        improve_profile_chip_box.set_halign(Gtk.Align.START)
-        improve_profile_chip_box.set_visible(False)
-        regenerate_row.append(improve_profile_chip_box)
-        self._improve_profile_chip_box = improve_profile_chip_box
-        self._rebuild_improve_profile_chips()
+        regenerate_profile_chip_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
+        regenerate_profile_chip_box.set_halign(Gtk.Align.START)
+        regenerate_profile_chip_box.set_visible(False)
+        regenerate_row.append(regenerate_profile_chip_box)
+        self._regenerate_profile_chip_box = regenerate_profile_chip_box
+        self._rebuild_regenerate_profile_chips()
 
         output_section.append(regenerate_row)
 
@@ -2064,9 +2088,6 @@ class ProseWindow(Adw.ApplicationWindow):
             disable_reasoning=self._proof_settings.disable_reasoning,
         )
 
-    def _configured_improve_profiles(self) -> list[ModelProfile]:
-        return [profile for profile in self._model_profiles if profile.is_configured()]
-
     def _profile_slot_label(self, profile: ModelProfile) -> str:
         abbreviation = profile.abbreviation.strip()
         if abbreviation:
@@ -2076,23 +2097,38 @@ class ProseWindow(Adw.ApplicationWindow):
         except ValueError:
             return profile.display_name()[:1] or "?"
 
-    def _improve_profile_chip_tooltip(self, profile: ModelProfile) -> str:
-        tooltip = f"Improve Generated with {profile.display_name()}."
+    def _active_regenerate_context(self) -> RegenerateContext | None:
+        return self._pending_regenerate_context or self._last_regenerate_context
+
+    def _configured_regenerate_profiles(self) -> list[ModelProfile]:
+        return [profile for profile in self._model_profiles if profile.is_configured()]
+
+    def _regenerate_profile_chip_tooltip(
+        self, profile: ModelProfile, context: RegenerateContext | None
+    ) -> str:
+        if context is None:
+            tooltip = "Run a supported text-generation command first."
+        else:
+            tooltip = f"Regenerate {context.command_title} with {profile.display_name()}."
+            if profile.key == self._default_profile_key_for_action(context.action_key):
+                tooltip = f"{tooltip}\nDefault {context.command_title} profile."
         if profile.model_id.strip():
             tooltip = f"{tooltip}\nModel: {profile.model_id.strip()}"
-        if profile.key == self._default_profile_key_for_action("improve-generated"):
-            tooltip = f"{tooltip}\nDefault Improve Generated profile."
         return tooltip
 
-    def _rebuild_improve_profile_chips(self) -> None:
-        box = self._improve_profile_chip_box
+    def _rebuild_regenerate_profile_chips(self) -> None:
+        box = self._regenerate_profile_chip_box
+        label = self._regenerate_label
         if box is None:
             return
 
         self._clear_box(box)
-        self._improve_profile_chip_buttons = []
-        profiles = self._configured_improve_profiles()
+        self._regenerate_profile_chip_buttons = []
+        profiles = self._configured_regenerate_profiles()
         box.set_visible(bool(profiles))
+        context = self._active_regenerate_context()
+        if label is not None:
+            label.set_label("Try again with:")
         if not profiles:
             return
 
@@ -2100,13 +2136,40 @@ class ProseWindow(Adw.ApplicationWindow):
             button = Gtk.Button(label=self._profile_slot_label(profile))
             button.add_css_class("flat")
             button.add_css_class("improve-profile-chip")
-            button.set_tooltip_text(self._improve_profile_chip_tooltip(profile))
-            button.connect("clicked", self._on_improve_clicked, profile.display_name())
+            button.set_tooltip_text(self._regenerate_profile_chip_tooltip(profile, context))
+            button.connect("clicked", self._on_regenerate_clicked, profile.display_name())
+            button.set_sensitive(not self._busy and context is not None)
             box.append(button)
-            self._improve_profile_chip_buttons.append(button)
+            self._regenerate_profile_chip_buttons.append(button)
 
-        for button in self._improve_profile_chip_buttons:
-            button.set_sensitive(not self._busy)
+    def _make_regenerate_context(self, action_key: str, source_text: str) -> RegenerateContext | None:
+        insert_mode = REGENERATE_INSERT_MODE_BY_ACTION.get(action_key)
+        if insert_mode is None:
+            return None
+        return RegenerateContext(
+            action_key=action_key,
+            command_title=self._command_title(action_key),
+            source_text=source_text,
+            insert_mode=insert_mode,
+        )
+
+    def _set_pending_regenerate_context(self, action_key: str, source_text: str) -> None:
+        context = self._make_regenerate_context(action_key, source_text)
+        self._pending_regenerate_context = context
+        self._rebuild_regenerate_profile_chips()
+
+    def _clear_pending_regenerate_context(self) -> None:
+        if self._pending_regenerate_context is None:
+            return
+        self._pending_regenerate_context = None
+        self._rebuild_regenerate_profile_chips()
+
+    def _commit_pending_regenerate_context(self) -> None:
+        if self._pending_regenerate_context is None:
+            return
+        self._last_regenerate_context = self._pending_regenerate_context
+        self._pending_regenerate_context = None
+        self._rebuild_regenerate_profile_chips()
 
     def _resolve_profile_for_action(self, action_key: str, profile_nickname: str | None) -> ModelProfile | None:
         if profile_nickname:
@@ -2128,6 +2191,10 @@ class ProseWindow(Adw.ApplicationWindow):
     ) -> Gtk.Button:
         button = Gtk.Button(label=label or definition.label)
         button.set_action_name(f"app.{definition.action_name}")
+        if definition.supports_profiles:
+            default_profile = self._default_profile_for_action(definition.key)
+            default_target = default_profile.display_name() if default_profile is not None else ""
+            button.set_action_target_value(GLib.Variant("s", default_target))
         button.set_tooltip_text(definition.description)
         self._apply_quick_action_button_classes(button)
         if on_clicked is not None:
@@ -2137,73 +2204,12 @@ class ProseWindow(Adw.ApplicationWindow):
     def _apply_quick_action_button_classes(
         self,
         widget: Gtk.Widget,
-        *,
-        segment_class: str | None = None,
     ) -> None:
         if isinstance(widget, Gtk.Button | Gtk.MenuButton):
             widget.set_has_frame(False)
         widget.add_css_class("flat")
-        widget.add_css_class("quick-action-button")
-        widget.add_css_class("quick-action-button-compact")
-        if segment_class is not None:
-            widget.add_css_class(segment_class)
-
-    def _build_quick_action_split_widget(
-        self,
-        definition: QuickActionDefinition,
-        *,
-        label: str | None = None,
-        close_popover: Gtk.Popover | None = None,
-    ) -> Gtk.Box:
-        container = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
-
-        main_button = Gtk.Button(label=label or definition.label)
-        main_button.set_action_name(f"app.{definition.action_name}")
-        main_button.set_tooltip_text(definition.description)
-        self._apply_quick_action_button_classes(main_button, segment_class="quick-action-split-main")
-        default_profile = self._default_profile_for_action(definition.key)
-        default_target = default_profile.display_name() if default_profile is not None else ""
-        main_button.set_action_target_value(GLib.Variant("s", default_target))
-        if close_popover is not None:
-            main_button.connect("clicked", lambda _button, current=close_popover: current.popdown())
-
-        profile_popover = Gtk.Popover()
-        profile_popover.set_autohide(True)
-        profile_popover.set_cascade_popdown(True)
-        profile_popover.set_position(Gtk.PositionType.BOTTOM)
-        profile_popover.set_child(self._build_profile_menu_content(definition, close_popover))
-
-        menu_button = Gtk.MenuButton(icon_name="pan-down-symbolic")
-        menu_button.set_tooltip_text(f"Choose a profile for {definition.title}.")
-        menu_button.set_popover(profile_popover)
-        self._apply_quick_action_button_classes(menu_button, segment_class="quick-action-split-menu")
-
-        container.append(main_button)
-        container.append(menu_button)
-        return container
-
-    def _build_profile_menu_content(
-        self,
-        definition: QuickActionDefinition,
-        close_popover: Gtk.Popover | None = None,
-    ) -> Gtk.Box:
-        content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
-        content.set_margin_top(8)
-        content.set_margin_bottom(8)
-        content.set_margin_start(8)
-        content.set_margin_end(8)
-        for profile in self._model_profiles:
-            button = Gtk.Button(label=profile.display_name())
-            self._apply_quick_action_button_classes(button)
-            button.add_css_class("quick-action-profile-button")
-            button.set_hexpand(True)
-            button.set_halign(Gtk.Align.FILL)
-            button.set_action_name(f"app.{definition.action_name}")
-            button.set_action_target_value(GLib.Variant("s", profile.display_name()))
-            if close_popover is not None:
-                button.connect("clicked", lambda _button, current=close_popover: current.popdown())
-            content.append(button)
-        return content
+        widget.add_css_class("transform-pill")
+        widget.add_css_class("transform-pill-compact")
 
     def _build_quick_action_widget(
         self,
@@ -2212,16 +2218,10 @@ class ProseWindow(Adw.ApplicationWindow):
         label: str | None = None,
         close_popover: Gtk.Popover | None = None,
     ) -> Gtk.Widget:
-        if not definition.supports_profiles:
-            return self._build_quick_action_button(
-                definition,
-                label=label,
-                on_clicked=(lambda _button, current=close_popover: current.popdown()) if close_popover else None,
-            )
-        return self._build_quick_action_split_widget(
+        return self._build_quick_action_button(
             definition,
             label=label,
-            close_popover=close_popover,
+            on_clicked=(lambda _button, current=close_popover: current.popdown()) if close_popover else None,
         )
 
     def _build_more_actions_button(
@@ -2320,43 +2320,18 @@ class ProseWindow(Adw.ApplicationWindow):
   background-color: @card_bg_color;
   color: @view_fg_color;
 }}
-button.transform-pill {{
+button.transform-pill,
+menubutton.transform-pill > button {{
   border-radius: {SPELLING_OUTPUT_CORNER_RADIUS_PX}px;
   padding-left: 14px;
   padding-right: 14px;
 }}
-button.transform-pill-compact {{
+button.transform-pill-compact,
+menubutton.transform-pill-compact > button {{
   padding-left: 10px;
   padding-right: 10px;
   min-height: 28px;
   font-size: 0.85rem;
-}}
-button.quick-action-button,
-menubutton.quick-action-button > button {{
-  border-radius: {SPELLING_OUTPUT_CORNER_RADIUS_PX}px;
-  padding-left: 14px;
-  padding-right: 14px;
-}}
-button.quick-action-button.quick-action-button-compact,
-menubutton.quick-action-button.quick-action-button-compact > button {{
-  padding-left: 10px;
-  padding-right: 10px;
-  min-height: 28px;
-  font-size: 0.85rem;
-}}
-button.quick-action-split-main {{
-  border-top-right-radius: 0;
-  border-bottom-right-radius: 0;
-  padding-right: 8px;
-}}
-menubutton.quick-action-split-menu > button {{
-  border-top-left-radius: 0;
-  border-bottom-left-radius: 0;
-  padding-left: 8px;
-  padding-right: 8px;
-}}
-button.quick-action-profile-button {{
-  border-radius: {SPELLING_OUTPUT_CORNER_RADIUS_PX}px;
 }}
 button.improve-profile-chip {{
   min-height: 24px;
@@ -2811,7 +2786,7 @@ button.improve-profile-chip {{
         save_libreoffice_python_path(self._libreoffice_python_path)
         save_concordance_file_path(self._concordance_file_path)
         self._rebuild_transform_action_buttons()
-        self._rebuild_improve_profile_chips()
+        self._rebuild_regenerate_profile_chips()
         _import_uno_from_candidates(self._libreoffice_python_path, force_retry=True)
         self._ctx = None
         self._desktop = None
@@ -3230,9 +3205,112 @@ button.improve-profile-chip {{
         if not self._prepare_improve_insertion(doc):
             self._show_toast("Unable to prepare Improve Generated insertion point.")
             return
+        self._set_pending_regenerate_context("improve-generated", source_text)
+        self._set_spelling_output_text(source_text)
         self._set_busy(True)
         self._status_label.set_label(f"Improving generated text with {profile.display_name()}…")
         thread = threading.Thread(target=self._run_improve, args=(source_text, profile), daemon=True)
+        thread.start()
+
+    def _prepare_editor_regenerate_insertion(self, doc: XTextDocument) -> bool:  # type: ignore[type-arg]
+        if not self._editor_insert_end or self._last_insert_len <= 0:
+            return False
+        try:
+            text = self._get_text_container(doc, self._editor_insert_end)
+            if not text:
+                return False
+            range_cursor = text.createTextCursorByRange(self._editor_insert_end)
+            if not range_cursor.goLeft(self._last_insert_len, True):
+                return False
+            try:
+                range_cursor.setString("")
+            except Exception:
+                pass
+            self._editor_insert_cursor = text.createTextCursorByRange(range_cursor)
+            self._editor_insert_doc = doc
+            self._editor_insert_end = None
+            self._last_insert_len = 0
+            self._editor_pending_newlines = 0
+            return True
+        except Exception:
+            return False
+
+    def _prepare_regenerate_output_state(self, context: RegenerateContext) -> None:
+        if context.action_key in REGENERATE_SOURCE_BUFFER_ACTION_KEYS:
+            self._set_spelling_output_text(context.source_text)
+        else:
+            self._set_spelling_output_text("")
+
+    def _prepare_regenerate_insertion(self, doc: XTextDocument, context: RegenerateContext) -> bool:  # type: ignore[type-arg]
+        if not self._select_spellingstyle_range(doc):
+            return False
+        if context.insert_mode == "editor":
+            return self._prepare_editor_regenerate_insertion(doc)
+        if context.insert_mode == "improve":
+            return self._prepare_improve_insertion(doc)
+        return False
+
+    def _run_regenerate_command(self, context: RegenerateContext, profile: ModelProfile) -> None:
+        action_key = context.action_key
+        source_text = context.source_text
+        if action_key == "improve-generated":
+            self._run_improve(source_text, profile)
+            return
+        if action_key == "improve-selected":
+            self._run_improve_selected(source_text, profile)
+            return
+        if action_key == "shorten":
+            self._run_shorten(source_text, profile)
+            return
+        if action_key == "topic-sentence":
+            self._run_topic_sentence(source_text, profile)
+            return
+        if action_key == "intro":
+            self._run_introduction(source_text, profile)
+            return
+        if action_key == "intro-reply":
+            self._run_introduction_reply(source_text, profile)
+            return
+        if action_key == "conclusion":
+            self._run_conclusion(source_text, profile)
+            return
+        if action_key == "concl-no-issues":
+            self._run_conclusion_no_issues(source_text, profile)
+            return
+        if action_key == "concl-section":
+            self._run_concl_section(source_text, profile)
+            return
+        GLib.idle_add(self._on_spellingstyle_failed, f'Unsupported regenerate action "{action_key}".')
+
+    def _on_regenerate_clicked(self, _button: Gtk.Button | None, profile_nickname: str | None = None) -> None:
+        if self._busy:
+            return
+        context = self._last_regenerate_context
+        if context is None:
+            self._show_toast("Run a supported text-generation command first.")
+            return
+        profile = self._resolve_profile_for_action(context.action_key, profile_nickname)
+        if profile is None:
+            return
+        if not profile.is_configured():
+            self._show_toast(f'Configure the "{profile.display_name()}" model profile in Settings first.')
+            return
+        desktop = self._get_desktop()
+        if not desktop:
+            self._show_toast("Unable to reach LibreOffice listener. Is the service running?")
+            return
+        doc = self._get_active_writer(desktop)
+        if not doc:
+            self._show_toast("Open a Writer document (File → Launch Writer).")
+            return
+        if not self._prepare_regenerate_insertion(doc, context):
+            self._show_toast("Unable to replace the last generated output.")
+            return
+        self._set_pending_regenerate_context(context.action_key, context.source_text)
+        self._prepare_regenerate_output_state(context)
+        self._set_busy(True)
+        self._status_label.set_label(f"Regenerating {context.command_title.lower()} with {profile.display_name()}…")
+        thread = threading.Thread(target=self._run_regenerate_command, args=(context, profile), daemon=True)
         thread.start()
 
     def _on_improve_selected_clicked(self, _button: Gtk.Button | None, profile_nickname: str | None = None) -> None:
@@ -3261,6 +3339,7 @@ button.improve-profile-chip {{
         if not self._prepare_selection_insertion(doc, view_cursor):
             self._show_toast("Unable to prepare selected text replacement.")
             return
+        self._set_pending_regenerate_context("improve-selected", source_text)
         self._set_busy(True)
         self._status_label.set_label(f"Improving selected text with {profile.display_name()}…")
         thread = threading.Thread(target=self._run_improve_selected, args=(source_text, profile), daemon=True)
@@ -3409,6 +3488,7 @@ button.improve-profile-chip {{
         if not self._prepare_selection_insertion(doc, view_cursor):
             self._show_toast("Unable to prepare selected text replacement.")
             return
+        self._set_pending_regenerate_context("shorten", source_text)
         self._set_busy(True)
         self._status_label.set_label(f"Shortening selection with {profile.display_name()}…")
         thread = threading.Thread(target=self._run_shorten, args=(source_text, profile), daemon=True)
@@ -3537,6 +3617,7 @@ button.improve-profile-chip {{
             self._show_toast("Unable to prepare Writer insertion point.")
             return
         self._set_spelling_output_text("")
+        self._set_pending_regenerate_context("topic-sentence", source_text)
         self._set_busy(True)
         self._status_label.set_label(f"Creating topic sentence with {profile.display_name()}…")
         thread = threading.Thread(target=self._run_topic_sentence, args=(source_text, profile), daemon=True)
@@ -3567,6 +3648,7 @@ button.improve-profile-chip {{
             self._show_toast("Unable to prepare Writer insertion point.")
             return
         self._set_spelling_output_text("")
+        self._set_pending_regenerate_context("intro", source_text)
         self._set_busy(True)
         self._status_label.set_label(f"Writing introduction with {profile.display_name()}…")
         thread = threading.Thread(target=self._run_introduction, args=(source_text, profile), daemon=True)
@@ -3597,6 +3679,7 @@ button.improve-profile-chip {{
             self._show_toast("Unable to prepare Writer insertion point.")
             return
         self._set_spelling_output_text("")
+        self._set_pending_regenerate_context("intro-reply", source_text)
         self._set_busy(True)
         self._status_label.set_label(f"Writing introduction for reply with {profile.display_name()}…")
         thread = threading.Thread(target=self._run_introduction_reply, args=(source_text, profile), daemon=True)
@@ -3627,6 +3710,7 @@ button.improve-profile-chip {{
             self._show_toast("Unable to prepare Writer insertion point.")
             return
         self._set_spelling_output_text("")
+        self._set_pending_regenerate_context("conclusion", source_text)
         self._set_busy(True)
         self._status_label.set_label(f"Writing conclusion with {profile.display_name()}…")
         thread = threading.Thread(target=self._run_conclusion, args=(source_text, profile), daemon=True)
@@ -3657,6 +3741,7 @@ button.improve-profile-chip {{
             self._show_toast("Unable to prepare Writer insertion point.")
             return
         self._set_spelling_output_text("")
+        self._set_pending_regenerate_context("concl-no-issues", source_text)
         self._set_busy(True)
         self._status_label.set_label(f"Writing conclusion without issues with {profile.display_name()}…")
         thread = threading.Thread(target=self._run_conclusion_no_issues, args=(source_text, profile), daemon=True)
@@ -3688,6 +3773,7 @@ button.improve-profile-chip {{
             self._show_toast("Unable to prepare Writer insertion point.")
             return
         self._set_spelling_output_text("")
+        self._set_pending_regenerate_context("concl-section", source_text)
         self._set_busy(True)
         self._status_label.set_label(f"Writing section conclusion with {profile.display_name()}…")
         thread = threading.Thread(target=self._run_concl_section, args=(source_text, profile), daemon=True)
@@ -5074,8 +5160,8 @@ button.improve-profile-chip {{
             self._thesaurus_btn.set_sensitive(not busy)
         if hasattr(self, "_reference_btn"):
             self._reference_btn.set_sensitive(not busy)
-        if hasattr(self, "_improve_profile_chip_buttons"):
-            for button in self._improve_profile_chip_buttons:
+        if hasattr(self, "_regenerate_profile_chip_buttons"):
+            for button in self._regenerate_profile_chip_buttons:
                 button.set_sensitive(not busy)
         if hasattr(self, "_transform_action_buttons"):
             for button in self._transform_action_buttons:
@@ -6655,6 +6741,7 @@ button.improve-profile-chip {{
 
     def _on_spellingstyle_failed(self, message: str) -> bool:
         self._set_busy(False)
+        self._clear_pending_regenerate_context()
         if self._editor_insert_doc and self._editor_insert_cursor:
             self._flush_pending_newlines(
                 self._editor_insert_doc,
@@ -6696,6 +6783,7 @@ button.improve-profile-chip {{
                 "_improve_pending_newlines",
             )
             self._ensure_single_trailing_space(self._improve_insert_doc, self._improve_insert_cursor)
+        self._commit_pending_regenerate_context()
         self._capture_improve1_range_end()
         return False
 
@@ -6709,6 +6797,7 @@ button.improve-profile-chip {{
                 "_improve_pending_newlines",
             )
             self._ensure_single_trailing_space(self._improve_insert_doc, self._improve_insert_cursor)
+        self._commit_pending_regenerate_context()
         self._capture_improve1_range_end()
         return False
 
@@ -6723,6 +6812,7 @@ button.improve-profile-chip {{
             )
             self._ensure_single_trailing_space(self._improve_insert_doc, self._improve_insert_cursor)
         self._trim_spelling_output_edges()
+        self._commit_pending_regenerate_context()
         self._capture_improve1_range_end()
         return False
 
@@ -6737,6 +6827,7 @@ button.improve-profile-chip {{
             )
             self._ensure_single_trailing_space(self._editor_insert_doc, self._editor_insert_cursor)
         self._trim_spelling_output_edges()
+        self._commit_pending_regenerate_context()
         self._capture_spellingstyle_range_end()
         return False
 
@@ -6751,6 +6842,7 @@ button.improve-profile-chip {{
             )
             self._ensure_single_trailing_space(self._editor_insert_doc, self._editor_insert_cursor)
         self._trim_spelling_output_edges()
+        self._commit_pending_regenerate_context()
         self._capture_spellingstyle_range_end()
         return False
 
@@ -6765,6 +6857,7 @@ button.improve-profile-chip {{
             )
             self._ensure_single_trailing_space(self._editor_insert_doc, self._editor_insert_cursor)
         self._trim_spelling_output_edges()
+        self._commit_pending_regenerate_context()
         self._capture_spellingstyle_range_end()
         return False
 
@@ -6779,6 +6872,7 @@ button.improve-profile-chip {{
             )
             self._ensure_single_trailing_space(self._editor_insert_doc, self._editor_insert_cursor)
         self._trim_spelling_output_edges()
+        self._commit_pending_regenerate_context()
         self._capture_spellingstyle_range_end()
         return False
 
@@ -6793,6 +6887,7 @@ button.improve-profile-chip {{
             )
             self._ensure_single_trailing_space(self._editor_insert_doc, self._editor_insert_cursor)
         self._trim_spelling_output_edges()
+        self._commit_pending_regenerate_context()
         self._capture_spellingstyle_range_end()
         return False
 
@@ -7386,11 +7481,11 @@ class SettingsWindow(Adw.ApplicationWindow):
             ("thesaurus", "Thesaurus", self._thesaurus_settings, DEFAULT_THESAURUS_PROMPT),
             ("reference", "Reference", self._reference_settings, DEFAULT_REFERENCE_PROMPT),
             ("ask", "Ask Field", self._ask_settings, DEFAULT_ASK_PROMPT),
-            ("improve-generated", "Improve", self._improve1_settings, DEFAULT_IMPROVE_PROMPT),
+            ("improve-generated", "Improve Generated", self._improve1_settings, DEFAULT_IMPROVE_PROMPT),
             ("combine", "Combine Cites", self._combine_cites_settings, DEFAULT_COMBINE_CITES_PROMPT),
-            ("shorten", "Shorten", self._shorten_settings, DEFAULT_SHORTEN_PROMPT),
+            ("shorten", "Shorten Selected", self._shorten_settings, DEFAULT_SHORTEN_PROMPT),
             ("intro", "Introduction", self._introduction_settings, DEFAULT_INTRO_PROMPT),
-            ("intro-reply", "Introduction for Reply", self._introduction_reply_settings, DEFAULT_INTRO_REPLY_PROMPT),
+            ("intro-reply", "Introduction Reply", self._introduction_reply_settings, DEFAULT_INTRO_REPLY_PROMPT),
             ("conclusion", "Conclusion", self._conclusion_settings, DEFAULT_CONCLUSION_PROMPT),
             ("concl-no-issues", "Conclusion No Issues", self._concl_no_issues_settings, DEFAULT_CONCL_NO_ISSUES_PROMPT),
             ("topic-sentence", "Topic Sentence", self._topic_sentence_settings, DEFAULT_TOPIC_SENTENCE_PROMPT),
