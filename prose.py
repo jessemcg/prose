@@ -322,6 +322,11 @@ def _model_looks_deepseek(model_id: str) -> bool:
     return "deepseek" in normalized
 
 
+def _model_looks_minimax(model_id: str) -> bool:
+    normalized = (model_id or "").strip().lower()
+    return "minimax" in normalized
+
+
 def _apply_disable_reasoning_to_body(
     body: dict[str, Any],
     *,
@@ -332,6 +337,8 @@ def _apply_disable_reasoning_to_body(
         return
     if _model_looks_deepseek(model_id) or _model_looks_kimi(model_id):
         body["thinking"] = {"type": "disabled"}
+    elif _model_looks_minimax(model_id):
+        body["reasoning_effort"] = "low"
     else:
         body["reasoning_effort"] = "none"
 
