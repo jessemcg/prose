@@ -40,6 +40,10 @@ APP_NAME = "Prose"
 GLib.set_application_name(APP_NAME)
 
 CONFIG_FILE = Path(__file__).with_name("config.json")
+STYLE_RULES_TOKEN = "{{STYLE_RULES}}"
+STYLE_RULES_HINT_TEXT = (
+    f"Use {STYLE_RULES_TOKEN} to insert the shared style rules from the Style Rules page."
+)
 CONFIG_KEY_PROOFREAD_API_URL = "api_url"
 CONFIG_KEY_PROOFREAD_MODEL_ID = "model_id"
 CONFIG_KEY_PROOFREAD_API_KEY = "api_key"
@@ -134,18 +138,137 @@ CONFIG_KEY_LAST_ODT_FILE = "last_odt_file"
 CONFIG_KEY_LIBREOFFICE_PYTHON_PATH = "libreoffice_python_path"
 CONFIG_KEY_CONCORDANCE_FILE_PATH = "concordance_file_path"
 CONFIG_KEY_EDITOR_PINNED_ACTIONS = "editor_pinned_actions"
+CONFIG_KEY_SHARED_STYLE_RULES = "shared_style_rules"
+
+DEFAULT_SHARED_STYLE_RULES = """## STYLE RULES
+
+Priority rule: if text appears inside quotation marks, preserve it exactly as written. Do not change spelling, punctuation, capitalization, spacing, or characters inside quotation marks, even if another style rule would otherwise apply.
+
+### 1. Tone and formality
+- Use formal legal writing.
+- Do not use contractions.
+- Write "is not," "cannot," and "should not" instead of "isn't," "can't," and "shouldn't."
+
+### 2. Mother / father
+- Capitalize "Mother" or "Father" only when the word begins a sentence.
+- Use lowercase "mother" or "father" when the word appears in the middle of a sentence.
+- Do not insert "the" before "mother" or "father" unless the SOURCE text already includes "the."
+
+Examples:
+"Mother told the juvenile court that father struck her in the face."
+"The juvenile court advised mother and father to be quiet during the hearing."
+
+### 3. Agency / department
+- Refer to the entity as "DCFS," "the agency," or "the department."
+- Capitalize "agency" or "department" only when the word begins a sentence.
+
+### 4. Foster care
+- Always write "foster care" as two words.
+- Do not hyphenate it.
+
+### 5. Parents
+- If the SOURCE text uses "parents," keep "parents."
+
+### 6. Attorney and role titles
+- Write position titles in lowercase.
+- Examples: "children's counsel," "county counsel."
+
+### 7. Dates
+- If the SOURCE text provides a specific calendar date, write it in long-form U.S. style.
+- Example: "June 15, 2023" or "August 25, 2025."
+- Convert numeric dates to long-form U.S. style.
+- Example: "02/24/2024" becomes "February 24, 2024."
+- Do not convert relative or vague time expressions into calendar dates.
+- Preserve terms such as "yesterday," "today," "tomorrow," "last week," "earlier this month," and "mid-April 2025" as written.
+- If a modifier appears before a month, keep the modifier and hyphenate it.
+- Examples: "early-January 2025," "mid-March 2024," "late-May 2022."
+- Never invent, infer, or calculate a date that does not appear in the SOURCE text.
+
+### 8. Kinship terms
+- Use "maternal" for the mother's side of the family.
+- Use "paternal" for the father's side of the family.
+- Do not write phrases such as "mother's mother" or "father's father" when "maternal" or "paternal" would express the relationship.
+
+### 9. Initials in names
+- If a person's or child's name appears as initials, add a period after each letter.
+- Do not add spaces between the letters.
+- "BR" becomes "B.R."
+- "AL" becomes "A.L."
+- "FP" becomes "F.P."
+- "TWT" becomes "T.W.T."
+
+Examples:
+"The juvenile court placed the children, BR and AL, in foster care" becomes "The juvenile court placed the children, B.R. and A.L., in foster care."
+"The children's legal guardian, FP, requested custody of the children" becomes "The children's legal guardian, F.P., requested custody of the children."
+"The parents of the children are TWT and FT" becomes "The parents of the children are T.W.T. and F.T."
+
+### 10. Statutes
+- Write "section" in lowercase.
+- Write subdivision letters and numbers in lowercase inside parentheses.
+
+Examples:
+"The juvenile court sustained the findings under section 300, subdivision (b)(1)."
+"The juvenile court ordered the children removed under section 361, subdivision (c)."
+"Evidence Code section 720 authorizes the juvenile court to appoint an expert."
+
+### 11. Special capitalizations
+- Assume there is one respondent. Write "Respondent's Brief."
+- Treat "Phoenix H." as a case name. Write "Phoenix H. Brief."
+
+### 12. Quotations
+- Preserve quoted content exactly.
+- Do not normalize or replace any character inside quotation marks.
+- Outside quoted SOURCE text, never use straight ASCII quotation marks or apostrophes.
+- Prohibited characters in normal output:
+  - U+0022 (")
+  - U+0027 (')
+- Use only typographic quotation marks and apostrophes in normal output:
+  - U+201C LEFT DOUBLE QUOTATION MARK (“)
+  - U+201D RIGHT DOUBLE QUOTATION MARK (”)
+  - U+2018 LEFT SINGLE QUOTATION MARK (‘)
+  - U+2019 RIGHT SINGLE QUOTATION MARK (’)
+- Possessives must use U+2019.
+- Example: “Jesse’s”
+- If quoted SOURCE text contains ASCII quotation marks or apostrophes, preserve them unchanged inside that quoted material because the preservation rule controls.
+
+### 13. Use of "that"
+- Prefer adding "that" after reporting verbs when the verb introduces a clause.
+- Common examples of reporting verbs include "said," "explained," "reported," "testified," and "believed."
+- Use "that" when it makes the sentence clearer, smoother, or less ambiguous.
+- Example pattern: "Mother reported that father struck her."
+
+### Quick checklist
+Before finalizing, confirm that:
+- there are no contractions;
+- "mother" and "father" follow the capitalization rule;
+- dates are in long-form U.S. style when a specific date is given;
+- initials contain periods with no spaces;
+- statutes use lowercase "section" and lowercase subdivision references;
+- quoted text is unchanged;
+- all quotation marks and apostrophes outside quoted SOURCE text are non-ASCII typographic characters;
+- "that" appears after reporting verbs when needed for clarity;"""
 
 DEFAULT_PROMPT = (
     "You are a meticulous legal proofreader. Improve clarity, fix grammar, and preserve legal meaning. "
-    "Do not shorten or embellish facts. Respond with concrete edits, not generic advice."
+    "Do not shorten or embellish facts. Respond with concrete edits, not generic advice.\n\n"
+    f"{STYLE_RULES_TOKEN}"
 )
 DEFAULT_SPELLINGSTYLE_PROMPT = (
-    "Revise the source text for spelling, grammar, and style. Preserve meaning and facts. "
+    "Revise the source text for spelling, grammar, and style. Preserve meaning and facts.\n\n"
+    f"{STYLE_RULES_TOKEN}\n\n"
     "Return only the revised text."
 )
-DEFAULT_IMPROVE_PROMPT = "Improve the following text for clarity and precision while preserving meaning."
-DEFAULT_IMPROVE1_PROMPT = "Improve the following text for clarity and precision while preserving meaning."
-DEFAULT_IMPROVE2_PROMPT = "Improve the following text for clarity and precision while preserving meaning."
+DEFAULT_IMPROVE_PROMPT = (
+    "Improve the following text for clarity and precision while preserving meaning.\n\n"
+    f"{STYLE_RULES_TOKEN}\n\n"
+    "Return only the improved text."
+)
+DEFAULT_IMPROVE1_PROMPT = DEFAULT_IMPROVE_PROMPT
+DEFAULT_IMPROVE2_PROMPT = (
+    "Rephrase the following text while preserving meaning.\n\n"
+    f"{STYLE_RULES_TOKEN}\n\n"
+    "Return only the rephrased text."
+)
 DEFAULT_COMBINE_CITES_PROMPT = ""
 DEFAULT_THESAURUS_PROMPT = (
     "Return JSON only with an 'alternatives' array of synonyms or short phrases for the selected text. "
@@ -174,29 +297,39 @@ DEFAULT_ASK_PROMPT = (
     "Do not use markdown formatting."
 )
 DEFAULT_SHORTEN_PROMPT = (
-    "Shorten the selected text by removing unnecessary facts while preserving meaning. "
+    "Shorten the selected text by removing unnecessary facts while preserving meaning.\n\n"
+    f"{STYLE_RULES_TOKEN}\n\n"
     "Return only the shortened text."
 )
 DEFAULT_INTRO_PROMPT = (
-    "Write a concise introduction for the brief based on the provided argument section. "
+    "Write a concise introduction for the brief based on the provided argument section.\n\n"
+    f"{STYLE_RULES_TOKEN}\n\n"
     "Return only the introduction."
 )
-DEFAULT_INTRO_REPLY_PROMPT = DEFAULT_INTRO_PROMPT
+DEFAULT_INTRO_REPLY_PROMPT = (
+    "Write a concise introduction for the reply brief based on the provided argument section.\n\n"
+    f"{STYLE_RULES_TOKEN}\n\n"
+    "Return only the introduction."
+)
 DEFAULT_CONCLUSION_PROMPT = (
-    "Write a conclusion for the brief based on the provided argument section. "
+    "Write a conclusion for the brief based on the provided argument section.\n\n"
+    f"{STYLE_RULES_TOKEN}\n\n"
     "Return only the conclusion."
 )
 DEFAULT_CONCL_NO_ISSUES_PROMPT = (
-    "Write a conclusion for the brief based on the provided issues-considered section. "
+    "Write a conclusion for the brief based on the provided issues-considered section.\n\n"
+    f"{STYLE_RULES_TOKEN}\n\n"
     "Return only the conclusion."
 )
 DEFAULT_TOPIC_SENTENCE_PROMPT = (
-    "Write a concise topic sentence that captures the central meaning of the paragraph. "
+    "Write a concise topic sentence that captures the central meaning of the paragraph.\n\n"
+    f"{STYLE_RULES_TOKEN}\n\n"
     "Return only the topic sentence."
 )
 
 DEFAULT_CONCL_SECTION_PROMPT = (
-    "Write a concise conclusion for the provided section. "
+    "Write a concise conclusion for the provided section.\n\n"
+    f"{STYLE_RULES_TOKEN}\n\n"
     "Return only the conclusion."
 )
 DEFAULT_TRANSLATE_PROMPT = (
@@ -217,6 +350,7 @@ DEFAULT_MODEL_PROFILE_NICKNAMES = {
 }
 PROFILE_BACKED_COMMAND_TITLES = {
     "improve-generated": "Improve Generated",
+    "rephrase-generated": "Rephrase Generated",
     "improve-selected": "Improve Selected",
     "combine": "Combine Cites",
     "thesaurus": "Thesaurus",
@@ -232,6 +366,7 @@ PROFILE_BACKED_COMMAND_TITLES = {
 PROFILE_BACKED_COMMAND_KEYS = tuple(PROFILE_BACKED_COMMAND_TITLES.keys())
 REGENERATE_INSERT_MODE_BY_ACTION = {
     "improve-generated": "improve",
+    "rephrase-generated": "improve",
     "improve-selected": "improve",
     "shorten": "improve",
     "topic-sentence": "editor",
@@ -241,7 +376,7 @@ REGENERATE_INSERT_MODE_BY_ACTION = {
     "concl-no-issues": "editor",
     "concl-section": "editor",
 }
-REGENERATE_SOURCE_BUFFER_ACTION_KEYS = frozenset({"improve-generated", "improve-selected"})
+REGENERATE_SOURCE_BUFFER_ACTION_KEYS = frozenset({"improve-generated", "rephrase-generated", "improve-selected"})
 CITATION_NUMBER_WORDS = {
     "zero": "0",
     "one": "1",
@@ -379,6 +514,111 @@ def _write_config(data: dict[str, Any]) -> None:
         CONFIG_FILE.write_text(json.dumps(data, indent=2), encoding="utf-8")
     except OSError:
         pass
+
+
+def load_shared_style_rules() -> str:
+    raw = _read_config()
+    if CONFIG_KEY_SHARED_STYLE_RULES in raw:
+        return str(raw.get(CONFIG_KEY_SHARED_STYLE_RULES, "") or "").strip()
+    return DEFAULT_SHARED_STYLE_RULES
+
+
+def save_shared_style_rules(shared_style_rules: str) -> None:
+    data = _read_config()
+    data[CONFIG_KEY_SHARED_STYLE_RULES] = str(shared_style_rules or "").strip()
+    _write_config(data)
+
+
+def _expand_shared_prompt_parts(prompt_text: str) -> str:
+    text = str(prompt_text or "").strip()
+    if not text or STYLE_RULES_TOKEN not in text:
+        return text
+    expanded = text.replace(STYLE_RULES_TOKEN, load_shared_style_rules())
+    return re.sub(r"\n{3,}", "\n\n", expanded).strip()
+
+
+def _replace_prompt_block_with_style_token(prompt_text: str, start_marker: str, end_marker: str) -> str:
+    text = str(prompt_text or "").strip()
+    if not text or STYLE_RULES_TOKEN in text:
+        return text
+    start = text.find(start_marker)
+    end = text.find(end_marker)
+    if start < 0 or end <= start:
+        return text
+    prefix = text[:start].rstrip()
+    suffix = text[end:].lstrip("\n")
+    return "\n\n".join(part for part in (prefix, STYLE_RULES_TOKEN, suffix) if part).strip()
+
+
+def _insert_style_rules_token_before_marker(prompt_text: str, marker: str) -> str:
+    text = str(prompt_text or "").strip()
+    if not text or STYLE_RULES_TOKEN in text:
+        return text
+    marker_index = text.find(marker)
+    if marker_index < 0:
+        return text
+    prefix = text[:marker_index].rstrip()
+    suffix = text[marker_index:].lstrip("\n")
+    return "\n\n".join(part for part in (prefix, STYLE_RULES_TOKEN, suffix) if part).strip()
+
+
+def _migrate_shared_style_rules_prompts() -> None:
+    data = _read_config()
+    if not data:
+        return
+
+    changed = False
+    if CONFIG_KEY_SHARED_STYLE_RULES not in data:
+        data[CONFIG_KEY_SHARED_STYLE_RULES] = DEFAULT_SHARED_STYLE_RULES
+        changed = True
+
+    replacements: dict[str, tuple[str, str]] = {
+        CONFIG_KEY_PROOFREAD_PROMPT: ("## STYLE RULES", "## SOURCE text"),
+        CONFIG_KEY_SPELLING_PROMPT: ("## STYLE RULES", "## OUTPUT"),
+        CONFIG_KEY_IMPROVE1_PROMPT: ("## STYLE RULES", "## OUTPUT"),
+    }
+    insertions: dict[str, str] = {
+        CONFIG_KEY_IMPROVE2_PROMPT: "## RULES",
+        CONFIG_KEY_SHORTEN_PROMPT: "## RULES",
+        CONFIG_KEY_INTRO_PROMPT: "Below are ten sample",
+        CONFIG_KEY_INTRO_REPLY_PROMPT: "Below are ten sample",
+        CONFIG_KEY_CONCLUSION_PROMPT: "Below are ten sample",
+        CONFIG_KEY_CONCL_NO_ISSUES_PROMPT: "Below are ten sample",
+        CONFIG_KEY_TOPIC_SENTENCE_PROMPT: "## RULES",
+        CONFIG_KEY_CONCL_SECTION_PROMPT: "## RULES",
+    }
+
+    for key, (start_marker, end_marker) in replacements.items():
+        prompt = data.get(key)
+        if not isinstance(prompt, str) or not prompt.strip():
+            continue
+        updated = _replace_prompt_block_with_style_token(prompt, start_marker, end_marker)
+        if updated != prompt:
+            data[key] = updated
+            changed = True
+
+    for key, marker in insertions.items():
+        prompt = data.get(key)
+        if not isinstance(prompt, str) or not prompt.strip():
+            continue
+        updated = _insert_style_rules_token_before_marker(prompt, marker)
+        if updated != prompt:
+            data[key] = updated
+            changed = True
+
+    improve2_prompt = str(data.get(CONFIG_KEY_IMPROVE2_PROMPT, "") or "").strip()
+    if (
+        not improve2_prompt
+        or improve2_prompt == DEFAULT_IMPROVE_PROMPT
+        or "Rewrite the SOURCE text to be more clear, concise, and easier to read without changing its meaning." in improve2_prompt
+        or "Rewrite the SOURCE text to be more clear, more concise, and easier to read without changing its meaning." in improve2_prompt
+        or improve2_prompt.startswith("Improve the following text for clarity and precision while preserving meaning.")
+    ) and improve2_prompt != DEFAULT_IMPROVE2_PROMPT:
+        data[CONFIG_KEY_IMPROVE2_PROMPT] = DEFAULT_IMPROVE2_PROMPT
+        changed = True
+
+    if changed:
+        _write_config(data)
 
 
 def _normal_libreoffice_profile_path() -> Path:
@@ -902,6 +1142,14 @@ EDITOR_QUICK_ACTIONS = (
         supports_profiles=True,
     ),
     QuickActionDefinition(
+        key="rephrase-generated",
+        label="Rephrase Generated",
+        title="Rephrase Generated",
+        action_name="rephrase-generated",
+        description="Rephrase the latest SpellingStyle output using the selected model profile.",
+        supports_profiles=True,
+    ),
+    QuickActionDefinition(
         key="improve-selected",
         label="Improve Selected",
         title="Improve Selected",
@@ -1225,6 +1473,8 @@ def load_editor_action_profile_defaults(
             matched_profile_key = _match_profile_key_for_settings(settings_by_key.get(key), profiles)
             if matched_profile_key is not None:
                 defaults[key] = matched_profile_key
+    if defaults.get("rephrase-generated") is None and defaults.get("improve-generated") is not None:
+        defaults["rephrase-generated"] = defaults["improve-generated"]
     return defaults
 
 
@@ -1747,8 +1997,10 @@ class ProseApp(Adw.Application):
 class ProseWindow(Adw.ApplicationWindow):
     def __init__(self, app: ProseApp) -> None:
         super().__init__(application=app, title=APP_NAME, default_width=920, default_height=680)
+        _migrate_shared_style_rules_prompts()
         self._libreoffice_python_path = load_libreoffice_python_path()
         _import_uno_from_candidates(self._libreoffice_python_path)
+        self._shared_style_rules = load_shared_style_rules()
         self._proof_settings = load_proofread_settings()
         self._spelling_settings = load_spellingstyle_settings()
         self._improve1_settings = load_improve1_settings()
@@ -1770,6 +2022,7 @@ class ProseWindow(Adw.ApplicationWindow):
             self._model_profiles,
             {
                 "improve-generated": self._improve1_settings,
+                "rephrase-generated": self._improve2_settings,
                 "combine": self._combine_cites_settings,
                 "thesaurus": self._thesaurus_settings,
                 "shorten": self._shorten_settings,
@@ -2625,6 +2878,7 @@ button.improve-profile-chip {{
         _add_action("combine-cites", lambda: self._on_combine_cites_clicked(None))
         _add_action("spellingstyle", lambda: self._on_spellingstyle_clicked(None))
         _add_string_action("improve-generated", lambda nickname: self._on_improve_clicked(None, nickname))
+        _add_string_action("rephrase-generated", lambda nickname: self._on_rephrase_generated_clicked(None, nickname))
         _add_string_action("improve", lambda nickname: self._on_improve_clicked(None, nickname))
         _add_action(
             "improve1",
@@ -2742,6 +2996,7 @@ button.improve-profile-chip {{
             self._topic_sentence_settings,
             self._concl_section_settings,
             self._translate_settings,
+            self._shared_style_rules,
             self._editor_action_profile_defaults,
             self._editor_pinned_action_ids,
             self._libreoffice_python_path,
@@ -2781,6 +3036,7 @@ button.improve-profile-chip {{
         topic_sentence_settings: TopicSentenceSettings,
         concl_section_settings: ConclSectionSettings,
         translate_settings: TranslateSettings,
+        shared_style_rules: str,
         editor_action_profile_defaults: dict[str, str | None],
         editor_pinned_action_ids: list[str],
         libreoffice_python_path: Path | None,
@@ -2803,6 +3059,7 @@ button.improve-profile-chip {{
         self._topic_sentence_settings = topic_sentence_settings
         self._concl_section_settings = concl_section_settings
         self._translate_settings = translate_settings
+        self._shared_style_rules = str(shared_style_rules or "").strip()
         self._editor_action_profile_defaults = _sanitize_editor_action_profile_defaults(editor_action_profile_defaults)
         self._editor_pinned_action_ids = _sanitize_editor_pinned_actions(editor_pinned_action_ids)
         self._libreoffice_python_path = libreoffice_python_path.expanduser().resolve(strict=False) if libreoffice_python_path else None
@@ -2826,6 +3083,7 @@ button.improve-profile-chip {{
         save_topic_sentence_settings(topic_sentence_settings)
         save_concl_section_settings(concl_section_settings)
         save_translate_settings(translate_settings)
+        save_shared_style_rules(self._shared_style_rules)
         save_editor_action_profile_defaults(self._editor_action_profile_defaults)
         save_editor_pinned_actions(self._editor_pinned_action_ids)
         save_libreoffice_python_path(self._libreoffice_python_path)
@@ -3257,6 +3515,40 @@ button.improve-profile-chip {{
         thread = threading.Thread(target=self._run_improve, args=(source_text, profile), daemon=True)
         thread.start()
 
+    def _on_rephrase_generated_clicked(self, _button: Gtk.Button | None, profile_nickname: str | None = None) -> None:
+        if self._busy:
+            return
+        profile = self._resolve_profile_for_action("rephrase-generated", profile_nickname)
+        if profile is None:
+            return
+        if not profile.is_configured():
+            self._show_toast(f'Configure the "{profile.display_name()}" model profile in Settings first.')
+            return
+        source_text = self._get_spelling_output_text().strip()
+        if not source_text:
+            self._show_toast("SpellingStyle output is empty.")
+            return
+        desktop = self._get_desktop()
+        if not desktop:
+            self._show_toast("Unable to reach LibreOffice listener. Is the service running?")
+            return
+        doc = self._get_active_writer(desktop)
+        if not doc:
+            self._show_toast("Open a Writer document (File → Launch Writer).")
+            return
+        if not self._select_spellingstyle_range(doc):
+            self._show_toast("Unable to select the last SpellingStyle range.")
+            return
+        if not self._prepare_improve_insertion(doc):
+            self._show_toast("Unable to prepare Rephrase Generated insertion point.")
+            return
+        self._set_pending_regenerate_context("rephrase-generated", source_text)
+        self._set_spelling_output_text(source_text)
+        self._set_busy(True)
+        self._status_label.set_label(f"Rephrasing generated text with {profile.display_name()}…")
+        thread = threading.Thread(target=self._run_rephrase_generated, args=(source_text, profile), daemon=True)
+        thread.start()
+
     def _prepare_editor_regenerate_insertion(self, doc: XTextDocument) -> bool:  # type: ignore[type-arg]
         if not self._editor_insert_end or self._last_insert_len <= 0:
             return False
@@ -3300,6 +3592,9 @@ button.improve-profile-chip {{
         source_text = context.source_text
         if action_key == "improve-generated":
             self._run_improve(source_text, profile)
+            return
+        if action_key == "rephrase-generated":
+            self._run_rephrase_generated(source_text, profile)
             return
         if action_key == "improve-selected":
             self._run_improve_selected(source_text, profile)
@@ -3835,7 +4130,7 @@ button.improve-profile-chip {{
         GLib.idle_add(self._on_thesaurus_ready, words)
 
     def _compose_thesaurus_payload(self, source_text: str, profile: ModelProfile) -> dict[str, Any]:
-        prompt = self._thesaurus_settings.prompt or DEFAULT_THESAURUS_PROMPT
+        prompt = _expand_shared_prompt_parts(self._thesaurus_settings.prompt or DEFAULT_THESAURUS_PROMPT)
         content = f"{prompt}\n\n{source_text}" if prompt else source_text
         payload = {
             "messages": [
@@ -4135,7 +4430,7 @@ button.improve-profile-chip {{
         prompt_override: str | None,
         search_bundle: TavilySearchBundle,
     ) -> dict[str, Any]:
-        prompt = prompt_override or self._reference_settings.prompt or DEFAULT_REFERENCE_PROMPT
+        prompt = _expand_shared_prompt_parts(prompt_override or self._reference_settings.prompt or DEFAULT_REFERENCE_PROMPT)
         system_prompt = (
             "The app already performed the Tavily search. "
             "Use only the provided search results. "
@@ -4164,7 +4459,7 @@ button.improve-profile-chip {{
         )
 
     def _compose_ask_payload(self, question: str, search_bundle: TavilySearchBundle) -> dict[str, Any]:
-        prompt = self._ask_settings.prompt or DEFAULT_ASK_PROMPT
+        prompt = _expand_shared_prompt_parts(self._ask_settings.prompt or DEFAULT_ASK_PROMPT)
         today = datetime.now().strftime("%B %d, %Y")
         system_prompt = (
             "The app already performed the Tavily search. "
@@ -4734,7 +5029,7 @@ button.improve-profile-chip {{
         GLib.idle_add(self._apply_combined_cites, combined_text)
 
     def _compose_combine_cites_payload(self, cite_text: str, profile: ModelProfile) -> dict[str, Any]:
-        prompt = self._combine_cites_settings.prompt or DEFAULT_COMBINE_CITES_PROMPT
+        prompt = _expand_shared_prompt_parts(self._combine_cites_settings.prompt or DEFAULT_COMBINE_CITES_PROMPT)
         content = f"{prompt}\n\n{cite_text}" if prompt else cite_text
         payload = {
             "messages": [
@@ -5592,7 +5887,7 @@ button.improve-profile-chip {{
         end: int,
         profile: ModelProfile,
     ) -> dict[str, Any]:
-        system_prompt = self._proof_settings.prompt or DEFAULT_PROMPT
+        system_prompt = _expand_shared_prompt_parts(self._proof_settings.prompt or DEFAULT_PROMPT)
         instructions = (
             "Return a JSON array of suggested edits for ONLY the provided Writer page range. "
             "Each item must look like: {"
@@ -5896,6 +6191,16 @@ button.improve-profile-chip {{
             return
         GLib.idle_add(self._on_improve_finished, f"Improve Generated complete with {profile.display_name()}.")
 
+    def _run_rephrase_generated(self, source_text: str, profile: ModelProfile) -> None:
+        payload = self._compose_rephrase_generated_payload(source_text, profile)
+        try:
+            for chunk in self._stream_custom(payload, profile.api_url, profile.api_key, request_title="Rephrase"):
+                GLib.idle_add(self._append_improve1_text, chunk)
+        except Exception as exc:  # noqa: BLE001
+            GLib.idle_add(self._on_spellingstyle_failed, str(exc))
+            return
+        GLib.idle_add(self._on_improve_finished, f"Rephrase Generated complete with {profile.display_name()}.")
+
     def _run_improve_selected(self, source_text: str, profile: ModelProfile) -> None:
         payload = self._compose_improve_payload(source_text, profile)
         try:
@@ -5943,7 +6248,7 @@ button.improve-profile-chip {{
         payload = self._compose_introduction_payload(source_text, profile)
         try:
             if self._is_gemini_generate_content_url(profile.api_url):
-                prompt = self._introduction_settings.prompt or DEFAULT_INTRO_PROMPT
+                prompt = _expand_shared_prompt_parts(self._introduction_settings.prompt or DEFAULT_INTRO_PROMPT)
                 combined = f"{prompt}\n\n{source_text}" if prompt else source_text
                 output = self._call_gemini_generate_content(
                     profile.api_url,
@@ -5971,7 +6276,7 @@ button.improve-profile-chip {{
         payload = self._compose_introduction_reply_payload(source_text, profile)
         try:
             if self._is_gemini_generate_content_url(profile.api_url):
-                prompt = self._introduction_reply_settings.prompt or DEFAULT_INTRO_REPLY_PROMPT
+                prompt = _expand_shared_prompt_parts(self._introduction_reply_settings.prompt or DEFAULT_INTRO_REPLY_PROMPT)
                 combined = f"{prompt}\n\n{source_text}" if prompt else source_text
                 output = self._call_gemini_generate_content(
                     profile.api_url,
@@ -6002,7 +6307,7 @@ button.improve-profile-chip {{
         payload = self._compose_conclusion_payload(source_text, profile)
         try:
             if self._is_gemini_generate_content_url(profile.api_url):
-                prompt = self._conclusion_settings.prompt or DEFAULT_CONCLUSION_PROMPT
+                prompt = _expand_shared_prompt_parts(self._conclusion_settings.prompt or DEFAULT_CONCLUSION_PROMPT)
                 combined = f"{prompt}\n\n{source_text}" if prompt else source_text
                 output = self._call_gemini_generate_content(
                     profile.api_url,
@@ -6030,7 +6335,7 @@ button.improve-profile-chip {{
         payload = self._compose_conclusion_no_issues_payload(source_text, profile)
         try:
             if self._is_gemini_generate_content_url(profile.api_url):
-                prompt = self._concl_no_issues_settings.prompt or DEFAULT_CONCL_NO_ISSUES_PROMPT
+                prompt = _expand_shared_prompt_parts(self._concl_no_issues_settings.prompt or DEFAULT_CONCL_NO_ISSUES_PROMPT)
                 combined = f"{prompt}\n\n{source_text}" if prompt else source_text
                 output = self._call_gemini_generate_content(
                     profile.api_url,
@@ -6491,7 +6796,7 @@ button.improve-profile-chip {{
         return self._parse_translation_batch(raw_output, {index for index, _text, _cursor in batch})
 
     def _build_translate_instructions(self, strict: bool, expect_json: bool = True) -> str:
-        prompt = self._translate_settings.prompt or DEFAULT_TRANSLATE_PROMPT
+        prompt = _expand_shared_prompt_parts(self._translate_settings.prompt or DEFAULT_TRANSLATE_PROMPT)
         if expect_json:
             base = (
                 f"{prompt}\n\n"
@@ -6628,7 +6933,7 @@ button.improve-profile-chip {{
         return translated
 
     def _compose_spellingstyle_payload(self, source_text: str) -> dict[str, Any]:
-        system_prompt = self._spelling_settings.prompt or DEFAULT_SPELLINGSTYLE_PROMPT
+        system_prompt = _expand_shared_prompt_parts(self._spelling_settings.prompt or DEFAULT_SPELLINGSTYLE_PROMPT)
         payload = {
             "messages": [
                 {"role": "system", "content": system_prompt},
@@ -6650,6 +6955,14 @@ button.improve-profile-chip {{
             profile,
         )
 
+    def _compose_rephrase_generated_payload(self, source_text: str, profile: ModelProfile) -> dict[str, Any]:
+        return self._compose_profile_prompt_payload(
+            source_text,
+            self._improve2_settings.prompt,
+            DEFAULT_IMPROVE2_PROMPT,
+            profile,
+        )
+
     def _compose_profile_prompt_payload(
         self,
         source_text: str,
@@ -6657,7 +6970,7 @@ button.improve-profile-chip {{
         default_prompt: str,
         profile: ModelProfile,
     ) -> dict[str, Any]:
-        system_prompt = prompt_text or default_prompt
+        system_prompt = _expand_shared_prompt_parts(prompt_text or default_prompt)
         payload = {
             "messages": [
                 {"role": "system", "content": system_prompt},
@@ -7519,6 +7832,7 @@ class SettingsWindow(Adw.ApplicationWindow):
         topic_sentence_settings: TopicSentenceSettings,
         concl_section_settings: ConclSectionSettings,
         translate_settings: TranslateSettings,
+        shared_style_rules: str,
         editor_action_profile_defaults: dict[str, str | None],
         editor_pinned_action_ids: list[str],
         libreoffice_python_path: Path | None,
@@ -7545,6 +7859,7 @@ class SettingsWindow(Adw.ApplicationWindow):
                 TopicSentenceSettings,
                 ConclSectionSettings,
                 TranslateSettings,
+                str,
                 dict[str, str | None],
                 list[str],
                 Path | None,
@@ -7575,6 +7890,7 @@ class SettingsWindow(Adw.ApplicationWindow):
         self._topic_sentence_settings = topic_sentence_settings
         self._concl_section_settings = concl_section_settings
         self._translate_settings = translate_settings
+        self._shared_style_rules_text = str(shared_style_rules or "").strip()
         self._editor_action_profile_defaults = _sanitize_editor_action_profile_defaults(editor_action_profile_defaults)
         self._editor_action_order = _ordered_editor_quick_action_keys(editor_pinned_action_ids)
         pinned_action_set = set(_sanitize_editor_pinned_actions(editor_pinned_action_ids))
@@ -7585,6 +7901,7 @@ class SettingsWindow(Adw.ApplicationWindow):
         self._libreoffice_python_path = libreoffice_python_path
         self._concordance_file_path = concordance_file_path
         self._editor_source_file = editor_source_file
+        self._shared_style_rules_buffer: Gtk.TextBuffer | None = None
         self._model_profile_editors: dict[str, ModelProfileEditorWidgets] = {}
         self._prompt_editors: dict[str, PromptEditorWidgets] = {}
         self._prompt_row_keys: dict[Gtk.ListBoxRow, str] = {}
@@ -7699,6 +8016,18 @@ class SettingsWindow(Adw.ApplicationWindow):
         prompt_stack.add_named(self._build_model_profiles_page(), "model-profiles")
         first_row = profiles_row
 
+        style_rules_row = Gtk.ListBoxRow()
+        style_rules_row_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        style_rules_row_box.set_margin_top(8)
+        style_rules_row_box.set_margin_bottom(8)
+        style_rules_row_box.set_margin_start(12)
+        style_rules_row_box.set_margin_end(12)
+        style_rules_row_box.append(Gtk.Label(label="Style Rules", xalign=0))
+        style_rules_row.set_child(style_rules_row_box)
+        prompt_list.append(style_rules_row)
+        self._prompt_row_keys[style_rules_row] = "style-rules"
+        prompt_stack.add_named(self._build_style_rules_page(), "style-rules")
+
         prompt_definitions = [
             ("proof", "Proof Reading", self._proof_settings, DEFAULT_PROMPT),
             ("spelling", "SpellingStyle", self._spelling_settings, DEFAULT_SPELLINGSTYLE_PROMPT),
@@ -7706,6 +8035,7 @@ class SettingsWindow(Adw.ApplicationWindow):
             ("reference", "Reference", self._reference_settings, DEFAULT_REFERENCE_PROMPT),
             ("ask", "Ask Field", self._ask_settings, DEFAULT_ASK_PROMPT),
             ("improve-generated", "Improve Generated", self._improve1_settings, DEFAULT_IMPROVE_PROMPT),
+            ("rephrase-generated", "Rephrase Generated", self._improve2_settings, DEFAULT_IMPROVE2_PROMPT),
             ("combine", "Combine Cites", self._combine_cites_settings, DEFAULT_COMBINE_CITES_PROMPT),
             ("shorten", "Shorten Selected", self._shorten_settings, DEFAULT_SHORTEN_PROMPT),
             ("intro", "Introduction", self._introduction_settings, DEFAULT_INTRO_PROMPT),
@@ -8330,6 +8660,7 @@ class SettingsWindow(Adw.ApplicationWindow):
         reference_widgets = self._prompt_editors.get("reference")
         ask_widgets = self._prompt_editors.get("ask")
         improve_widgets = self._prompt_editors.get("improve-generated")
+        rephrase_widgets = self._prompt_editors.get("rephrase-generated")
         combine_widgets = self._prompt_editors.get("combine")
         shorten_widgets = self._prompt_editors.get("shorten")
         intro_widgets = self._prompt_editors.get("intro")
@@ -8347,6 +8678,7 @@ class SettingsWindow(Adw.ApplicationWindow):
                 reference_widgets,
                 ask_widgets,
                 improve_widgets,
+                rephrase_widgets,
                 combine_widgets,
                 shorten_widgets,
                 intro_widgets,
@@ -8366,6 +8698,7 @@ class SettingsWindow(Adw.ApplicationWindow):
         reference_prompt_text = self._prompt_text(reference_widgets.prompt_buffer)
         ask_prompt_text = self._prompt_text(ask_widgets.prompt_buffer)
         improve_prompt_text = self._prompt_text(improve_widgets.prompt_buffer)
+        rephrase_prompt_text = self._prompt_text(rephrase_widgets.prompt_buffer)
         combine_prompt_text = self._prompt_text(combine_widgets.prompt_buffer)
         shorten_prompt_text = self._prompt_text(shorten_widgets.prompt_buffer)
         intro_prompt_text = self._prompt_text(intro_widgets.prompt_buffer)
@@ -8375,6 +8708,11 @@ class SettingsWindow(Adw.ApplicationWindow):
         topic_sentence_prompt_text = self._prompt_text(topic_sentence_widgets.prompt_buffer)
         concl_section_prompt_text = self._prompt_text(concl_section_widgets.prompt_buffer)
         translate_prompt_text = self._prompt_text(translate_widgets.prompt_buffer)
+        shared_style_rules_text = (
+            self._prompt_text(self._shared_style_rules_buffer)
+            if self._shared_style_rules_buffer is not None
+            else self._shared_style_rules_text
+        )
         proof_settings = ProofreadSettings(
             api_url=proof_widgets.api_url_row.get_text().strip(),
             model_id=proof_widgets.model_row.get_text().strip(),
@@ -8418,6 +8756,13 @@ class SettingsWindow(Adw.ApplicationWindow):
             api_key=improve_widgets.api_key_row.get_text().strip(),
             prompt=improve_prompt_text.strip() or DEFAULT_IMPROVE_PROMPT,
             disable_reasoning=improve_widgets.disable_reasoning_row.get_active(),
+        )
+        improve2_settings = Improve2Settings(
+            api_url=rephrase_widgets.api_url_row.get_text().strip(),
+            model_id=rephrase_widgets.model_row.get_text().strip(),
+            api_key=rephrase_widgets.api_key_row.get_text().strip(),
+            prompt=rephrase_prompt_text.strip() or DEFAULT_IMPROVE2_PROMPT,
+            disable_reasoning=rephrase_widgets.disable_reasoning_row.get_active(),
         )
         combine_cites_settings = CombineCitesSettings(
             api_url=combine_widgets.api_url_row.get_text().strip(),
@@ -8505,7 +8850,7 @@ class SettingsWindow(Adw.ApplicationWindow):
             proof_settings,
             spelling_settings,
             improve1_settings,
-            self._improve2_settings,
+            improve2_settings,
             combine_cites_settings,
             thesaurus_settings,
             reference_settings,
@@ -8518,6 +8863,7 @@ class SettingsWindow(Adw.ApplicationWindow):
             topic_sentence_settings,
             concl_section_settings,
             translate_settings,
+            shared_style_rules_text,
             editor_action_profile_defaults,
             editor_pinned_action_ids,
             self._libreoffice_python_path,
@@ -8531,6 +8877,49 @@ class SettingsWindow(Adw.ApplicationWindow):
         key = self._prompt_row_keys.get(row)
         if key:
             self._prompt_stack.set_visible_child_name(key)
+
+    def _build_style_rules_page(self) -> Gtk.Widget:
+        page_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+        page_box.set_margin_top(12)
+        page_box.set_margin_bottom(12)
+        page_box.set_margin_start(12)
+        page_box.set_margin_end(12)
+        page_box.set_vexpand(True)
+
+        title_label = Gtk.Label(label="Style Rules", xalign=0)
+        title_label.add_css_class("title-3")
+        page_box.append(title_label)
+
+        subtitle = Gtk.Label(
+            label=(
+                f"These rules are inserted anywhere a prompt contains {STYLE_RULES_TOKEN}. "
+                "Edit them here to change all token-based prompts at once."
+            ),
+            xalign=0,
+        )
+        subtitle.add_css_class("caption")
+        subtitle.add_css_class("dim-label")
+        subtitle.set_wrap(True)
+        subtitle.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
+        page_box.append(subtitle)
+
+        prompt_section = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        prompt_section.set_hexpand(True)
+        prompt_section.set_vexpand(True)
+        prompt_label = Gtk.Label(label="Shared Rules", xalign=0)
+        prompt_label.add_css_class("dim-label")
+        prompt_section.append(prompt_label)
+        prompt_scroller, buffer = self._build_prompt_editor(self._shared_style_rules_text or DEFAULT_SHARED_STYLE_RULES)
+        self._shared_style_rules_buffer = buffer
+        prompt_section.append(prompt_scroller)
+        page_box.append(prompt_section)
+
+        page = Gtk.ScrolledWindow()
+        page.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        page.set_hexpand(True)
+        page.set_vexpand(True)
+        page.set_child(page_box)
+        return page
 
     def _build_prompt_page(
         self,
@@ -8659,6 +9048,12 @@ class SettingsWindow(Adw.ApplicationWindow):
         prompt_label = Gtk.Label(label="Prompt", xalign=0)
         prompt_label.add_css_class("dim-label")
         prompt_section.append(prompt_label)
+        prompt_hint = Gtk.Label(label=STYLE_RULES_HINT_TEXT, xalign=0)
+        prompt_hint.add_css_class("caption")
+        prompt_hint.add_css_class("dim-label")
+        prompt_hint.set_wrap(True)
+        prompt_hint.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
+        prompt_section.append(prompt_hint)
         prompt_scroller, buffer = self._build_prompt_editor(settings.prompt or default_prompt)
         prompt_section.append(prompt_scroller)
         page_box.append(prompt_section)
