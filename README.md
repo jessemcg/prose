@@ -70,6 +70,7 @@ This keeps Prose's Writer session isolated from your ordinary day-to-day LibreOf
 - LibreOffice Writer installed as a normal `.deb` or `.rpm`
 - LibreOffice Python UNO bridge files available locally
 - network/API access for whichever LLM provider you configure
+- Tavily CLI installed locally for `Reference` and `Ask Field`
 
 ## Repository Layout
 
@@ -140,6 +141,14 @@ Open Settings and enter the API information for the tools you want to use. Each 
 - prompt text
 - Tavily API key for reference-oriented tools
 
+`Reference` and `Ask Field` now use local Tavily CLI retrieval instead of provider-side MCP. Install the CLI once with:
+
+```bash
+uv tool install tavily-cli
+```
+
+Prose passes the Tavily API key from Settings to the CLI through `TAVILY_API_KEY`, so you do not need to run `tvly login` separately.
+
 ## LibreOffice Integration Details
 
 Prose connects to LibreOffice through a local UNO socket at:
@@ -184,6 +193,8 @@ Available actions include:
 - `Combine Cites`
 
 Some actions operate on the current Writer document or selection. Others use the configured external source text file.
+
+`Reference` and `Ask Field` first run a local `tvly search --json` command and then send those search results to the configured model endpoint. This makes them work with standard OpenAI-compatible `/chat/completions` and `/responses` endpoints, including Fireworks-hosted models.
 
 ### Add Case
 

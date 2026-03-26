@@ -13,6 +13,7 @@ import sys
 import threading
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from dataclasses import dataclass
 from datetime import datetime
@@ -151,11 +152,27 @@ DEFAULT_THESAURUS_PROMPT = (
     "Example: {\"alternatives\": [\"option\", \"best choice\"]}."
 )
 DEFAULT_REFERENCE_PROMPT = (
-    "Use Tavily search to provide the definition of a word or phrase and use the word in a sentence. "
-    "Consult two sources and cite the url for each source. Here is the word or phrase:"
+    "Using only the Tavily search results provided below, provide the definition of a word or phrase "
+    "and use the word or phrase in a sentence. Consult up to two sources and cite the url for each source. "
+    "Present the information like this:\n\n"
+    "DEFINITION\n"
+    "This is the definition.\n\n"
+    "EXAMPLE SENTENCE\n"
+    "This is an example sentence.\n\n"
+    "SOURCES\n"
+    "One url per line.\n\n"
+    "Do not use markdown formatting."
 )
 DEFAULT_REFERENCE_ASK_PROMPT = "Answer the following question."
-DEFAULT_ASK_PROMPT = DEFAULT_REFERENCE_ASK_PROMPT
+DEFAULT_ASK_PROMPT = (
+    "Using only the Tavily search results provided below, answer the question. "
+    "Present the information like this:\n\n"
+    "ANSWER\n"
+    "This is the answer.\n\n"
+    "SOURCES\n"
+    "One url per line.\n\n"
+    "Do not use markdown formatting."
+)
 DEFAULT_SHORTEN_PROMPT = (
     "Shorten the selected text by removing unnecessary facts while preserving meaning. "
     "Return only the shortened text."
@@ -256,8 +273,11 @@ SPELLING_OUTPUT_FONT_SIZE_PX = 18
 SPELLING_OUTPUT_PADDING_PX = 12
 SPELLING_OUTPUT_CORNER_RADIUS_PX = 10
 REFERENCE_OUTPUT_FONT_SIZE_PX = SPELLING_OUTPUT_FONT_SIZE_PX
-TAVILY_MCP_SERVER_URL = "https://mcp.tavily.com/mcp"
 REFERENCE_URL_RE = re.compile(r"https?://[^\s)\]]+")
+TAVILY_MAX_RESULTS = 5
+TAVILY_MAX_SOURCES = 2
+TAVILY_SOURCE_EXCERPT_CHARS = 2000
+TAVILY_CLI_INSTALL_HINT = "Install it with `uv tool install tavily-cli`."
 OBSOLETE_REASONING_CONFIG_KEYS = (
     "proofread_kimi_reasoning",
     "proofread_deepseek_reasoning",
@@ -838,6 +858,21 @@ class ModelProfileEditorWidgets:
 class WordSubstitution:
     original: str
     replacement: str
+
+
+@dataclass
+class TavilySearchSource:
+    title: str
+    url: str
+    excerpt: str
+    domain: str
+
+
+@dataclass
+class TavilySearchBundle:
+    query: str
+    sources: list[TavilySearchSource]
+    notice: str | None = None
 
 
 @dataclass
@@ -3424,7 +3459,7 @@ button.improve-profile-chip {{
             return
         if not self._reference_settings.is_configured():
             self._show_toast(
-                "Add Reference API URL, API key, Tavily API key, and prompt in Settings. Model ID may be required."
+                "Add Reference API URL, API key, Tavily API key, and prompt in Settings. Tavily CLI (`tvly`) must also be installed."
             )
             return
         desktop = self._get_desktop()
@@ -3455,7 +3490,7 @@ button.improve-profile-chip {{
             return
         if not self._ask_settings.is_configured():
             self._show_toast(
-                "Add Ask API URL, API key, Tavily API key, and prompt in Settings. Model ID may be required."
+                "Add Ask API URL, API key, Tavily API key, and prompt in Settings. Tavily CLI (`tvly`) must also be installed."
             )
             return
         self._show_reference_output()
@@ -3865,10 +3900,16 @@ button.improve-profile-chip {{
 
     # Reference pipeline ------------------------------------------------
     def _run_reference(self, source_text: str, prompt_override: str | None) -> None:
-        payload = self._compose_reference_payload(source_text, prompt_override)
+        search_query = f"Define the following word or phrase and find authoritative sources: {source_text}"
         try:
+            search_bundle = self._run_tavily_search(
+                search_query,
+                self._reference_settings.tavily_api_key,
+                request_title="Look Up",
+            )
+            payload = self._compose_reference_payload(source_text, prompt_override, search_bundle)
             received = False
-            if self._reference_settings.api_url.rstrip("/").endswith("/responses"):
+            if self._endpoint_uses_responses_api(self._reference_settings.api_url):
                 stream = self._stream_responses(
                     payload,
                     self._reference_settings.api_url,
@@ -3894,10 +3935,15 @@ button.improve-profile-chip {{
         GLib.idle_add(self._on_reference_finished, "Reference ready.")
 
     def _run_ask(self, question: str) -> None:
-        payload = self._compose_ask_payload(question)
         try:
+            search_bundle = self._run_tavily_search(
+                question,
+                self._ask_settings.tavily_api_key,
+                request_title="Ask",
+            )
+            payload = self._compose_ask_payload(question, search_bundle)
             received = False
-            if self._ask_settings.api_url.rstrip("/").endswith("/responses"):
+            if self._endpoint_uses_responses_api(self._ask_settings.api_url):
                 stream = self._stream_responses(
                     payload,
                     self._ask_settings.api_url,
@@ -3922,59 +3968,227 @@ button.improve-profile-chip {{
             return
         GLib.idle_add(self._on_reference_finished, "Answer ready.")
 
-    def _compose_reference_payload(self, source_text: str, prompt_override: str | None) -> dict[str, Any]:
-        prompt = prompt_override or self._reference_settings.prompt or DEFAULT_REFERENCE_PROMPT
-        content = f"{prompt}\n\n{source_text}" if prompt else source_text
-        payload = {
-            "input": content,
-            "stream": True,
-            "tools": [
-                {
-                    "type": "mcp",
-                    "server_label": "Tavily",
-                    "server_url": TAVILY_MCP_SERVER_URL,
-                    "headers": {
-                        "Authorization": f"Bearer {self._reference_settings.tavily_api_key}",
-                        "x-api-key": self._reference_settings.tavily_api_key,
-                    },
-                }
-            ],
-            "tool_choice": "auto",
-        }
+    def _endpoint_uses_responses_api(self, api_url: str) -> bool:
+        return api_url.rstrip("/").endswith("/responses")
+
+    def _run_tavily_search(
+        self,
+        query: str,
+        tavily_api_key: str,
+        *,
+        request_title: str,
+    ) -> TavilySearchBundle:
+        tvly_path = shutil.which("tvly")
+        if not tvly_path:
+            raise ValueError(f"Tavily CLI (`tvly`) was not found on PATH. {TAVILY_CLI_INSTALL_HINT}")
+        command = [
+            tvly_path,
+            "search",
+            query,
+            "--depth",
+            "advanced",
+            "--max-results",
+            str(TAVILY_MAX_RESULTS),
+            "--include-raw-content",
+            "text",
+            "--json",
+        ]
+        env = os.environ.copy()
+        env["TAVILY_API_KEY"] = tavily_api_key
+        self._remember_editor_request(
+            f"{request_title} Tavily Search",
+            tvly_path,
+            {
+                "command": command[1:],
+                "query": query,
+            },
+        )
+        try:
+            completed = subprocess.run(
+                command,
+                capture_output=True,
+                text=True,
+                env=env,
+                check=False,
+            )
+        except OSError as exc:
+            raise ValueError(f"Unable to run Tavily CLI: {exc}. {TAVILY_CLI_INSTALL_HINT}") from exc
+        detail = completed.stderr.strip() or completed.stdout.strip()
+        if completed.returncode != 0:
+            if completed.returncode == 3:
+                raise ValueError("Tavily CLI authentication failed. Check the Tavily API key in Settings.")
+            raise ValueError(f"Tavily CLI search failed: {detail or f'exit code {completed.returncode}'}")
+        raw = completed.stdout.strip()
+        if not raw:
+            raise ValueError("Tavily CLI search returned empty JSON output.")
+        try:
+            data = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"Tavily CLI search returned invalid JSON: {exc}") from exc
+        sources = self._select_tavily_sources(data)
+        if not sources:
+            raise ValueError("Tavily CLI did not return any usable sources.")
+        notice = None
+        if len(sources) < TAVILY_MAX_SOURCES:
+            notice = "Only one usable Tavily source was available for this query. Do not invent additional citations."
+        return TavilySearchBundle(query=query, sources=sources, notice=notice)
+
+    def _select_tavily_sources(self, data: Any) -> list[TavilySearchSource]:
+        raw_results = data.get("results") if isinstance(data, dict) else data
+        if not isinstance(raw_results, list):
+            return []
+        usable: list[TavilySearchSource] = []
+        for item in raw_results:
+            if not isinstance(item, dict):
+                continue
+            url = str(item.get("url") or "").strip()
+            title = str(item.get("title") or item.get("site_name") or "").strip()
+            excerpt = str(item.get("raw_content") or item.get("content") or item.get("snippet") or "").strip()
+            if not url or not title or not excerpt:
+                continue
+            domain = urllib.parse.urlparse(url).netloc.lower().strip()
+            usable.append(
+                TavilySearchSource(
+                    title=title,
+                    url=url,
+                    excerpt=self._trim_tavily_excerpt(excerpt),
+                    domain=domain,
+                )
+            )
+        selected: list[TavilySearchSource] = []
+        seen_domains: set[str] = set()
+        for source in usable:
+            if source.domain and source.domain in seen_domains:
+                continue
+            selected.append(source)
+            if source.domain:
+                seen_domains.add(source.domain)
+            if len(selected) >= TAVILY_MAX_SOURCES:
+                return selected
+        for source in usable:
+            if any(existing.url == source.url for existing in selected):
+                continue
+            selected.append(source)
+            if len(selected) >= TAVILY_MAX_SOURCES:
+                break
+        return selected
+
+    def _trim_tavily_excerpt(self, text: str) -> str:
+        normalized = re.sub(r"\n{3,}", "\n\n", text or "").strip()
+        if len(normalized) <= TAVILY_SOURCE_EXCERPT_CHARS:
+            return normalized
+        truncated = normalized[:TAVILY_SOURCE_EXCERPT_CHARS].rstrip()
+        if " " in truncated:
+            truncated = truncated.rsplit(" ", 1)[0].rstrip()
+        return f"{truncated}..."
+
+    def _format_tavily_sources_for_prompt(self, sources: list[TavilySearchSource]) -> str:
+        blocks: list[str] = []
+        for index, source in enumerate(sources, start=1):
+            blocks.append(
+                "\n".join(
+                    (
+                        f"SOURCE {index}",
+                        f"Title: {source.title}",
+                        f"URL: {source.url}",
+                        "Excerpt:",
+                        source.excerpt,
+                    )
+                )
+            )
+        return "\n\n".join(blocks)
+
+    def _compose_search_grounded_payload(
+        self,
+        *,
+        api_url: str,
+        model_id: str,
+        disable_reasoning: bool,
+        system_prompt: str,
+        user_content: str,
+    ) -> dict[str, Any]:
+        if self._endpoint_uses_responses_api(api_url):
+            payload = {
+                "input": f"{system_prompt}\n\n{user_content}".strip(),
+                "stream": True,
+            }
+        else:
+            payload = {
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_content},
+                ],
+                "stream": True,
+            }
         return self._add_model_id(
             payload,
-            self._reference_settings.model_id,
-            disable_reasoning=self._reference_settings.disable_reasoning,
+            model_id,
+            disable_reasoning=disable_reasoning,
         )
 
-    def _compose_ask_payload(self, question: str) -> dict[str, Any]:
+    def _compose_reference_payload(
+        self,
+        source_text: str,
+        prompt_override: str | None,
+        search_bundle: TavilySearchBundle,
+    ) -> dict[str, Any]:
+        prompt = prompt_override or self._reference_settings.prompt or DEFAULT_REFERENCE_PROMPT
+        system_prompt = (
+            "The app already performed the Tavily search. "
+            "Use only the provided search results. "
+            "Do not claim to have browsed or searched on your own. "
+            "Cite only the provided source URLs.\n\n"
+            f"{prompt}"
+        ).strip()
+        user_parts = [
+            f"Word or phrase: {source_text}",
+        ]
+        if search_bundle.notice:
+            user_parts.append(f"SEARCH NOTICE\n{search_bundle.notice}")
+        user_parts.extend(
+            (
+                "TAVILY SEARCH RESULTS",
+                self._format_tavily_sources_for_prompt(search_bundle.sources),
+            )
+        )
+        user_content = "\n\n".join(part for part in user_parts if part)
+        return self._compose_search_grounded_payload(
+            api_url=self._reference_settings.api_url,
+            model_id=self._reference_settings.model_id,
+            disable_reasoning=self._reference_settings.disable_reasoning,
+            system_prompt=system_prompt,
+            user_content=user_content,
+        )
+
+    def _compose_ask_payload(self, question: str, search_bundle: TavilySearchBundle) -> dict[str, Any]:
         prompt = self._ask_settings.prompt or DEFAULT_ASK_PROMPT
         today = datetime.now().strftime("%B %d, %Y")
-        date_line = f"Today is {today}."
-        if prompt:
-            content = f"{date_line}\n\n{prompt}\n\n{question}"
-        else:
-            content = f"{date_line}\n\n{question}"
-        payload = {
-            "input": content,
-            "stream": True,
-            "tools": [
-                {
-                    "type": "mcp",
-                    "server_label": "Tavily",
-                    "server_url": TAVILY_MCP_SERVER_URL,
-                    "headers": {
-                        "Authorization": f"Bearer {self._ask_settings.tavily_api_key}",
-                        "x-api-key": self._ask_settings.tavily_api_key,
-                    },
-                }
-            ],
-            "tool_choice": "auto",
-        }
-        return self._add_model_id(
-            payload,
-            self._ask_settings.model_id,
+        system_prompt = (
+            "The app already performed the Tavily search. "
+            "Use only the provided search results. "
+            "Do not claim to have browsed or searched on your own. "
+            "Cite only the provided source URLs.\n\n"
+            f"{prompt}"
+        ).strip()
+        user_parts = [
+            f"Today is {today}.",
+            f"Question: {question}",
+        ]
+        if search_bundle.notice:
+            user_parts.append(f"SEARCH NOTICE\n{search_bundle.notice}")
+        user_parts.extend(
+            (
+                "TAVILY SEARCH RESULTS",
+                self._format_tavily_sources_for_prompt(search_bundle.sources),
+            )
+        )
+        user_content = "\n\n".join(part for part in user_parts if part)
+        return self._compose_search_grounded_payload(
+            api_url=self._ask_settings.api_url,
+            model_id=self._ask_settings.model_id,
             disable_reasoning=self._ask_settings.disable_reasoning,
+            system_prompt=system_prompt,
+            user_content=user_content,
         )
 
     def _on_reference_finished(self, message: str) -> bool:
