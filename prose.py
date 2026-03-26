@@ -2158,6 +2158,9 @@ class ProseWindow(Adw.ApplicationWindow):
             tooltip = f"{tooltip}\nModel: {profile.model_id.strip()}"
         return tooltip
 
+    def _regenerate_profile_chip_sensitive(self) -> bool:
+        return not self._busy and self._active_regenerate_context() is not None
+
     def _rebuild_regenerate_profile_chips(self) -> None:
         box = self._regenerate_profile_chip_box
         label = self._regenerate_label
@@ -2180,7 +2183,7 @@ class ProseWindow(Adw.ApplicationWindow):
             button.add_css_class("improve-profile-chip")
             button.set_tooltip_text(self._regenerate_profile_chip_tooltip(profile, context))
             button.connect("clicked", self._on_regenerate_clicked, profile.display_name())
-            button.set_sensitive(not self._busy and context is not None)
+            button.set_sensitive(self._regenerate_profile_chip_sensitive())
             box.append(button)
             self._regenerate_profile_chip_buttons.append(button)
 
@@ -5383,7 +5386,7 @@ button.improve-profile-chip {{
             self._reference_btn.set_sensitive(not busy)
         if hasattr(self, "_regenerate_profile_chip_buttons"):
             for button in self._regenerate_profile_chip_buttons:
-                button.set_sensitive(not busy)
+                button.set_sensitive(self._regenerate_profile_chip_sensitive())
         if hasattr(self, "_transform_action_buttons"):
             for button in self._transform_action_buttons:
                 button.set_sensitive(not busy)
