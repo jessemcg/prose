@@ -498,6 +498,23 @@ def _apply_disable_reasoning_to_body(
         body["reasoning_effort"] = "none"
 
 
+def _resolve_tavily_cli_path() -> str | None:
+    found = shutil.which("tvly")
+    if found:
+        return found
+    candidates = (
+        Path.home() / ".local" / "bin" / "tvly",
+        Path.home() / ".local" / "share" / "uv" / "tools" / "tavily-cli" / "bin" / "tvly",
+    )
+    for candidate in candidates:
+        try:
+            if candidate.is_file() and os.access(candidate, os.X_OK):
+                return str(candidate)
+        except OSError:
+            continue
+    return None
+
+
 def _read_config() -> dict[str, Any]:
     if not CONFIG_FILE.exists():
         return {}
@@ -4276,7 +4293,7 @@ button.improve-profile-chip {{
         *,
         request_title: str,
     ) -> TavilySearchBundle:
-        tvly_path = shutil.which("tvly")
+        tvly_path = _resolve_tavily_cli_path()
         if not tvly_path:
             raise ValueError(f"Tavily CLI (`tvly`) was not found on PATH. {TAVILY_CLI_INSTALL_HINT}")
         command = [
@@ -7781,6 +7798,41 @@ button.improve-profile-chip {{
         if hasattr(self, "_overlay") and self._overlay:
             self._overlay.add_toast(toast)
 
+    def _extract_http_error_summary(self, message: str) -> str:
+        cleaned = str(message or "").strip()
+        if not cleaned.lower().startswith("http "):
+            return ""
+        detail = cleaned
+        separator = " - "
+        if separator in cleaned:
+            detail = cleaned.split(separator, 1)[1].strip()
+        if not detail:
+            return ""
+        try:
+            data = json.loads(detail)
+        except json.JSONDecodeError:
+            data = None
+        if isinstance(data, dict):
+            candidates: list[str] = []
+            error_obj = data.get("error")
+            if isinstance(error_obj, dict):
+                for key in ("message", "detail", "type", "code"):
+                    value = error_obj.get(key)
+                    if isinstance(value, str) and value.strip():
+                        candidates.append(value.strip())
+            for key in ("message", "detail", "error"):
+                value = data.get(key)
+                if isinstance(value, str) and value.strip():
+                    candidates.append(value.strip())
+            if candidates:
+                detail = ". ".join(dict.fromkeys(candidates))
+        detail = re.sub(r"\s+", " ", detail).strip().strip(".")
+        if not detail:
+            return ""
+        if len(detail) > 160:
+            detail = f"{detail[:157].rstrip()}..."
+        return detail
+
     def _llm_toast_message(self, message: str) -> str:
         cleaned = str(message or "").strip()
         if not cleaned:
@@ -7788,7 +7840,12 @@ button.improve-profile-chip {{
         lowered = cleaned.lower()
         if "503" in lowered or "over capacity" in lowered:
             return "Model is busy. Try again."
-        if lowered.startswith("llm error") or lowered.startswith("http "):
+        if lowered.startswith("http "):
+            summary = self._extract_http_error_summary(cleaned)
+            if summary:
+                return summary
+            return "Model error. Try again."
+        if lowered.startswith("llm error"):
             return "Model error. Try again."
         if "empty output" in lowered:
             return "Model returned empty output."
