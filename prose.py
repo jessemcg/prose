@@ -10,6 +10,7 @@ import shlex
 import shutil
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 import urllib.error
@@ -138,6 +139,7 @@ CONFIG_KEY_LAST_ODT_FILE = "last_odt_file"
 CONFIG_KEY_LIBREOFFICE_PYTHON_PATH = "libreoffice_python_path"
 CONFIG_KEY_CONCORDANCE_FILE_PATH = "concordance_file_path"
 CONFIG_KEY_EDITOR_PINNED_ACTIONS = "editor_pinned_actions"
+CONFIG_KEY_TEXT_DRAFT_PINNED_ACTIONS = "text_draft_pinned_actions"
 CONFIG_KEY_SHARED_STYLE_RULES = "shared_style_rules"
 
 DEFAULT_SHARED_STYLE_RULES = """## STYLE RULES
@@ -340,6 +342,7 @@ DEFAULT_RT_PREFIX = "2"
 DEFAULT_CT_PREFIX = "2"
 MAX_WORD_SUBSTITUTIONS = 3
 MAX_PINNED_EDITOR_ACTIONS = 5
+TEXT_DRAFT_TEMP_FLUSH_DELAY_MS = 200
 UNSET_PROFILE_LABEL = "Choose a profile..."
 MODEL_PROFILE_IDS = ("profile1", "profile2", "profile3", "profile4")
 DEFAULT_MODEL_PROFILE_NICKNAMES = {
@@ -1266,6 +1269,13 @@ DEFAULT_EDITOR_PINNED_ACTION_IDS = (
     "intro",
     "conclusion",
 )
+DEFAULT_TEXT_DRAFT_PINNED_ACTION_IDS = (
+    "text-draft-spellingstyle",
+    "text-draft-improve-generated",
+    "text-draft-rephrase-generated",
+    "text-draft-improve-selected",
+    "text-draft-keep-original",
+)
 
 
 def _editor_command_items() -> list[tuple[str, str, str | None, str, bool]]:
@@ -1300,10 +1310,88 @@ def _editor_command_items() -> list[tuple[str, str, str | None, str, bool]]:
     return commands
 
 
+TEXT_DRAFT_QUICK_ACTIONS = (
+    QuickActionDefinition(
+        key="text-draft-spellingstyle",
+        label="SpellingStyle",
+        title="SpellingStyle",
+        action_name="text-draft-spellingstyle",
+        description="Stream model output into the local Text Draft buffer.",
+    ),
+    QuickActionDefinition(
+        key="text-draft-improve-generated",
+        label="Improve Generated",
+        title="Improve Generated",
+        action_name="text-draft-improve-generated",
+        description="Rewrite the latest Text Draft Original Output using the selected model profile.",
+        supports_profiles=True,
+    ),
+    QuickActionDefinition(
+        key="text-draft-rephrase-generated",
+        label="Rephrase Generated",
+        title="Rephrase Generated",
+        action_name="text-draft-rephrase-generated",
+        description="Rephrase the latest Text Draft Original Output using the selected model profile.",
+        supports_profiles=True,
+    ),
+    QuickActionDefinition(
+        key="text-draft-improve-selected",
+        label="Improve Selected",
+        title="Improve Selected",
+        action_name="text-draft-improve-selected",
+        description="Rewrite selected text in the Text Draft buffer using the selected model profile.",
+        supports_profiles=True,
+    ),
+    QuickActionDefinition(
+        key="text-draft-keep-original",
+        label="Keep Original",
+        title="Keep Original",
+        action_name="text-draft-keep-original",
+        description="Restore the last Text Draft generated range from Original Output.",
+    ),
+    QuickActionDefinition(
+        key="text-draft-wrap-quotes",
+        label="Wrap Quotes",
+        title="Wrap Quotes",
+        action_name="text-draft-wrap-quotes",
+        description="Wrap the selected Text Draft text in curly quotes.",
+    ),
+)
+TEXT_DRAFT_QUICK_ACTION_BY_KEY = {definition.key: definition for definition in TEXT_DRAFT_QUICK_ACTIONS}
+TEXT_DRAFT_QUICK_ACTION_BY_ACTION_NAME = {
+    definition.action_name: definition for definition in TEXT_DRAFT_QUICK_ACTIONS
+}
+
+
+def _text_draft_command_items() -> list[tuple[str, str, str | None, str, bool]]:
+    commands = [
+        (
+            definition.title,
+            definition.action_name,
+            None,
+            definition.description,
+            definition.supports_profiles,
+        )
+        for definition in TEXT_DRAFT_QUICK_ACTIONS
+    ]
+    commands.append(
+        ("Copy Draft", "text-draft-copy", None, "Copy the full Text Draft buffer to the clipboard.", False)
+    )
+    return commands
+
+
 def _profile_default_lookup_key_for_action_name(action_name: str) -> str | None:
     definition = EDITOR_QUICK_ACTION_BY_ACTION_NAME.get(action_name)
     if definition is not None:
         return definition.key
+    text_draft_definition = TEXT_DRAFT_QUICK_ACTION_BY_ACTION_NAME.get(action_name)
+    if text_draft_definition is not None:
+        if text_draft_definition.key == "text-draft-improve-generated":
+            return "improve-generated"
+        if text_draft_definition.key == "text-draft-rephrase-generated":
+            return "rephrase-generated"
+        if text_draft_definition.key == "text-draft-improve-selected":
+            return "improve-selected"
     if action_name == "improve":
         return "improve-generated"
     if action_name == "improve-selected":
@@ -1975,6 +2063,41 @@ def _ordered_editor_quick_action_keys(pinned_action_ids: Iterable[str]) -> list[
     return ordered
 
 
+def _default_text_draft_pinned_actions() -> list[str]:
+    return list(DEFAULT_TEXT_DRAFT_PINNED_ACTION_IDS)
+
+
+def _sanitize_text_draft_pinned_actions(raw: Any) -> list[str]:
+    pinned: list[str] = []
+    seen: set[str] = set()
+    if not isinstance(raw, list):
+        return pinned
+    for item in raw:
+        key = str(item or "").strip()
+        if key not in TEXT_DRAFT_QUICK_ACTION_BY_KEY or key in seen:
+            continue
+        pinned.append(key)
+        seen.add(key)
+        if len(pinned) >= MAX_PINNED_EDITOR_ACTIONS:
+            break
+    return pinned
+
+
+def _ordered_text_draft_quick_action_keys(pinned_action_ids: Iterable[str]) -> list[str]:
+    ordered: list[str] = []
+    seen: set[str] = set()
+    for key in pinned_action_ids:
+        if key not in TEXT_DRAFT_QUICK_ACTION_BY_KEY or key in seen:
+            continue
+        ordered.append(key)
+        seen.add(key)
+    for definition in TEXT_DRAFT_QUICK_ACTIONS:
+        if definition.key in seen:
+            continue
+        ordered.append(definition.key)
+    return ordered
+
+
 def load_editor_pinned_actions() -> list[str]:
     raw = _read_config()
     if CONFIG_KEY_EDITOR_PINNED_ACTIONS not in raw:
@@ -1988,6 +2111,22 @@ def load_editor_pinned_actions() -> list[str]:
 def save_editor_pinned_actions(action_ids: Iterable[str]) -> None:
     data = _read_config()
     data[CONFIG_KEY_EDITOR_PINNED_ACTIONS] = _sanitize_editor_pinned_actions(list(action_ids))
+    _write_config(data)
+
+
+def load_text_draft_pinned_actions() -> list[str]:
+    raw = _read_config()
+    if CONFIG_KEY_TEXT_DRAFT_PINNED_ACTIONS not in raw:
+        return _default_text_draft_pinned_actions()
+    stored = raw.get(CONFIG_KEY_TEXT_DRAFT_PINNED_ACTIONS)
+    if not isinstance(stored, list):
+        return _default_text_draft_pinned_actions()
+    return _sanitize_text_draft_pinned_actions(stored)
+
+
+def save_text_draft_pinned_actions(action_ids: Iterable[str]) -> None:
+    data = _read_config()
+    data[CONFIG_KEY_TEXT_DRAFT_PINNED_ACTIONS] = _sanitize_text_draft_pinned_actions(list(action_ids))
     _write_config(data)
 
 
@@ -2057,6 +2196,7 @@ class ProseWindow(Adw.ApplicationWindow):
         self._last_odt_path = load_last_odt_file()
         self._concordance_file_path = load_concordance_file_path()
         self._editor_pinned_action_ids = load_editor_pinned_actions()
+        self._text_draft_pinned_action_ids = load_text_draft_pinned_actions()
         self._ctx = None
         self._desktop = None
         self._active_doc = None
@@ -2084,6 +2224,23 @@ class ProseWindow(Adw.ApplicationWindow):
         self._pending_regenerate_context: RegenerateContext | None = None
         self._last_regenerate_context: RegenerateContext | None = None
         self._spelling_output_buffer: Gtk.TextBuffer | None = None
+        self._text_draft_original_output_buffer: Gtk.TextBuffer | None = None
+        self._text_draft_buffer: Gtk.TextBuffer | None = None
+        self._text_draft_view: Gtk.TextView | None = None
+        self._text_draft_insert_start_mark: Gtk.TextMark | None = None
+        self._text_draft_insert_end_mark: Gtk.TextMark | None = None
+        self._text_draft_pending_regenerate_context: RegenerateContext | None = None
+        self._text_draft_last_regenerate_context: RegenerateContext | None = None
+        self._text_draft_regenerate_label: Gtk.Label | None = None
+        self._text_draft_regenerate_profile_chip_box: Gtk.Box | None = None
+        self._text_draft_regenerate_profile_chip_buttons: list[Gtk.Button] = []
+        self._text_draft_action_buttons: list[Gtk.Widget] = []
+        self._text_draft_actions_wrap: Gtk.FlowBox | None = None
+        self._text_draft_temp_path: Path | None = None
+        self._text_draft_temp_flush_source_id = 0
+        self._text_draft_temp_dirty = False
+        self._text_draft_pending_newlines = 0
+        self._text_draft_original_pending_newlines = 0
         self._css_provider: Gtk.CssProvider | None = None
         self._thesaurus_words: list[str] = []
         self._thesaurus_rows: list[Gtk.Widget] = []
@@ -2102,6 +2259,7 @@ class ProseWindow(Adw.ApplicationWindow):
         self._regenerate_profile_chip_buttons: list[Gtk.Button] = []
         self._transform_action_buttons: list[Gtk.Widget] = []
         self._transform_actions_wrap: Gtk.FlowBox | None = None
+        self.connect("close-request", self._on_window_close_request)
         self._build_ui()
         self._ensure_menu()
         self._register_actions()
@@ -2166,10 +2324,13 @@ class ProseWindow(Adw.ApplicationWindow):
         mode_switcher.set_stack(stack)
 
         editor_panel = self._build_editor_panel()
+        text_draft_panel = self._build_text_draft_panel()
         proof_panel = self._build_proof_panel()
         prefixes_panel = self._build_prefixes_panel()
         editor_page = stack.add_titled(editor_panel, "editor", "Editor")
         editor_page.set_icon_name("document-edit-symbolic")
+        text_draft_page = stack.add_titled(text_draft_panel, "text-draft", "Text Draft")
+        text_draft_page.set_icon_name("document-edit-symbolic")
         proof_page = stack.add_titled(proof_panel, "proof", "Proof Reader")
         proof_page.set_icon_name("tools-check-spelling-symbolic")
         prefixes_page = stack.add_titled(prefixes_panel, "prefixes", "Prefixes")
@@ -2342,6 +2503,110 @@ class ProseWindow(Adw.ApplicationWindow):
 
         return panel
 
+    def _build_text_draft_panel(self) -> Gtk.Box:
+        panel = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+        panel.set_margin_top(6)
+        panel.set_margin_bottom(12)
+        panel.set_margin_start(18)
+        panel.set_margin_end(18)
+
+        action_wrap = Gtk.FlowBox()
+        action_wrap.set_selection_mode(Gtk.SelectionMode.NONE)
+        action_wrap.set_column_spacing(6)
+        action_wrap.set_row_spacing(6)
+        action_wrap.set_max_children_per_line(6)
+        action_wrap.set_hexpand(True)
+        panel.append(action_wrap)
+        self._text_draft_actions_wrap = action_wrap
+        self._rebuild_text_draft_action_buttons()
+
+        original_section = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        original_header = Gtk.Label(label="Original Output", xalign=0)
+        original_header.add_css_class("dim-label")
+        original_section.append(original_header)
+
+        original_scroller = Gtk.ScrolledWindow()
+        original_scroller.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
+        original_scroller.set_hexpand(True)
+        original_scroller.set_vexpand(True)
+        original_scroller.set_min_content_height(150)
+        original_scroller.add_css_class("spelling-output-scroller")
+        original_buffer = Gtk.TextBuffer()
+        original_view = Gtk.TextView.new_with_buffer(original_buffer)
+        original_view.set_wrap_mode(Gtk.WrapMode.WORD_CHAR)
+        original_view.set_editable(False)
+        original_view.set_cursor_visible(False)
+        original_view.set_left_margin(SPELLING_OUTPUT_PADDING_PX)
+        original_view.set_right_margin(SPELLING_OUTPUT_PADDING_PX)
+        original_view.set_top_margin(SPELLING_OUTPUT_PADDING_PX)
+        original_view.set_bottom_margin(SPELLING_OUTPUT_PADDING_PX)
+        original_view.add_css_class("spelling-output-view")
+        original_scroller.set_child(original_view)
+        original_section.append(original_scroller)
+        self._text_draft_original_output_buffer = original_buffer
+
+        regenerate_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        regenerate_row.set_hexpand(True)
+        regenerate_label = Gtk.Label(label="Try again with:", xalign=0)
+        regenerate_label.add_css_class("dim-label")
+        regenerate_row.append(regenerate_label)
+        self._text_draft_regenerate_label = regenerate_label
+
+        regenerate_chip_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
+        regenerate_chip_box.set_halign(Gtk.Align.START)
+        regenerate_chip_box.set_visible(False)
+        regenerate_row.append(regenerate_chip_box)
+        self._text_draft_regenerate_profile_chip_box = regenerate_chip_box
+        self._rebuild_text_draft_regenerate_profile_chips()
+        original_section.append(regenerate_row)
+
+        panel.append(original_section)
+
+        draft_section = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        draft_section.set_hexpand(True)
+        draft_section.set_vexpand(True)
+        draft_header_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        draft_header = Gtk.Label(label="Draft", xalign=0)
+        draft_header.add_css_class("dim-label")
+        draft_header.set_hexpand(True)
+        draft_header.set_halign(Gtk.Align.START)
+        draft_header_row.append(draft_header)
+
+        copy_draft_btn = Gtk.Button(label="Copy", icon_name="edit-copy-symbolic")
+        copy_draft_btn.add_css_class("flat")
+        copy_draft_btn.add_css_class("transform-pill")
+        copy_draft_btn.add_css_class("transform-pill-compact")
+        copy_draft_btn.set_tooltip_text("Copy the full Draft text to the clipboard.")
+        copy_draft_btn.connect("clicked", self._on_copy_text_draft_clicked)
+        draft_header_row.append(copy_draft_btn)
+
+        draft_section.append(draft_header_row)
+
+        draft_scroller = Gtk.ScrolledWindow()
+        draft_scroller.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
+        draft_scroller.set_hexpand(True)
+        draft_scroller.set_vexpand(True)
+        draft_scroller.set_min_content_height(260)
+        draft_scroller.add_css_class("spelling-output-scroller")
+        draft_buffer = Gtk.TextBuffer()
+        draft_buffer.connect("changed", self._on_text_draft_buffer_changed)
+        draft_view = Gtk.TextView.new_with_buffer(draft_buffer)
+        draft_view.set_wrap_mode(Gtk.WrapMode.WORD_CHAR)
+        draft_view.set_vexpand(True)
+        draft_view.set_hexpand(True)
+        draft_view.set_left_margin(SPELLING_OUTPUT_PADDING_PX)
+        draft_view.set_right_margin(SPELLING_OUTPUT_PADDING_PX)
+        draft_view.set_top_margin(SPELLING_OUTPUT_PADDING_PX)
+        draft_view.set_bottom_margin(SPELLING_OUTPUT_PADDING_PX)
+        draft_view.add_css_class("spelling-output-view")
+        draft_scroller.set_child(draft_view)
+        draft_section.append(draft_scroller)
+        self._text_draft_buffer = draft_buffer
+        self._text_draft_view = draft_view
+
+        panel.append(draft_section)
+        return panel
+
     def _clear_flow_box(self, flow_box: Gtk.FlowBox) -> None:
         child = flow_box.get_first_child()
         while child is not None:
@@ -2497,6 +2762,78 @@ class ProseWindow(Adw.ApplicationWindow):
             self._show_toast(f'Choose a default model profile for "{self._command_title(action_key)}" in Settings.')
         return profile
 
+    def _active_text_draft_regenerate_context(self) -> RegenerateContext | None:
+        return self._text_draft_pending_regenerate_context or self._text_draft_last_regenerate_context
+
+    def _text_draft_regenerate_profile_chip_sensitive(self) -> bool:
+        return not self._busy and self._active_text_draft_regenerate_context() is not None
+
+    def _text_draft_regenerate_profile_chip_tooltip(
+        self, profile: ModelProfile, context: RegenerateContext | None
+    ) -> str:
+        if context is None:
+            tooltip = "Run a supported Text Draft command first."
+        else:
+            tooltip = f"Regenerate {context.command_title} in Text Draft with {profile.display_name()}."
+            if profile.key == self._default_profile_key_for_action(context.action_key):
+                tooltip = f"{tooltip}\nDefault {context.command_title} profile."
+        if profile.model_id.strip():
+            tooltip = f"{tooltip}\nModel: {profile.model_id.strip()}"
+        return tooltip
+
+    def _rebuild_text_draft_regenerate_profile_chips(self) -> None:
+        box = self._text_draft_regenerate_profile_chip_box
+        label = self._text_draft_regenerate_label
+        if box is None:
+            return
+
+        self._clear_box(box)
+        self._text_draft_regenerate_profile_chip_buttons = []
+        profiles = self._configured_regenerate_profiles()
+        box.set_visible(bool(profiles))
+        context = self._active_text_draft_regenerate_context()
+        if label is not None:
+            label.set_label("Try again with:")
+        if not profiles:
+            return
+
+        for profile in profiles:
+            button = Gtk.Button(label=self._profile_slot_label(profile))
+            button.add_css_class("flat")
+            button.add_css_class("improve-profile-chip")
+            button.set_tooltip_text(self._text_draft_regenerate_profile_chip_tooltip(profile, context))
+            button.connect("clicked", self._on_text_draft_regenerate_clicked, profile.display_name())
+            button.set_sensitive(self._text_draft_regenerate_profile_chip_sensitive())
+            box.append(button)
+            self._text_draft_regenerate_profile_chip_buttons.append(button)
+
+    def _make_text_draft_regenerate_context(self, action_key: str, source_text: str) -> RegenerateContext | None:
+        if action_key not in {"improve-generated", "rephrase-generated", "improve-selected"}:
+            return None
+        return RegenerateContext(
+            action_key=action_key,
+            command_title=self._command_title(action_key),
+            source_text=source_text,
+            insert_mode="text-draft",
+        )
+
+    def _set_pending_text_draft_regenerate_context(self, action_key: str, source_text: str) -> None:
+        self._text_draft_pending_regenerate_context = self._make_text_draft_regenerate_context(action_key, source_text)
+        self._rebuild_text_draft_regenerate_profile_chips()
+
+    def _clear_pending_text_draft_regenerate_context(self) -> None:
+        if self._text_draft_pending_regenerate_context is None:
+            return
+        self._text_draft_pending_regenerate_context = None
+        self._rebuild_text_draft_regenerate_profile_chips()
+
+    def _commit_pending_text_draft_regenerate_context(self) -> None:
+        if self._text_draft_pending_regenerate_context is None:
+            return
+        self._text_draft_last_regenerate_context = self._text_draft_pending_regenerate_context
+        self._text_draft_pending_regenerate_context = None
+        self._rebuild_text_draft_regenerate_profile_chips()
+
     def _build_quick_action_button(
         self,
         definition: QuickActionDefinition,
@@ -2609,6 +2946,38 @@ class ProseWindow(Adw.ApplicationWindow):
 
         self._transform_action_buttons = action_buttons
         for widget in self._transform_action_buttons:
+            widget.set_sensitive(not self._busy)
+
+    def _rebuild_text_draft_action_buttons(self) -> None:
+        flow_box = self._text_draft_actions_wrap
+        if flow_box is None:
+            return
+
+        self._clear_flow_box(flow_box)
+        action_buttons: list[Gtk.Widget] = []
+
+        pinned_keys = self._text_draft_pinned_action_ids
+        pinned_set = set(pinned_keys)
+        ordered_keys = _ordered_text_draft_quick_action_keys(pinned_keys)
+        remaining_actions: list[QuickActionDefinition] = []
+
+        for key in ordered_keys:
+            definition = TEXT_DRAFT_QUICK_ACTION_BY_KEY[key]
+            if key in pinned_set:
+                widget = self._build_quick_action_widget(definition)
+                flow_box.append(widget)
+                action_buttons.append(widget)
+            else:
+                remaining_actions.append(definition)
+
+        if remaining_actions:
+            more_button, more_action_buttons = self._build_more_actions_button(remaining_actions)
+            flow_box.append(more_button)
+            action_buttons.append(more_button)
+            action_buttons.extend(more_action_buttons)
+
+        self._text_draft_action_buttons = action_buttons
+        for widget in self._text_draft_action_buttons:
             widget.set_sensitive(not self._busy)
 
     def _ensure_css(self) -> None:
@@ -2894,8 +3263,14 @@ button.improve-profile-chip {{
         _add_action("save-prefixes", lambda: self._on_save_prefixes_clicked(None))
         _add_action("combine-cites", lambda: self._on_combine_cites_clicked(None))
         _add_action("spellingstyle", lambda: self._on_spellingstyle_clicked(None))
+        _add_action("text-draft-spellingstyle", lambda: self._on_text_draft_spellingstyle_clicked(None))
         _add_string_action("improve-generated", lambda nickname: self._on_improve_clicked(None, nickname))
         _add_string_action("rephrase-generated", lambda nickname: self._on_rephrase_generated_clicked(None, nickname))
+        _add_string_action("text-draft-improve-generated", lambda nickname: self._on_text_draft_improve_clicked(None, nickname))
+        _add_string_action(
+            "text-draft-rephrase-generated",
+            lambda nickname: self._on_text_draft_rephrase_generated_clicked(None, nickname),
+        )
         _add_string_action("improve", lambda nickname: self._on_improve_clicked(None, nickname))
         _add_action(
             "improve1",
@@ -2912,7 +3287,14 @@ button.improve-profile-chip {{
             ),
         )
         _add_string_action("improve-selected", lambda nickname: self._on_improve_selected_clicked(None, nickname))
+        _add_string_action(
+            "text-draft-improve-selected",
+            lambda nickname: self._on_text_draft_improve_selected_clicked(None, nickname),
+        )
         _add_action("keep-original", lambda: self._on_keep_original_clicked(None))
+        _add_action("text-draft-keep-original", lambda: self._on_text_draft_keep_original_clicked(None))
+        _add_action("text-draft-wrap-quotes", lambda: self._on_text_draft_wrap_quotes_clicked(None))
+        _add_action("text-draft-copy", lambda: self._on_copy_text_draft_clicked(None))
         _add_action("reference-lookup", lambda: self._on_reference_clicked(None))
         _add_string_action("transform-shorten", lambda nickname: self._on_shorten_clicked(None, nickname))
         _add_action("transform-wrap-quotes", lambda: self._on_wrap_quotes_clicked(None))
@@ -3016,6 +3398,7 @@ button.improve-profile-chip {{
             self._shared_style_rules,
             self._editor_action_profile_defaults,
             self._editor_pinned_action_ids,
+            self._text_draft_pinned_action_ids,
             self._libreoffice_python_path,
             self._concordance_file_path,
             self._editor_source_file,
@@ -3056,6 +3439,7 @@ button.improve-profile-chip {{
         shared_style_rules: str,
         editor_action_profile_defaults: dict[str, str | None],
         editor_pinned_action_ids: list[str],
+        text_draft_pinned_action_ids: list[str],
         libreoffice_python_path: Path | None,
         concordance_file_path: Path | None,
     ) -> None:
@@ -3079,6 +3463,7 @@ button.improve-profile-chip {{
         self._shared_style_rules = str(shared_style_rules or "").strip()
         self._editor_action_profile_defaults = _sanitize_editor_action_profile_defaults(editor_action_profile_defaults)
         self._editor_pinned_action_ids = _sanitize_editor_pinned_actions(editor_pinned_action_ids)
+        self._text_draft_pinned_action_ids = _sanitize_text_draft_pinned_actions(text_draft_pinned_action_ids)
         self._libreoffice_python_path = libreoffice_python_path.expanduser().resolve(strict=False) if libreoffice_python_path else None
         self._concordance_file_path = (
             concordance_file_path.expanduser().resolve(strict=False) if concordance_file_path else None
@@ -3103,9 +3488,11 @@ button.improve-profile-chip {{
         save_shared_style_rules(self._shared_style_rules)
         save_editor_action_profile_defaults(self._editor_action_profile_defaults)
         save_editor_pinned_actions(self._editor_pinned_action_ids)
+        save_text_draft_pinned_actions(self._text_draft_pinned_action_ids)
         save_libreoffice_python_path(self._libreoffice_python_path)
         save_concordance_file_path(self._concordance_file_path)
         self._rebuild_transform_action_buttons()
+        self._rebuild_text_draft_action_buttons()
         self._rebuild_regenerate_profile_chips()
         _import_uno_from_candidates(self._libreoffice_python_path, force_retry=True)
         self._ctx = None
@@ -3435,6 +3822,198 @@ button.improve-profile-chip {{
 
     def _on_direct_input_no_trailing_space_clicked(self, _button: Gtk.Button) -> None:
         self._run_direct_input(add_trailing_space=False)
+
+    def _on_text_draft_spellingstyle_clicked(self, _button: Gtk.Button | None) -> None:
+        if self._busy:
+            return
+        if not self._spelling_settings.is_configured():
+            self._show_toast("Add SpellingStyle API URL, API key, and prompt in Settings. Model ID may be required.")
+            return
+        if self._spelling_settings.api_url.rstrip("/").endswith("/responses"):
+            self._show_toast("SpellingStyle uses a chat endpoint. Update the API URL in Settings.")
+            return
+        source_text = self._read_editor_source_text()
+        if source_text is None:
+            return
+        source_text = self._apply_word_substitutions(source_text)
+        if not source_text.strip():
+            self._show_toast("Source file is empty.")
+            return
+        if not self._prepare_text_draft_fresh_output():
+            self._show_toast("Unable to prepare Text Draft output.")
+            return
+        GLib.idle_add(self._set_text_draft_original_output_text, "")
+        self._clear_pending_text_draft_regenerate_context()
+        self._set_busy(True)
+        self._status_label.set_label("Streaming SpellingStyle output into Text Draft…")
+        thread = threading.Thread(target=self._run_text_draft_spellingstyle, args=(source_text,), daemon=True)
+        thread.start()
+
+    def _on_text_draft_improve_clicked(self, _button: Gtk.Button | None, profile_nickname: str | None = None) -> None:
+        if self._busy:
+            return
+        profile = self._resolve_profile_for_action("improve-generated", profile_nickname)
+        if profile is None:
+            return
+        if not profile.is_configured():
+            self._show_toast(f'Configure the "{profile.display_name()}" model profile in Settings first.')
+            return
+        source_text = self._get_text_draft_original_output_text().strip()
+        if not source_text:
+            self._show_toast("Original Output is empty.")
+            return
+        if not self._prepare_text_draft_generated_replace():
+            self._show_toast("Unable to replace the last generated draft output.")
+            return
+        self._set_pending_text_draft_regenerate_context("improve-generated", source_text)
+        self._set_busy(True)
+        self._status_label.set_label(f"Improving Text Draft output with {profile.display_name()}…")
+        thread = threading.Thread(target=self._run_text_draft_improve, args=(source_text, profile), daemon=True)
+        thread.start()
+
+    def _on_text_draft_rephrase_generated_clicked(
+        self,
+        _button: Gtk.Button | None,
+        profile_nickname: str | None = None,
+    ) -> None:
+        if self._busy:
+            return
+        profile = self._resolve_profile_for_action("rephrase-generated", profile_nickname)
+        if profile is None:
+            return
+        if not profile.is_configured():
+            self._show_toast(f'Configure the "{profile.display_name()}" model profile in Settings first.')
+            return
+        source_text = self._get_text_draft_original_output_text().strip()
+        if not source_text:
+            self._show_toast("Original Output is empty.")
+            return
+        if not self._prepare_text_draft_generated_replace():
+            self._show_toast("Unable to replace the last generated draft output.")
+            return
+        self._set_pending_text_draft_regenerate_context("rephrase-generated", source_text)
+        self._set_busy(True)
+        self._status_label.set_label(f"Rephrasing Text Draft output with {profile.display_name()}…")
+        thread = threading.Thread(
+            target=self._run_text_draft_rephrase_generated,
+            args=(source_text, profile),
+            daemon=True,
+        )
+        thread.start()
+
+    def _on_text_draft_improve_selected_clicked(
+        self,
+        _button: Gtk.Button | None,
+        profile_nickname: str | None = None,
+    ) -> None:
+        if self._busy:
+            return
+        profile = self._resolve_profile_for_action("improve-selected", profile_nickname)
+        if profile is None:
+            return
+        if not profile.is_configured():
+            self._show_toast(f'Configure the "{profile.display_name()}" model profile in Settings first.')
+            return
+        source_text = self._get_text_draft_selected_text().strip()
+        if not source_text:
+            self._show_toast("Select text in the Draft box first.")
+            return
+        if not self._prepare_text_draft_selection_replace():
+            self._show_toast("Unable to prepare Draft selection replacement.")
+            return
+        self._set_text_draft_original_output_text(source_text)
+        self._set_pending_text_draft_regenerate_context("improve-selected", source_text)
+        self._set_busy(True)
+        self._status_label.set_label(f"Improving Draft selection with {profile.display_name()}…")
+        thread = threading.Thread(target=self._run_text_draft_improve_selected, args=(source_text, profile), daemon=True)
+        thread.start()
+
+    def _on_text_draft_keep_original_clicked(self, _button: Gtk.Button | None) -> None:
+        if self._busy:
+            return
+        source_text = self._get_text_draft_original_output_text().strip()
+        if not source_text:
+            self._show_toast("Original Output is empty.")
+            return
+        if not self._prepare_text_draft_generated_replace():
+            self._show_toast("Unable to replace the last generated draft output.")
+            return
+        self._set_busy(True)
+        self._status_label.set_label("Restoring Original Output in Draft…")
+        self._append_text_draft_inserted_text(source_text)
+        self._ensure_single_text_draft_trailing_space()
+        self._set_busy(False)
+        self._status_label.set_label("Original output restored in Draft.")
+
+    def _on_text_draft_wrap_quotes_clicked(self, _button: Gtk.Button | None) -> None:
+        if self._busy:
+            return
+        source_text = self._get_text_draft_selected_text()
+        if not source_text.strip():
+            self._show_toast("Select text in the Draft box first.")
+            return
+        wrapped = self._wrap_text_in_curly_quotes(source_text)
+        if not self._prepare_text_draft_selection_replace():
+            self._show_toast("Unable to prepare Draft selection replacement.")
+            return
+        self._set_busy(True)
+        self._status_label.set_label("Wrapping Draft selection in quotes…")
+        self._append_text_draft_inserted_text(wrapped)
+        self._set_busy(False)
+        self._status_label.set_label("Draft selection wrapped in quotes.")
+
+    def _on_copy_text_draft_clicked(self, _button: Gtk.Button | None) -> None:
+        text = self._get_text_draft_text()
+        if not text:
+            self._show_toast("Draft is empty.")
+            return
+        clipboard = self.get_clipboard()
+        clipboard.set(text)
+        self._status_label.set_label("Draft copied to clipboard.")
+        self._show_toast("Draft copied to clipboard.")
+
+    def _prepare_text_draft_regenerate_output_state(self, context: RegenerateContext) -> None:
+        if context.action_key in REGENERATE_SOURCE_BUFFER_ACTION_KEYS:
+            self._set_text_draft_original_output_text(context.source_text)
+
+    def _run_text_draft_regenerate_command(self, context: RegenerateContext, profile: ModelProfile) -> None:
+        if context.action_key == "improve-generated":
+            self._run_text_draft_improve(context.source_text, profile)
+            return
+        if context.action_key == "rephrase-generated":
+            self._run_text_draft_rephrase_generated(context.source_text, profile)
+            return
+        if context.action_key == "improve-selected":
+            self._run_text_draft_improve_selected(context.source_text, profile)
+            return
+        GLib.idle_add(self._on_text_draft_failed, f'Unsupported Text Draft regenerate action "{context.action_key}".')
+
+    def _on_text_draft_regenerate_clicked(
+        self,
+        _button: Gtk.Button | None,
+        profile_nickname: str | None = None,
+    ) -> None:
+        if self._busy:
+            return
+        context = self._text_draft_last_regenerate_context
+        if context is None:
+            self._show_toast("Run a supported Text Draft command first.")
+            return
+        profile = self._resolve_profile_for_action(context.action_key, profile_nickname)
+        if profile is None:
+            return
+        if not profile.is_configured():
+            self._show_toast(f'Configure the "{profile.display_name()}" model profile in Settings first.')
+            return
+        if not self._prepare_text_draft_generated_replace():
+            self._show_toast("Unable to replace the last generated draft output.")
+            return
+        self._set_pending_text_draft_regenerate_context(context.action_key, context.source_text)
+        self._prepare_text_draft_regenerate_output_state(context)
+        self._set_busy(True)
+        self._status_label.set_label(f"Regenerating {context.command_title.lower()} in Text Draft with {profile.display_name()}…")
+        thread = threading.Thread(target=self._run_text_draft_regenerate_command, args=(context, profile), daemon=True)
+        thread.start()
 
     def _on_input_rt_clicked(self, _button: Gtk.Button) -> None:
         self._run_citation_input("RT", self._prefix_settings.rt_prefix)
@@ -5621,6 +6200,274 @@ button.improve-profile-chip {{
         start, end = self._spelling_output_buffer.get_bounds()
         return self._spelling_output_buffer.get_text(start, end, True)
 
+    def _on_text_draft_buffer_changed(self, _buffer: Gtk.TextBuffer) -> None:
+        self._text_draft_temp_dirty = True
+        if self._text_draft_temp_flush_source_id:
+            return
+        self._text_draft_temp_flush_source_id = GLib.timeout_add(
+            TEXT_DRAFT_TEMP_FLUSH_DELAY_MS,
+            self._flush_text_draft_temp_file,
+        )
+
+    def _ensure_text_draft_temp_path(self) -> Path | None:
+        if self._text_draft_temp_path is not None:
+            return self._text_draft_temp_path
+        try:
+            with tempfile.NamedTemporaryFile(prefix="prose-text-draft-", suffix=".txt", delete=False) as handle:
+                self._text_draft_temp_path = Path(handle.name)
+        except OSError as exc:
+            self._show_toast(f"Unable to create text draft temp file: {exc}")
+            return None
+        return self._text_draft_temp_path
+
+    def _flush_text_draft_temp_file(self) -> bool:
+        self._text_draft_temp_flush_source_id = 0
+        if not self._text_draft_temp_dirty:
+            return GLib.SOURCE_REMOVE
+        path = self._ensure_text_draft_temp_path()
+        if path is None:
+            return GLib.SOURCE_REMOVE
+        try:
+            path.write_text(self._get_text_draft_text(), encoding="utf-8")
+            self._text_draft_temp_dirty = False
+        except OSError as exc:
+            self._show_toast(f"Unable to sync text draft temp file: {exc}")
+        return GLib.SOURCE_REMOVE
+
+    def _cleanup_text_draft_temp_file(self) -> None:
+        if self._text_draft_temp_flush_source_id:
+            GLib.Source.remove(self._text_draft_temp_flush_source_id)
+            self._text_draft_temp_flush_source_id = 0
+        self._text_draft_temp_dirty = False
+        if self._text_draft_temp_path is None:
+            return
+        try:
+            self._text_draft_temp_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+        self._text_draft_temp_path = None
+
+    def _on_window_close_request(self, _window: Gtk.Window) -> bool:
+        self._cleanup_text_draft_temp_file()
+        return False
+
+    def _set_text_draft_original_output_text(self, text: str) -> bool:
+        if self._text_draft_original_output_buffer is None:
+            return False
+        self._text_draft_original_pending_newlines = 0
+        self._text_draft_original_output_buffer.set_text(text or "")
+        return False
+
+    def _get_text_draft_original_output_text(self) -> str:
+        if self._text_draft_original_output_buffer is None:
+            return ""
+        start, end = self._text_draft_original_output_buffer.get_bounds()
+        return self._text_draft_original_output_buffer.get_text(start, end, True)
+
+    def _trim_text_draft_original_output_edges(self) -> None:
+        current = self._get_text_draft_original_output_text()
+        cleaned = self._normalize_generated_output_text(current)
+        if cleaned != current:
+            self._set_text_draft_original_output_text(cleaned)
+
+    def _get_text_draft_text(self) -> str:
+        if self._text_draft_buffer is None:
+            return ""
+        start, end = self._text_draft_buffer.get_bounds()
+        return self._text_draft_buffer.get_text(start, end, True)
+
+    def _clear_text_draft_insert_marks(self) -> None:
+        buffer = self._text_draft_buffer
+        if buffer is None:
+            self._text_draft_insert_start_mark = None
+            self._text_draft_insert_end_mark = None
+            return
+        for mark in (self._text_draft_insert_start_mark, self._text_draft_insert_end_mark):
+            if mark is None:
+                continue
+            try:
+                buffer.delete_mark(mark)
+            except Exception:
+                pass
+        self._text_draft_insert_start_mark = None
+        self._text_draft_insert_end_mark = None
+
+    def _set_text_draft_insert_marks(self, start_iter: Gtk.TextIter) -> None:
+        buffer = self._text_draft_buffer
+        if buffer is None:
+            return
+        self._clear_text_draft_insert_marks()
+        self._text_draft_insert_start_mark = buffer.create_mark(None, start_iter, True)
+        self._text_draft_insert_end_mark = buffer.create_mark(None, start_iter, False)
+
+    def _prepare_text_draft_fresh_output(self) -> bool:
+        buffer = self._text_draft_buffer
+        if buffer is None:
+            return False
+        start = buffer.get_start_iter()
+        end = buffer.get_end_iter()
+        buffer.delete(start, end)
+        insert_iter = buffer.get_start_iter()
+        self._set_text_draft_insert_marks(insert_iter)
+        self._text_draft_pending_newlines = 0
+        self._text_draft_temp_dirty = True
+        return True
+
+    def _prepare_text_draft_generated_replace(self) -> bool:
+        buffer = self._text_draft_buffer
+        start_mark = self._text_draft_insert_start_mark
+        end_mark = self._text_draft_insert_end_mark
+        if buffer is None or start_mark is None or end_mark is None:
+            return False
+        start_iter = buffer.get_iter_at_mark(start_mark)
+        end_iter = buffer.get_iter_at_mark(end_mark)
+        start_offset = start_iter.get_offset()
+        buffer.delete(start_iter, end_iter)
+        insert_iter = buffer.get_iter_at_offset(start_offset)
+        self._set_text_draft_insert_marks(insert_iter)
+        self._text_draft_pending_newlines = 0
+        self._text_draft_temp_dirty = True
+        return True
+
+    def _get_text_draft_selected_text(self) -> str:
+        buffer = self._text_draft_buffer
+        if buffer is None:
+            return ""
+        if not buffer.get_has_selection():
+            return ""
+        selection = buffer.get_selection_bounds()
+        if len(selection) == 3:
+            has_selection, start, end = selection
+            if not has_selection:
+                return ""
+        else:
+            start, end = selection
+        return buffer.get_text(start, end, True)
+
+    def _prepare_text_draft_selection_replace(self) -> bool:
+        buffer = self._text_draft_buffer
+        if buffer is None or not buffer.get_has_selection():
+            return False
+        selection = buffer.get_selection_bounds()
+        if len(selection) == 3:
+            has_selection, start_iter, end_iter = selection
+            if not has_selection:
+                return False
+        else:
+            start_iter, end_iter = selection
+        start_offset = start_iter.get_offset()
+        buffer.delete(start_iter, end_iter)
+        insert_iter = buffer.get_iter_at_offset(start_offset)
+        self._set_text_draft_insert_marks(insert_iter)
+        self._text_draft_pending_newlines = 0
+        self._text_draft_temp_dirty = True
+        return True
+
+    def _append_text_draft_inserted_text(self, text: str) -> bool:
+        if not text:
+            return False
+        self._append_text_draft_buffer_text(
+            text,
+            is_original_output=False,
+        )
+        return False
+
+    def _append_text_draft_buffer_text(self, text: str, *, is_original_output: bool) -> bool:
+        buffer = self._text_draft_original_output_buffer if is_original_output else self._text_draft_buffer
+        if not text or buffer is None:
+            return False
+        if is_original_output:
+            end_iter = buffer.get_end_iter()
+            insert = lambda chunk: buffer.insert(end_iter, chunk)
+            pending_attr = "_text_draft_original_pending_newlines"
+        else:
+            if self._text_draft_insert_end_mark is None:
+                return False
+            insert_iter = buffer.get_iter_at_mark(self._text_draft_insert_end_mark)
+            insert = lambda chunk: buffer.insert(insert_iter, chunk)
+            pending_attr = "_text_draft_pending_newlines"
+
+        pending_newlines = int(getattr(self, pending_attr, 0) or 0)
+        parts, pending_newlines = self._split_text_for_paragraphs(text, pending_newlines)
+        for kind, chunk in parts:
+            if kind == "paragraph":
+                insert("\n\n")
+                continue
+            if not chunk:
+                continue
+            insert(chunk)
+        setattr(self, pending_attr, pending_newlines)
+        self._text_draft_temp_dirty = True
+        return False
+
+    def _append_text_draft_original_output_text(self, text: str) -> bool:
+        if not text:
+            return False
+        self._append_text_draft_buffer_text(text, is_original_output=True)
+        return False
+
+    def _flush_text_draft_pending_newlines(self, *, is_original_output: bool) -> None:
+        buffer = self._text_draft_original_output_buffer if is_original_output else self._text_draft_buffer
+        if buffer is None:
+            return
+        pending_attr = "_text_draft_original_pending_newlines" if is_original_output else "_text_draft_pending_newlines"
+        pending_newlines = int(getattr(self, pending_attr, 0) or 0)
+        if pending_newlines <= 0:
+            return
+        if is_original_output:
+            end_iter = buffer.get_end_iter()
+            insert = lambda chunk: buffer.insert(end_iter, chunk)
+        else:
+            if self._text_draft_insert_end_mark is None:
+                return
+            insert_iter = buffer.get_iter_at_mark(self._text_draft_insert_end_mark)
+            insert = lambda chunk: buffer.insert(insert_iter, chunk)
+        breaks = pending_newlines // 2
+        for _ in range(breaks):
+            insert("\n\n")
+        if pending_newlines % 2:
+            insert("\n")
+        setattr(self, pending_attr, 0)
+        self._text_draft_temp_dirty = True
+
+    def _trim_text_draft_trailing_whitespace(self) -> None:
+        buffer = self._text_draft_buffer
+        start_mark = self._text_draft_insert_start_mark
+        end_mark = self._text_draft_insert_end_mark
+        if buffer is None or start_mark is None or end_mark is None:
+            return
+        start_iter = buffer.get_iter_at_mark(start_mark)
+        end_iter = buffer.get_iter_at_mark(end_mark)
+        current = buffer.get_text(start_iter, end_iter, True)
+        if not current:
+            return
+        trimmed = current.rstrip()
+        if trimmed == current:
+            return
+        start_offset = start_iter.get_offset()
+        end_offset = end_iter.get_offset()
+        delete_start = buffer.get_iter_at_offset(start_offset)
+        delete_end = buffer.get_iter_at_offset(end_offset)
+        buffer.delete(delete_start, delete_end)
+        insert_iter = buffer.get_iter_at_offset(start_offset)
+        self._set_text_draft_insert_marks(insert_iter)
+        if trimmed:
+            self._append_text_draft_inserted_text(trimmed)
+
+    def _ensure_single_text_draft_trailing_space(self) -> None:
+        buffer = self._text_draft_buffer
+        end_mark = self._text_draft_insert_end_mark
+        if buffer is None or end_mark is None:
+            return
+        self._trim_text_draft_trailing_whitespace()
+        end_iter = buffer.get_iter_at_mark(end_mark)
+        if end_iter.ends_line() or end_iter.is_end():
+            self._append_text_draft_inserted_text(" ")
+            return
+        following = end_iter.get_char()
+        if following != " ":
+            self._append_text_draft_inserted_text(" ")
+
     def _capture_spellingstyle_range_end(self) -> None:
         if not self._editor_insert_doc or not self._editor_insert_cursor:
             return
@@ -5699,8 +6546,14 @@ button.improve-profile-chip {{
         if hasattr(self, "_regenerate_profile_chip_buttons"):
             for button in self._regenerate_profile_chip_buttons:
                 button.set_sensitive(self._regenerate_profile_chip_sensitive())
+        if hasattr(self, "_text_draft_regenerate_profile_chip_buttons"):
+            for button in self._text_draft_regenerate_profile_chip_buttons:
+                button.set_sensitive(self._text_draft_regenerate_profile_chip_sensitive())
         if hasattr(self, "_transform_action_buttons"):
             for button in self._transform_action_buttons:
+                button.set_sensitive(not busy)
+        if hasattr(self, "_text_draft_action_buttons"):
+            for button in self._text_draft_action_buttons:
                 button.set_sensitive(not busy)
 
     # Proofreading pipeline ----------------------------------------------
@@ -6198,6 +7051,17 @@ button.improve-profile-chip {{
             return
         GLib.idle_add(self._on_spellingstyle_finished, "SpellingStyle complete.")
 
+    def _run_text_draft_spellingstyle(self, source_text: str) -> None:
+        try:
+            payload = self._compose_spellingstyle_payload(source_text)
+            for chunk in self._stream_spellingstyle(payload):
+                GLib.idle_add(self._append_text_draft_inserted_text, chunk)
+                GLib.idle_add(self._append_text_draft_original_output_text, chunk)
+        except Exception as exc:  # noqa: BLE001
+            GLib.idle_add(self._on_text_draft_failed, str(exc))
+            return
+        GLib.idle_add(self._on_text_draft_spellingstyle_finished, "Text Draft SpellingStyle complete.")
+
     def _run_improve(self, source_text: str, profile: ModelProfile) -> None:
         payload = self._compose_improve_payload(source_text, profile)
         try:
@@ -6207,6 +7071,16 @@ button.improve-profile-chip {{
             GLib.idle_add(self._on_spellingstyle_failed, str(exc))
             return
         GLib.idle_add(self._on_improve_finished, f"Improve Generated complete with {profile.display_name()}.")
+
+    def _run_text_draft_improve(self, source_text: str, profile: ModelProfile) -> None:
+        payload = self._compose_improve_payload(source_text, profile)
+        try:
+            for chunk in self._stream_custom(payload, profile.api_url, profile.api_key, request_title="Improve"):
+                GLib.idle_add(self._append_text_draft_inserted_text, chunk)
+        except Exception as exc:  # noqa: BLE001
+            GLib.idle_add(self._on_text_draft_failed, str(exc))
+            return
+        GLib.idle_add(self._on_text_draft_improve_finished, f"Improve Generated complete with {profile.display_name()}.")
 
     def _run_rephrase_generated(self, source_text: str, profile: ModelProfile) -> None:
         payload = self._compose_rephrase_generated_payload(source_text, profile)
@@ -6218,6 +7092,19 @@ button.improve-profile-chip {{
             return
         GLib.idle_add(self._on_improve_finished, f"Rephrase Generated complete with {profile.display_name()}.")
 
+    def _run_text_draft_rephrase_generated(self, source_text: str, profile: ModelProfile) -> None:
+        payload = self._compose_rephrase_generated_payload(source_text, profile)
+        try:
+            for chunk in self._stream_custom(payload, profile.api_url, profile.api_key, request_title="Rephrase"):
+                GLib.idle_add(self._append_text_draft_inserted_text, chunk)
+        except Exception as exc:  # noqa: BLE001
+            GLib.idle_add(self._on_text_draft_failed, str(exc))
+            return
+        GLib.idle_add(
+            self._on_text_draft_improve_finished,
+            f"Rephrase Generated complete with {profile.display_name()}.",
+        )
+
     def _run_improve_selected(self, source_text: str, profile: ModelProfile) -> None:
         payload = self._compose_improve_payload(source_text, profile)
         try:
@@ -6228,6 +7115,19 @@ button.improve-profile-chip {{
             return
         GLib.idle_add(
             self._on_improve_selected_finished,
+            f"Improve Selected complete with {profile.display_name()}.",
+        )
+
+    def _run_text_draft_improve_selected(self, source_text: str, profile: ModelProfile) -> None:
+        payload = self._compose_improve_payload(source_text, profile)
+        try:
+            for chunk in self._stream_custom(payload, profile.api_url, profile.api_key, request_title="Improve"):
+                GLib.idle_add(self._append_text_draft_inserted_text, chunk)
+        except Exception as exc:  # noqa: BLE001
+            GLib.idle_add(self._on_text_draft_failed, str(exc))
+            return
+        GLib.idle_add(
+            self._on_text_draft_improve_finished,
             f"Improve Selected complete with {profile.display_name()}.",
         )
 
@@ -7296,6 +8196,7 @@ button.improve-profile-chip {{
     def _on_spellingstyle_failed(self, message: str) -> bool:
         self._set_busy(False)
         self._clear_pending_regenerate_context()
+        self._clear_pending_text_draft_regenerate_context()
         if self._editor_insert_doc and self._editor_insert_cursor:
             self._flush_pending_newlines(
                 self._editor_insert_doc,
@@ -7313,6 +8214,14 @@ button.improve-profile-chip {{
         self._notify_llm_error(message)
         return False
 
+    def _on_text_draft_failed(self, message: str) -> bool:
+        self._set_busy(False)
+        self._clear_pending_text_draft_regenerate_context()
+        self._flush_text_draft_pending_newlines(is_original_output=False)
+        self._flush_text_draft_pending_newlines(is_original_output=True)
+        self._notify_llm_error(message)
+        return False
+
     def _on_spellingstyle_finished(self, message: str) -> bool:
         self._set_busy(False)
         self._status_label.set_label(message)
@@ -7327,6 +8236,16 @@ button.improve-profile-chip {{
         self._capture_spellingstyle_range_end()
         return False
 
+    def _on_text_draft_spellingstyle_finished(self, message: str) -> bool:
+        self._set_busy(False)
+        self._status_label.set_label(message)
+        self._flush_text_draft_pending_newlines(is_original_output=False)
+        self._flush_text_draft_pending_newlines(is_original_output=True)
+        self._ensure_single_text_draft_trailing_space()
+        self._trim_text_draft_original_output_edges()
+        self._text_draft_temp_dirty = True
+        return False
+
     def _on_improve_finished(self, message: str) -> bool:
         self._set_busy(False)
         self._status_label.set_label(message)
@@ -7339,6 +8258,15 @@ button.improve-profile-chip {{
             self._ensure_single_trailing_space(self._improve_insert_doc, self._improve_insert_cursor)
         self._commit_pending_regenerate_context()
         self._capture_improve1_range_end()
+        return False
+
+    def _on_text_draft_improve_finished(self, message: str) -> bool:
+        self._set_busy(False)
+        self._status_label.set_label(message)
+        self._flush_text_draft_pending_newlines(is_original_output=False)
+        self._ensure_single_text_draft_trailing_space()
+        self._commit_pending_text_draft_regenerate_context()
+        self._text_draft_temp_dirty = True
         return False
 
     def _on_improve_selected_finished(self, message: str) -> bool:
@@ -7892,6 +8820,7 @@ class SettingsWindow(Adw.ApplicationWindow):
         shared_style_rules: str,
         editor_action_profile_defaults: dict[str, str | None],
         editor_pinned_action_ids: list[str],
+        text_draft_pinned_action_ids: list[str],
         libreoffice_python_path: Path | None,
         concordance_file_path: Path | None,
         editor_source_file: Path | None,
@@ -7918,6 +8847,7 @@ class SettingsWindow(Adw.ApplicationWindow):
                 TranslateSettings,
                 str,
                 dict[str, str | None],
+                list[str],
                 list[str],
                 Path | None,
                 Path | None,
@@ -7955,6 +8885,12 @@ class SettingsWindow(Adw.ApplicationWindow):
             key: key in pinned_action_set
             for key in self._editor_action_order
         }
+        self._text_draft_action_order = _ordered_text_draft_quick_action_keys(text_draft_pinned_action_ids)
+        text_draft_pinned_action_set = set(_sanitize_text_draft_pinned_actions(text_draft_pinned_action_ids))
+        self._text_draft_quick_action_enabled = {
+            key: key in text_draft_pinned_action_set
+            for key in self._text_draft_action_order
+        }
         self._libreoffice_python_path = libreoffice_python_path
         self._concordance_file_path = concordance_file_path
         self._editor_source_file = editor_source_file
@@ -7966,6 +8902,7 @@ class SettingsWindow(Adw.ApplicationWindow):
         self._libreoffice_path_row_guard = False
         self._concordance_path_row_guard = False
         self._quick_action_toggle_guard = False
+        self._text_draft_quick_action_toggle_guard = False
         self.set_default_size(900, 720)
         self.set_resizable(True)
         self._build_ui()
@@ -8133,6 +9070,18 @@ class SettingsWindow(Adw.ApplicationWindow):
         self._prompt_row_keys[quick_actions_row] = "quick-actions"
         prompt_stack.add_named(self._build_quick_actions_page(), "quick-actions")
 
+        text_draft_quick_actions_row = Gtk.ListBoxRow()
+        text_draft_quick_actions_row_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        text_draft_quick_actions_row_box.set_margin_top(8)
+        text_draft_quick_actions_row_box.set_margin_bottom(8)
+        text_draft_quick_actions_row_box.set_margin_start(12)
+        text_draft_quick_actions_row_box.set_margin_end(12)
+        text_draft_quick_actions_row_box.append(Gtk.Label(label="Text Draft Quick Actions", xalign=0))
+        text_draft_quick_actions_row.set_child(text_draft_quick_actions_row_box)
+        prompt_list.append(text_draft_quick_actions_row)
+        self._prompt_row_keys[text_draft_quick_actions_row] = "text-draft-quick-actions"
+        prompt_stack.add_named(self._build_text_draft_quick_actions_page(), "text-draft-quick-actions")
+
         editor_commands_row = Gtk.ListBoxRow()
         editor_commands_row_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         editor_commands_row_box.set_margin_top(8)
@@ -8144,6 +9093,18 @@ class SettingsWindow(Adw.ApplicationWindow):
         prompt_list.append(editor_commands_row)
         self._prompt_row_keys[editor_commands_row] = "editor-commands"
         prompt_stack.add_named(self._build_editor_commands_page(), "editor-commands")
+
+        text_draft_commands_row = Gtk.ListBoxRow()
+        text_draft_commands_row_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        text_draft_commands_row_box.set_margin_top(8)
+        text_draft_commands_row_box.set_margin_bottom(8)
+        text_draft_commands_row_box.set_margin_start(12)
+        text_draft_commands_row_box.set_margin_end(12)
+        text_draft_commands_row_box.append(Gtk.Label(label="Text Draft Commands", xalign=0))
+        text_draft_commands_row.set_child(text_draft_commands_row_box)
+        prompt_list.append(text_draft_commands_row)
+        self._prompt_row_keys[text_draft_commands_row] = "text-draft-commands"
+        prompt_stack.add_named(self._build_text_draft_commands_page(), "text-draft-commands")
 
         if first_row is not None:
             prompt_list.select_row(first_row)
@@ -8317,6 +9278,64 @@ class SettingsWindow(Adw.ApplicationWindow):
         self._rebuild_quick_action_rows()
         return page_box
 
+    def _build_text_draft_quick_actions_page(self) -> Gtk.Widget:
+        page_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+        page_box.set_margin_top(12)
+        page_box.set_margin_bottom(12)
+        page_box.set_margin_start(12)
+        page_box.set_margin_end(12)
+        page_box.set_valign(Gtk.Align.START)
+
+        title_label = Gtk.Label(label="Text Draft Quick Actions", xalign=0)
+        title_label.add_css_class("title-3")
+        page_box.append(title_label)
+
+        info_label = Gtk.Label(
+            label=(
+                f"Pin up to {MAX_PINNED_EDITOR_ACTIONS} actions for the Text Draft toolbar. "
+                "Unpinned actions stay under More."
+            ),
+            xalign=0,
+        )
+        info_label.add_css_class("dim-label")
+        info_label.set_wrap(True)
+        info_label.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
+        page_box.append(info_label)
+
+        quick_actions_group = Adw.PreferencesGroup(title="Pinned Text Draft Actions")
+        quick_actions_group.add_css_class("list-stack")
+        quick_actions_group.set_hexpand(True)
+        page_box.append(quick_actions_group)
+
+        quick_actions_row = Adw.PreferencesRow()
+        quick_actions_row.set_selectable(False)
+        quick_actions_row.set_activatable(False)
+
+        quick_actions_content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        quick_actions_content.set_margin_top(10)
+        quick_actions_content.set_margin_bottom(10)
+        quick_actions_content.set_margin_start(12)
+        quick_actions_content.set_margin_end(12)
+
+        quick_actions_hint = Gtk.Label(xalign=0)
+        quick_actions_hint.add_css_class("caption")
+        quick_actions_hint.add_css_class("dim-label")
+        quick_actions_hint.set_wrap(True)
+        quick_actions_hint.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
+        quick_actions_content.append(quick_actions_hint)
+        self._text_draft_quick_actions_hint = quick_actions_hint
+
+        quick_actions_list = Gtk.ListBox()
+        quick_actions_list.set_selection_mode(Gtk.SelectionMode.NONE)
+        quick_actions_list.add_css_class("boxed-list")
+        quick_actions_content.append(quick_actions_list)
+        self._text_draft_quick_actions_list = quick_actions_list
+
+        quick_actions_row.set_child(quick_actions_content)
+        quick_actions_group.add(quick_actions_row)
+        self._rebuild_text_draft_quick_action_rows()
+        return page_box
+
     def _build_editor_commands_page(self) -> Gtk.Widget:
         page_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
         page_box.set_margin_top(12)
@@ -8346,6 +9365,46 @@ class SettingsWindow(Adw.ApplicationWindow):
         page_box.append(actions_group)
 
         for title, action_name, param, desc, supports_profiles in _editor_command_items():
+            row = self._build_settings_editor_command_row(
+                title,
+                action_name,
+                param,
+                desc,
+                supports_profiles=supports_profiles,
+            )
+            actions_group.add(row)
+
+        return page_box
+
+    def _build_text_draft_commands_page(self) -> Gtk.Widget:
+        page_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+        page_box.set_margin_top(12)
+        page_box.set_margin_bottom(12)
+        page_box.set_margin_start(12)
+        page_box.set_margin_end(12)
+        page_box.set_valign(Gtk.Align.START)
+
+        title_label = Gtk.Label(label="Text Draft Commands", xalign=0)
+        title_label.add_css_class("title-3")
+        page_box.append(title_label)
+
+        info_label = Gtk.Label(
+            label=(
+                "Use Run to trigger Text Draft actions inside the open Prose window. "
+                "Use Copy Command to place the GApplication call on your clipboard for use in other programs."
+            ),
+            xalign=0,
+        )
+        info_label.add_css_class("dim-label")
+        info_label.set_wrap(True)
+        info_label.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
+        page_box.append(info_label)
+
+        actions_group = Adw.PreferencesGroup(title="Text Draft Actions")
+        actions_group.add_css_class("list-stack")
+        page_box.append(actions_group)
+
+        for title, action_name, param, desc, supports_profiles in _text_draft_command_items():
             row = self._build_settings_editor_command_row(
                 title,
                 action_name,
@@ -8657,6 +9716,48 @@ class SettingsWindow(Adw.ApplicationWindow):
 
             self._quick_actions_list.append(row)
 
+    def _current_text_draft_pinned_actions(self) -> list[str]:
+        return [key for key in self._text_draft_action_order if self._text_draft_quick_action_enabled.get(key, False)]
+
+    def _update_text_draft_quick_actions_hint(self) -> None:
+        count = len(self._current_text_draft_pinned_actions())
+        self._text_draft_quick_actions_hint.set_label(
+            f"{count} of {MAX_PINNED_EDITOR_ACTIONS} pinned. Unpinned actions stay under More."
+        )
+
+    def _rebuild_text_draft_quick_action_rows(self) -> None:
+        self._clear_list_box(self._text_draft_quick_actions_list)
+        self._update_text_draft_quick_actions_hint()
+
+        last_index = len(self._text_draft_action_order) - 1
+        for index, key in enumerate(self._text_draft_action_order):
+            definition = TEXT_DRAFT_QUICK_ACTION_BY_KEY[key]
+            row = Adw.ActionRow(title=definition.title, subtitle=definition.description)
+            row.set_activatable(False)
+
+            toggle = Gtk.CheckButton()
+            toggle.set_valign(Gtk.Align.CENTER)
+            toggle.set_active(self._text_draft_quick_action_enabled.get(key, False))
+            toggle.set_tooltip_text("Show this action in the Text Draft quick-actions row")
+            toggle.connect("toggled", self._on_text_draft_quick_action_toggled, key)
+            row.add_prefix(toggle)
+
+            up_btn = Gtk.Button(icon_name="go-up-symbolic")
+            up_btn.add_css_class("flat")
+            up_btn.set_tooltip_text("Move up")
+            up_btn.set_sensitive(index > 0)
+            up_btn.connect("clicked", self._on_move_text_draft_quick_action_clicked, key, -1)
+            row.add_suffix(up_btn)
+
+            down_btn = Gtk.Button(icon_name="go-down-symbolic")
+            down_btn.add_css_class("flat")
+            down_btn.set_tooltip_text("Move down")
+            down_btn.set_sensitive(index < last_index)
+            down_btn.connect("clicked", self._on_move_text_draft_quick_action_clicked, key, 1)
+            row.add_suffix(down_btn)
+
+            self._text_draft_quick_actions_list.append(row)
+
     def _on_quick_action_toggled(self, button: Gtk.CheckButton, key: str) -> None:
         if self._quick_action_toggle_guard:
             return
@@ -8686,6 +9787,36 @@ class SettingsWindow(Adw.ApplicationWindow):
             self._editor_action_order[index],
         )
         self._rebuild_quick_action_rows()
+
+    def _on_text_draft_quick_action_toggled(self, button: Gtk.CheckButton, key: str) -> None:
+        if self._text_draft_quick_action_toggle_guard:
+            return
+
+        active = button.get_active()
+        was_active = self._text_draft_quick_action_enabled.get(key, False)
+        if active == was_active:
+            return
+
+        if active and len(self._current_text_draft_pinned_actions()) >= MAX_PINNED_EDITOR_ACTIONS:
+            self._text_draft_quick_action_toggle_guard = True
+            button.set_active(False)
+            self._text_draft_quick_action_toggle_guard = False
+            self._parent_window._show_toast(f"Pin up to {MAX_PINNED_EDITOR_ACTIONS} Text Draft quick actions.")
+            return
+
+        self._text_draft_quick_action_enabled[key] = active
+        self._update_text_draft_quick_actions_hint()
+
+    def _on_move_text_draft_quick_action_clicked(self, _button: Gtk.Button, key: str, delta: int) -> None:
+        index = self._text_draft_action_order.index(key)
+        target_index = index + delta
+        if target_index < 0 or target_index >= len(self._text_draft_action_order):
+            return
+        self._text_draft_action_order[index], self._text_draft_action_order[target_index] = (
+            self._text_draft_action_order[target_index],
+            self._text_draft_action_order[index],
+        )
+        self._rebuild_text_draft_quick_action_rows()
 
     def trigger_save(self) -> None:
         self._on_save_clicked(None)
@@ -8902,6 +10033,7 @@ class SettingsWindow(Adw.ApplicationWindow):
                 continue
             editor_action_profile_defaults[key] = MODEL_PROFILE_IDS[selected_index]
         editor_pinned_action_ids = self._current_editor_pinned_actions()
+        text_draft_pinned_action_ids = self._current_text_draft_pinned_actions()
         self._on_save(
             model_profiles,
             proof_settings,
@@ -8923,6 +10055,7 @@ class SettingsWindow(Adw.ApplicationWindow):
             shared_style_rules_text,
             editor_action_profile_defaults,
             editor_pinned_action_ids,
+            text_draft_pinned_action_ids,
             self._libreoffice_python_path,
             self._concordance_file_path,
         )
