@@ -1270,7 +1270,6 @@ DEFAULT_EDITOR_PINNED_ACTION_IDS = (
     "conclusion",
 )
 DEFAULT_TEXT_DRAFT_PINNED_ACTION_IDS = (
-    "text-draft-spellingstyle",
     "text-draft-improve-generated",
     "text-draft-rephrase-generated",
     "text-draft-improve-selected",
@@ -1312,13 +1311,6 @@ def _editor_command_items() -> list[tuple[str, str, str | None, str, bool]]:
 
 TEXT_DRAFT_QUICK_ACTIONS = (
     QuickActionDefinition(
-        key="text-draft-spellingstyle",
-        label="SpellingStyle",
-        title="SpellingStyle",
-        action_name="text-draft-spellingstyle",
-        description="Stream model output into the local Text Draft buffer.",
-    ),
-    QuickActionDefinition(
         key="text-draft-improve-generated",
         label="Improve Generated",
         title="Improve Generated",
@@ -1351,7 +1343,7 @@ TEXT_DRAFT_QUICK_ACTIONS = (
     ),
     QuickActionDefinition(
         key="text-draft-wrap-quotes",
-        label="Wrap Quotes",
+        label="Quotes",
         title="Wrap Quotes",
         action_name="text-draft-wrap-quotes",
         description="Wrap the selected Text Draft text in curly quotes.",
@@ -1366,6 +1358,14 @@ TEXT_DRAFT_QUICK_ACTION_BY_ACTION_NAME = {
 def _text_draft_command_items() -> list[tuple[str, str, str | None, str, bool]]:
     commands = [
         (
+            "SpellingStyle",
+            "text-draft-spellingstyle",
+            None,
+            "Stream model output into the local Text Draft buffer.",
+            False,
+        ),
+        *[
+        (
             definition.title,
             definition.action_name,
             None,
@@ -1373,6 +1373,7 @@ def _text_draft_command_items() -> list[tuple[str, str, str | None, str, bool]]:
             definition.supports_profiles,
         )
         for definition in TEXT_DRAFT_QUICK_ACTIONS
+        ],
     ]
     commands.append(
         ("Copy Draft", "text-draft-copy", None, "Copy the full Text Draft buffer to the clipboard.", False)
@@ -3839,7 +3840,7 @@ button.improve-profile-chip {{
         if not source_text.strip():
             self._show_toast("Source file is empty.")
             return
-        if not self._prepare_text_draft_fresh_output():
+        if not self._prepare_text_draft_append_output():
             self._show_toast("Unable to prepare Text Draft output.")
             return
         GLib.idle_add(self._set_text_draft_original_output_text, "")
@@ -6300,17 +6301,13 @@ button.improve-profile-chip {{
         self._text_draft_insert_start_mark = buffer.create_mark(None, start_iter, True)
         self._text_draft_insert_end_mark = buffer.create_mark(None, start_iter, False)
 
-    def _prepare_text_draft_fresh_output(self) -> bool:
+    def _prepare_text_draft_append_output(self) -> bool:
         buffer = self._text_draft_buffer
         if buffer is None:
             return False
-        start = buffer.get_start_iter()
-        end = buffer.get_end_iter()
-        buffer.delete(start, end)
-        insert_iter = buffer.get_start_iter()
+        insert_iter = buffer.get_iter_at_mark(buffer.get_insert())
         self._set_text_draft_insert_marks(insert_iter)
         self._text_draft_pending_newlines = 0
-        self._text_draft_temp_dirty = True
         return True
 
     def _prepare_text_draft_generated_replace(self) -> bool:
@@ -6467,6 +6464,18 @@ button.improve-profile-chip {{
         following = end_iter.get_char()
         if following != " ":
             self._append_text_draft_inserted_text(" ")
+
+    def _focus_text_draft_insert_end(self) -> None:
+        buffer = self._text_draft_buffer
+        view = self._text_draft_view
+        end_mark = self._text_draft_insert_end_mark
+        if buffer is None or view is None or end_mark is None:
+            return
+        end_iter = buffer.get_iter_at_mark(end_mark)
+        buffer.place_cursor(end_iter)
+        insert_mark = buffer.get_insert()
+        view.scroll_mark_onscreen(insert_mark)
+        view.grab_focus()
 
     def _capture_spellingstyle_range_end(self) -> None:
         if not self._editor_insert_doc or not self._editor_insert_cursor:
@@ -8242,6 +8251,7 @@ button.improve-profile-chip {{
         self._flush_text_draft_pending_newlines(is_original_output=False)
         self._flush_text_draft_pending_newlines(is_original_output=True)
         self._ensure_single_text_draft_trailing_space()
+        self._focus_text_draft_insert_end()
         self._trim_text_draft_original_output_edges()
         self._text_draft_temp_dirty = True
         return False
@@ -8265,6 +8275,7 @@ button.improve-profile-chip {{
         self._status_label.set_label(message)
         self._flush_text_draft_pending_newlines(is_original_output=False)
         self._ensure_single_text_draft_trailing_space()
+        self._focus_text_draft_insert_end()
         self._commit_pending_text_draft_regenerate_context()
         self._text_draft_temp_dirty = True
         return False
