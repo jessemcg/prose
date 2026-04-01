@@ -136,6 +136,7 @@ CONFIG_KEY_CT_PREFIX = "ct_prefix"
 CONFIG_KEY_WORD_SUBSTITUTIONS = "word_substitutions"
 CONFIG_KEY_EDITOR_SOURCE_FILE = "editor_source_file"
 CONFIG_KEY_LAST_ODT_FILE = "last_odt_file"
+CONFIG_KEY_TEXT_DRAFT_TEMPLATE_DIR = "text_draft_template_dir"
 CONFIG_KEY_LIBREOFFICE_PYTHON_PATH = "libreoffice_python_path"
 CONFIG_KEY_CONCORDANCE_FILE_PATH = "concordance_file_path"
 CONFIG_KEY_EDITOR_PINNED_ACTIONS = "editor_pinned_actions"
@@ -2011,6 +2012,23 @@ def save_editor_source_file(path: Path | None) -> None:
     _write_config(data)
 
 
+def load_text_draft_template_dir() -> Path | None:
+    raw = _read_config()
+    path = raw.get(CONFIG_KEY_TEXT_DRAFT_TEMPLATE_DIR)
+    if isinstance(path, str) and path.strip():
+        return Path(path).expanduser().resolve(strict=False)
+    return None
+
+
+def save_text_draft_template_dir(path: Path | None) -> None:
+    data = _read_config()
+    if path:
+        data[CONFIG_KEY_TEXT_DRAFT_TEMPLATE_DIR] = str(path.expanduser().resolve(strict=False))
+    else:
+        data.pop(CONFIG_KEY_TEXT_DRAFT_TEMPLATE_DIR, None)
+    _write_config(data)
+
+
 def load_last_odt_file() -> Path | None:
     raw = _read_config()
     path = raw.get(CONFIG_KEY_LAST_ODT_FILE)
@@ -2194,6 +2212,7 @@ class ProseWindow(Adw.ApplicationWindow):
         )
         self._prefix_settings = load_prefix_settings()
         self._editor_source_file = load_editor_source_file()
+        self._text_draft_template_dir = load_text_draft_template_dir()
         self._last_odt_path = load_last_odt_file()
         self._concordance_file_path = load_concordance_file_path()
         self._editor_pinned_action_ids = load_editor_pinned_actions()
@@ -2237,6 +2256,10 @@ class ProseWindow(Adw.ApplicationWindow):
         self._text_draft_regenerate_profile_chip_buttons: list[Gtk.Button] = []
         self._text_draft_action_buttons: list[Gtk.Widget] = []
         self._text_draft_actions_wrap: Gtk.FlowBox | None = None
+        self._text_draft_template_button: Gtk.MenuButton | None = None
+        self._text_draft_templates_popover: Gtk.Popover | None = None
+        self._text_draft_templates_grid: Gtk.FlowBox | None = None
+        self._text_draft_template_menu_buttons: list[Gtk.Widget] = []
         self._text_draft_temp_path: Path | None = None
         self._text_draft_temp_flush_source_id = 0
         self._text_draft_temp_dirty = False
@@ -2569,9 +2592,16 @@ class ProseWindow(Adw.ApplicationWindow):
         draft_header_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         draft_header = Gtk.Label(label="Draft", xalign=0)
         draft_header.add_css_class("dim-label")
-        draft_header.set_hexpand(True)
         draft_header.set_halign(Gtk.Align.START)
         draft_header_row.append(draft_header)
+
+        templates_button = self._build_text_draft_templates_button()
+        draft_header_row.append(templates_button)
+        self._text_draft_template_button = templates_button
+
+        header_spacer = Gtk.Box()
+        header_spacer.set_hexpand(True)
+        draft_header_row.append(header_spacer)
 
         copy_draft_btn = Gtk.Button(label="Copy", icon_name="edit-copy-symbolic")
         copy_draft_btn.add_css_class("flat")
@@ -2605,6 +2635,7 @@ class ProseWindow(Adw.ApplicationWindow):
         self._text_draft_buffer = draft_buffer
         self._text_draft_view = draft_view
 
+        self._refresh_text_draft_templates()
         panel.append(draft_section)
         return panel
 
@@ -3400,6 +3431,7 @@ button.improve-profile-chip {{
             self._editor_action_profile_defaults,
             self._editor_pinned_action_ids,
             self._text_draft_pinned_action_ids,
+            self._text_draft_template_dir,
             self._libreoffice_python_path,
             self._concordance_file_path,
             self._editor_source_file,
@@ -3441,6 +3473,7 @@ button.improve-profile-chip {{
         editor_action_profile_defaults: dict[str, str | None],
         editor_pinned_action_ids: list[str],
         text_draft_pinned_action_ids: list[str],
+        text_draft_template_dir: Path | None,
         libreoffice_python_path: Path | None,
         concordance_file_path: Path | None,
     ) -> None:
@@ -3465,6 +3498,9 @@ button.improve-profile-chip {{
         self._editor_action_profile_defaults = _sanitize_editor_action_profile_defaults(editor_action_profile_defaults)
         self._editor_pinned_action_ids = _sanitize_editor_pinned_actions(editor_pinned_action_ids)
         self._text_draft_pinned_action_ids = _sanitize_text_draft_pinned_actions(text_draft_pinned_action_ids)
+        self._text_draft_template_dir = (
+            text_draft_template_dir.expanduser().resolve(strict=False) if text_draft_template_dir else None
+        )
         self._libreoffice_python_path = libreoffice_python_path.expanduser().resolve(strict=False) if libreoffice_python_path else None
         self._concordance_file_path = (
             concordance_file_path.expanduser().resolve(strict=False) if concordance_file_path else None
@@ -3490,11 +3526,13 @@ button.improve-profile-chip {{
         save_editor_action_profile_defaults(self._editor_action_profile_defaults)
         save_editor_pinned_actions(self._editor_pinned_action_ids)
         save_text_draft_pinned_actions(self._text_draft_pinned_action_ids)
+        save_text_draft_template_dir(self._text_draft_template_dir)
         save_libreoffice_python_path(self._libreoffice_python_path)
         save_concordance_file_path(self._concordance_file_path)
         self._rebuild_transform_action_buttons()
         self._rebuild_text_draft_action_buttons()
         self._rebuild_regenerate_profile_chips()
+        self._refresh_text_draft_templates()
         _import_uno_from_candidates(self._libreoffice_python_path, force_retry=True)
         self._ctx = None
         self._desktop = None
@@ -6277,6 +6315,150 @@ button.improve-profile-chip {{
         start, end = self._text_draft_buffer.get_bounds()
         return self._text_draft_buffer.get_text(start, end, True)
 
+    def _text_draft_has_user_text(self) -> bool:
+        return bool(self._get_text_draft_text().strip())
+
+    def _list_text_draft_template_paths(self) -> list[Path]:
+        directory = self._text_draft_template_dir
+        if directory is None or not directory.exists() or not directory.is_dir():
+            return []
+        try:
+            return sorted(
+                (
+                    child for child in directory.iterdir()
+                    if child.is_file() and child.suffix.lower() == ".txt"
+                ),
+                key=lambda path: path.name.lower(),
+            )
+        except OSError:
+            return []
+
+    def _update_text_draft_template_controls(self) -> None:
+        button = self._text_draft_template_button
+        has_templates = bool(self._list_text_draft_template_paths())
+        if button is not None:
+            button.set_sensitive(has_templates and not self._busy)
+        for widget in self._text_draft_template_menu_buttons:
+            widget.set_sensitive(not self._busy)
+
+    def _build_text_draft_templates_button(self) -> Gtk.MenuButton:
+        popover = Gtk.Popover()
+        popover.set_autohide(True)
+        popover.set_cascade_popdown(True)
+        popover.set_position(Gtk.PositionType.BOTTOM)
+
+        content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+        content.set_margin_top(10)
+        content.set_margin_bottom(10)
+        content.set_margin_start(10)
+        content.set_margin_end(10)
+
+        title = Gtk.Label(label="Templates", xalign=0)
+        title.add_css_class("caption")
+        title.add_css_class("dim-label")
+        content.append(title)
+
+        action_grid = Gtk.FlowBox()
+        action_grid.set_selection_mode(Gtk.SelectionMode.NONE)
+        action_grid.set_column_spacing(6)
+        action_grid.set_row_spacing(6)
+        action_grid.set_max_children_per_line(2)
+        content.append(action_grid)
+
+        popover.set_child(content)
+
+        button = Gtk.MenuButton(label="Templates")
+        button.set_tooltip_text("Load a text template into Draft")
+        button.set_popover(popover)
+        self._apply_quick_action_button_classes(button)
+        self._text_draft_templates_popover = popover
+        self._text_draft_templates_grid = action_grid
+        return button
+
+    def _refresh_text_draft_templates(self) -> None:
+        grid = self._text_draft_templates_grid
+        if grid is None:
+            return
+        self._clear_flow_box(grid)
+        self._text_draft_template_menu_buttons = []
+        popover = self._text_draft_templates_popover
+        for path in self._list_text_draft_template_paths():
+            button = Gtk.Button(label=path.stem)
+            button.set_tooltip_text(path.name)
+            self._apply_quick_action_button_classes(button)
+            button.connect("clicked", self._on_text_draft_template_menu_clicked, path, popover)
+            grid.append(button)
+            self._text_draft_template_menu_buttons.append(button)
+        self._update_text_draft_template_controls()
+
+    def _replace_text_draft_with_text(self, text: str) -> None:
+        buffer = self._text_draft_buffer
+        if buffer is None:
+            return
+        self._clear_text_draft_insert_marks()
+        self._clear_pending_text_draft_regenerate_context()
+        self._text_draft_last_regenerate_context = None
+        self._set_text_draft_original_output_text("")
+        self._text_draft_pending_newlines = 0
+        buffer.set_text(text)
+        end_iter = buffer.get_end_iter()
+        self._set_text_draft_insert_marks(end_iter)
+        self._text_draft_temp_dirty = True
+        self._focus_text_draft_insert_end()
+
+    def _apply_text_draft_template_path(self, path: Path) -> None:
+        try:
+            text = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeError) as exc:
+            self._status_label.set_label(f"Unable to load template: {exc}")
+            self._show_toast(f"Unable to load template: {exc}")
+            return
+        self._replace_text_draft_with_text(text)
+        self._status_label.set_label(f"Loaded text template: {path.name}")
+        self._show_toast(f"Loaded template: {path.name}")
+
+    def _load_text_draft_template_path(self, path: Path) -> None:
+        if self._busy:
+            return
+        if not self._text_draft_has_user_text():
+            self._apply_text_draft_template_path(path)
+            return
+        dialog = Adw.MessageDialog.new(
+            self,
+            "Replace Draft with template?",
+            (
+                "Loading a template will replace the current Draft text.\n\n"
+                f"Template: {path.name}"
+            ),
+        )
+        dialog.add_response("cancel", "Cancel")
+        dialog.add_response("replace", "Replace Draft")
+        dialog.set_response_appearance("replace", Adw.ResponseAppearance.DESTRUCTIVE)
+        dialog.set_default_response("cancel")
+        dialog.set_close_response("cancel")
+        dialog.connect("response", self._on_text_draft_template_replace_response, path)
+        dialog.present()
+
+    def _on_text_draft_template_menu_clicked(
+        self,
+        _button: Gtk.Button,
+        path: Path,
+        popover: Gtk.Popover | None,
+    ) -> None:
+        if popover is not None:
+            popover.popdown()
+        self._load_text_draft_template_path(path)
+
+    def _on_text_draft_template_replace_response(
+        self,
+        _dialog: Adw.MessageDialog,
+        response: str,
+        path: Path,
+    ) -> None:
+        if response != "replace":
+            return
+        self._apply_text_draft_template_path(path)
+
     def _clear_text_draft_insert_marks(self) -> None:
         buffer = self._text_draft_buffer
         if buffer is None:
@@ -6564,6 +6746,8 @@ button.improve-profile-chip {{
         if hasattr(self, "_text_draft_action_buttons"):
             for button in self._text_draft_action_buttons:
                 button.set_sensitive(not busy)
+        if hasattr(self, "_update_text_draft_template_controls"):
+            self._update_text_draft_template_controls()
 
     # Proofreading pipeline ----------------------------------------------
     def _gather_and_request(
@@ -8832,6 +9016,7 @@ class SettingsWindow(Adw.ApplicationWindow):
         editor_action_profile_defaults: dict[str, str | None],
         editor_pinned_action_ids: list[str],
         text_draft_pinned_action_ids: list[str],
+        text_draft_template_dir: Path | None,
         libreoffice_python_path: Path | None,
         concordance_file_path: Path | None,
         editor_source_file: Path | None,
@@ -8860,6 +9045,7 @@ class SettingsWindow(Adw.ApplicationWindow):
                 dict[str, str | None],
                 list[str],
                 list[str],
+                Path | None,
                 Path | None,
                 Path | None,
             ],
@@ -8902,6 +9088,9 @@ class SettingsWindow(Adw.ApplicationWindow):
             key: key in text_draft_pinned_action_set
             for key in self._text_draft_action_order
         }
+        self._text_draft_template_dir = (
+            text_draft_template_dir.expanduser().resolve(strict=False) if text_draft_template_dir else None
+        )
         self._libreoffice_python_path = libreoffice_python_path
         self._concordance_file_path = concordance_file_path
         self._editor_source_file = editor_source_file
@@ -8910,6 +9099,7 @@ class SettingsWindow(Adw.ApplicationWindow):
         self._prompt_editors: dict[str, PromptEditorWidgets] = {}
         self._prompt_row_keys: dict[Gtk.ListBoxRow, str] = {}
         self._source_row_guard = False
+        self._text_draft_template_dir_row_guard = False
         self._libreoffice_path_row_guard = False
         self._concordance_path_row_guard = False
         self._quick_action_toggle_guard = False
@@ -8947,6 +9137,17 @@ class SettingsWindow(Adw.ApplicationWindow):
         source_row.add_suffix(choose_btn)
         source_group.add(source_row)
         self._source_row = source_row
+
+        text_draft_template_row, text_draft_template_entry = self._build_path_setting_row(
+            title="Text Draft template directory",
+            value=str(self._text_draft_template_dir or ""),
+            info_text="Optional. Prose lists top-level .txt files here as Text Draft templates.",
+            on_changed=self._on_text_draft_template_dir_row_changed,
+            on_choose=self._on_choose_text_draft_template_dir,
+            on_clear=self._on_clear_text_draft_template_dir,
+        )
+        source_group.add(text_draft_template_row)
+        self._text_draft_template_dir_row = text_draft_template_entry
 
         libreoffice_row, libreoffice_entry = self._build_path_setting_row(
             title="LibreOffice Python path",
@@ -9585,6 +9786,38 @@ class SettingsWindow(Adw.ApplicationWindow):
         if notify:
             self._on_source_change(self._editor_source_file)
 
+    def _on_choose_text_draft_template_dir(self, _button: Gtk.Button) -> None:
+        dialog = Gtk.FileDialog(title="Choose Text Draft template directory")
+        dialog.select_folder(self, None, self._on_text_draft_template_dir_chosen)
+
+    def _on_text_draft_template_dir_chosen(self, dialog: Gtk.FileDialog, result: Gio.AsyncResult) -> None:  # noqa: D401
+        try:
+            file = dialog.select_folder_finish(result)
+            path = Path(file.get_path() or "")
+        except Exception:
+            return
+        if not path:
+            return
+        self._set_text_draft_template_dir(path)
+
+    def _on_clear_text_draft_template_dir(self, _button: Gtk.Button) -> None:
+        self._set_text_draft_template_dir(None)
+
+    def _on_text_draft_template_dir_row_changed(self, row: Gtk.Editable) -> None:
+        if self._text_draft_template_dir_row_guard:
+            return
+        raw = row.get_text().strip()
+        if not raw:
+            self._set_text_draft_template_dir(None)
+            return
+        self._set_text_draft_template_dir(Path(raw))
+
+    def _set_text_draft_template_dir(self, path: Path | None) -> None:
+        self._text_draft_template_dir = path.expanduser().resolve(strict=False) if path else None
+        self._text_draft_template_dir_row_guard = True
+        self._text_draft_template_dir_row.set_text(str(self._text_draft_template_dir or ""))
+        self._text_draft_template_dir_row_guard = False
+
     def _on_choose_libreoffice_path(self, _button: Gtk.Button) -> None:
         dialog = Gtk.FileDialog(title="Choose LibreOffice Python directory")
         dialog.select_folder(self, None, self._on_libreoffice_path_chosen)
@@ -10067,6 +10300,7 @@ class SettingsWindow(Adw.ApplicationWindow):
             editor_action_profile_defaults,
             editor_pinned_action_ids,
             text_draft_pinned_action_ids,
+            self._text_draft_template_dir,
             self._libreoffice_python_path,
             self._concordance_file_path,
         )
