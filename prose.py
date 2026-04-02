@@ -2162,6 +2162,13 @@ class Suggestion:
     reasoning: str
 
 
+@dataclass(frozen=True)
+class TextDraftTemplateCategory:
+    key: str
+    name: str
+    template_paths: list[Path]
+
+
 class ProseApp(Adw.Application):
     def __init__(self) -> None:
         super().__init__(application_id=APP_ID, flags=Gio.ApplicationFlags.FLAGS_NONE)
@@ -2263,6 +2270,10 @@ class ProseWindow(Adw.ApplicationWindow):
         self._text_draft_template_button: Gtk.MenuButton | None = None
         self._text_draft_templates_popover: Gtk.Popover | None = None
         self._text_draft_templates_grid: Gtk.FlowBox | None = None
+        self._text_draft_templates_title: Gtk.Label | None = None
+        self._text_draft_templates_back_button: Gtk.Button | None = None
+        self._text_draft_template_categories: list[TextDraftTemplateCategory] = []
+        self._text_draft_template_current_category_key: str | None = None
         self._text_draft_template_menu_buttons: list[Gtk.Widget] = []
         self._text_draft_template_email_box: Gtk.Box | None = None
         self._text_draft_template_email_buttons: list[Gtk.Button] = []
@@ -6378,9 +6389,8 @@ button.improve-profile-chip {{
 
         return emails, text[position:]
 
-    def _list_text_draft_template_paths(self) -> list[Path]:
-        directory = self._text_draft_template_dir
-        if directory is None or not directory.exists() or not directory.is_dir():
+    def _list_text_draft_template_paths_in_directory(self, directory: Path) -> list[Path]:
+        if not directory.exists() or not directory.is_dir():
             return []
         try:
             return sorted(
@@ -6393,11 +6403,114 @@ button.improve-profile-chip {{
         except OSError:
             return []
 
+    def _list_text_draft_template_categories(self) -> list[TextDraftTemplateCategory]:
+        directory = self._text_draft_template_dir
+        if directory is None or not directory.exists() or not directory.is_dir():
+            return []
+
+        categories: list[TextDraftTemplateCategory] = []
+        try:
+            child_directories = sorted(
+                (child for child in directory.iterdir() if child.is_dir()),
+                key=lambda path: path.name.lower(),
+            )
+        except OSError:
+            return []
+
+        for child_directory in child_directories:
+            template_paths = self._list_text_draft_template_paths_in_directory(child_directory)
+            if template_paths:
+                categories.append(
+                    TextDraftTemplateCategory(
+                        key=f"dir:{child_directory.name}",
+                        name=child_directory.name,
+                        template_paths=template_paths,
+                    )
+                )
+
+        root_templates = self._list_text_draft_template_paths_in_directory(directory)
+        if root_templates:
+            categories.append(
+                TextDraftTemplateCategory(
+                    key="__uncategorized__",
+                    name="Uncategorized",
+                    template_paths=root_templates,
+                )
+            )
+        return categories
+
+    def _find_text_draft_template_category(self, key: str | None) -> TextDraftTemplateCategory | None:
+        if key is None:
+            return None
+        for category in self._text_draft_template_categories:
+            if category.key == key:
+                return category
+        return None
+
+    def _text_draft_template_display_name(self, path: Path) -> str:
+        directory = self._text_draft_template_dir
+        if directory is None:
+            return path.name
+        try:
+            return str(path.relative_to(directory))
+        except ValueError:
+            return path.name
+
+    def _show_text_draft_template_categories(self) -> None:
+        title = self._text_draft_templates_title
+        back_button = self._text_draft_templates_back_button
+        grid = self._text_draft_templates_grid
+        if title is None or back_button is None or grid is None:
+            return
+        self._text_draft_template_current_category_key = None
+        title.set_label("Templates")
+        back_button.set_visible(False)
+        self._clear_flow_box(grid)
+        self._text_draft_template_menu_buttons = []
+        for category in self._text_draft_template_categories:
+            button = Gtk.Button(label=category.name)
+            count = len(category.template_paths)
+            button.set_tooltip_text(f"{count} template{'s' if count != 1 else ''}")
+            self._apply_quick_action_button_classes(button)
+            button.connect("clicked", self._on_text_draft_template_category_clicked, category.key)
+            grid.append(button)
+            self._text_draft_template_menu_buttons.append(button)
+        self._update_text_draft_template_controls()
+
+    def _show_text_draft_template_category(self, key: str) -> None:
+        category = self._find_text_draft_template_category(key)
+        if category is None:
+            self._show_text_draft_template_categories()
+            return
+        title = self._text_draft_templates_title
+        back_button = self._text_draft_templates_back_button
+        grid = self._text_draft_templates_grid
+        if title is None or back_button is None or grid is None:
+            return
+        self._text_draft_template_current_category_key = category.key
+        title.set_label(category.name)
+        back_button.set_visible(True)
+        self._clear_flow_box(grid)
+        self._text_draft_template_menu_buttons = []
+        popover = self._text_draft_templates_popover
+        for path in category.template_paths:
+            button = Gtk.Button(label=path.stem)
+            button.set_tooltip_text(self._text_draft_template_display_name(path))
+            self._apply_quick_action_button_classes(button)
+            button.connect("clicked", self._on_text_draft_template_menu_clicked, path, popover)
+            grid.append(button)
+            self._text_draft_template_menu_buttons.append(button)
+        self._update_text_draft_template_controls()
+
     def _update_text_draft_template_controls(self) -> None:
         button = self._text_draft_template_button
-        has_templates = bool(self._list_text_draft_template_paths())
+        has_templates = bool(self._text_draft_template_categories)
         if button is not None:
             button.set_sensitive(has_templates and not self._busy)
+        if self._text_draft_templates_back_button is not None:
+            self._text_draft_templates_back_button.set_sensitive(
+                self._text_draft_template_current_category_key is not None and not self._busy
+            )
         for widget in self._text_draft_template_menu_buttons:
             widget.set_sensitive(not self._busy)
         for email_button in self._text_draft_template_email_buttons:
@@ -6433,10 +6546,20 @@ button.improve-profile-chip {{
         content.set_margin_start(10)
         content.set_margin_end(10)
 
+        header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        back_button = Gtk.Button(label="Back", icon_name="go-previous-symbolic")
+        back_button.add_css_class("flat")
+        back_button.connect("clicked", self._on_text_draft_template_back_clicked)
+        back_button.set_visible(False)
+        header.append(back_button)
+
         title = Gtk.Label(label="Templates", xalign=0)
         title.add_css_class("caption")
         title.add_css_class("dim-label")
-        content.append(title)
+        title.set_hexpand(True)
+        title.set_halign(Gtk.Align.START)
+        header.append(title)
+        content.append(header)
 
         action_grid = Gtk.FlowBox()
         action_grid.set_selection_mode(Gtk.SelectionMode.NONE)
@@ -6450,26 +6573,19 @@ button.improve-profile-chip {{
         button = Gtk.MenuButton(label="Templates")
         button.set_tooltip_text("Load a text template into Draft")
         button.set_popover(popover)
+        button.connect("notify::active", self._on_text_draft_template_button_active_changed)
         self._apply_quick_action_button_classes(button)
         self._text_draft_templates_popover = popover
         self._text_draft_templates_grid = action_grid
+        self._text_draft_templates_title = title
+        self._text_draft_templates_back_button = back_button
         return button
 
     def _refresh_text_draft_templates(self) -> None:
-        grid = self._text_draft_templates_grid
-        if grid is None:
+        if self._text_draft_templates_grid is None:
             return
-        self._clear_flow_box(grid)
-        self._text_draft_template_menu_buttons = []
-        popover = self._text_draft_templates_popover
-        for path in self._list_text_draft_template_paths():
-            button = Gtk.Button(label=path.stem)
-            button.set_tooltip_text(path.name)
-            self._apply_quick_action_button_classes(button)
-            button.connect("clicked", self._on_text_draft_template_menu_clicked, path, popover)
-            grid.append(button)
-            self._text_draft_template_menu_buttons.append(button)
-        self._update_text_draft_template_controls()
+        self._text_draft_template_categories = self._list_text_draft_template_categories()
+        self._show_text_draft_template_categories()
 
     def _replace_text_draft_with_text(self, text: str) -> None:
         buffer = self._text_draft_buffer
@@ -6497,13 +6613,32 @@ button.improve-profile-chip {{
         self._text_draft_template_emails = emails
         self._refresh_text_draft_template_email_buttons()
         self._replace_text_draft_with_text(text)
-        self._status_label.set_label(f"Loaded text template: {path.name}")
-        self._show_toast(f"Loaded template: {path.name}")
+        display_name = self._text_draft_template_display_name(path)
+        self._status_label.set_label(f"Loaded text template: {display_name}")
+        self._show_toast(f"Loaded template: {display_name}")
 
     def _load_text_draft_template_path(self, path: Path) -> None:
         if self._busy:
             return
         self._apply_text_draft_template_path(path)
+
+    def _on_text_draft_template_category_clicked(self, _button: Gtk.Button, key: str) -> None:
+        if self._busy:
+            return
+        self._show_text_draft_template_category(key)
+
+    def _on_text_draft_template_back_clicked(self, _button: Gtk.Button) -> None:
+        if self._busy:
+            return
+        self._show_text_draft_template_categories()
+
+    def _on_text_draft_template_button_active_changed(
+        self,
+        button: Gtk.MenuButton,
+        _param_spec: object | None = None,
+    ) -> None:
+        if button.get_active():
+            self._show_text_draft_template_categories()
 
     def _on_text_draft_template_menu_clicked(
         self,
@@ -9212,7 +9347,8 @@ class SettingsWindow(Adw.ApplicationWindow):
             title="Text Draft template directory",
             value=str(self._text_draft_template_dir or ""),
             info_text=(
-                "Optional. Prose lists top-level .txt files here as Text Draft templates. "
+                "Optional. Prose treats immediate subfolders here as template categories, and root-level .txt files "
+                "appear under Uncategorized. "
                 "Add leading lines like [[email: Label <address@example.com>]] to create copy buttons."
             ),
             on_changed=self._on_text_draft_template_dir_row_changed,
