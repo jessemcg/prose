@@ -413,6 +413,10 @@ SPELLING_OUTPUT_PADDING_PX = 12
 SPELLING_OUTPUT_CORNER_RADIUS_PX = 10
 REFERENCE_OUTPUT_FONT_SIZE_PX = SPELLING_OUTPUT_FONT_SIZE_PX
 REFERENCE_URL_RE = re.compile(r"https?://[^\s)\]]+")
+TEXT_DRAFT_TEMPLATE_EMAIL_RE = re.compile(
+    r"\[\[email:\s*(?P<label>.+?)\s*<(?P<address>[^<>\s]+@[^<>\s]+)>\s*\]\]"
+)
+TEXT_DRAFT_TEMPLATE_EMAIL_FALLBACK_RE = re.compile(r"(?P<address>[^<>\s]+@[^<>\s]+)")
 TAVILY_MAX_RESULTS = 5
 TAVILY_MAX_SOURCES = 2
 TAVILY_SOURCE_EXCERPT_CHARS = 2000
@@ -2260,6 +2264,9 @@ class ProseWindow(Adw.ApplicationWindow):
         self._text_draft_templates_popover: Gtk.Popover | None = None
         self._text_draft_templates_grid: Gtk.FlowBox | None = None
         self._text_draft_template_menu_buttons: list[Gtk.Widget] = []
+        self._text_draft_template_email_box: Gtk.Box | None = None
+        self._text_draft_template_email_buttons: list[Gtk.Button] = []
+        self._text_draft_template_emails: list[tuple[str, str]] = []
         self._text_draft_temp_path: Path | None = None
         self._text_draft_temp_flush_source_id = 0
         self._text_draft_temp_dirty = False
@@ -2602,6 +2609,11 @@ class ProseWindow(Adw.ApplicationWindow):
         header_spacer = Gtk.Box()
         header_spacer.set_hexpand(True)
         draft_header_row.append(header_spacer)
+
+        template_email_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        template_email_box.set_visible(False)
+        draft_header_row.append(template_email_box)
+        self._text_draft_template_email_box = template_email_box
 
         copy_draft_btn = Gtk.Button(label="Copy", icon_name="edit-copy-symbolic")
         copy_draft_btn.add_css_class("flat")
@@ -6318,6 +6330,54 @@ button.improve-profile-chip {{
     def _text_draft_has_user_text(self) -> bool:
         return bool(self._get_text_draft_text().strip())
 
+    def _parse_text_draft_template_content(self, raw_text: str) -> tuple[list[tuple[str, str]], str]:
+        text = raw_text[1:] if raw_text.startswith("\ufeff") else raw_text
+        if not text:
+            return [], ""
+
+        emails: list[tuple[str, str]] = []
+        position = 0
+        text_length = len(text)
+
+        while position < text_length:
+            line_end = text.find("\n", position)
+            next_position = text_length if line_end == -1 else line_end + 1
+            line = text[position:next_position]
+            line_for_match = line[:-1] if line.endswith("\n") else line
+            if line_for_match.endswith("\r"):
+                line_for_match = line_for_match[:-1]
+            match = TEXT_DRAFT_TEMPLATE_EMAIL_RE.fullmatch(line_for_match)
+            if match is not None:
+                emails.append((match.group("label").strip(), match.group("address").strip()))
+                position = next_position
+                continue
+
+            fallback_match = TEXT_DRAFT_TEMPLATE_EMAIL_FALLBACK_RE.search(line_for_match)
+            if fallback_match is None:
+                break
+
+            address = fallback_match.group("address").strip()
+            label = (
+                line_for_match[:fallback_match.start()] + line_for_match[fallback_match.end():]
+            ).strip(" <>[]():;,-\t")
+            emails.append((label or address, address))
+            position = next_position
+
+        if not emails:
+            return [], text
+
+        if position < text_length:
+            line_end = text.find("\n", position)
+            next_position = text_length if line_end == -1 else line_end + 1
+            line = text[position:next_position]
+            blank_line = line[:-1] if line.endswith("\n") else line
+            if blank_line.endswith("\r"):
+                blank_line = blank_line[:-1]
+            if not blank_line.strip():
+                position = next_position
+
+        return emails, text[position:]
+
     def _list_text_draft_template_paths(self) -> list[Path]:
         directory = self._text_draft_template_dir
         if directory is None or not directory.exists() or not directory.is_dir():
@@ -6340,6 +6400,26 @@ button.improve-profile-chip {{
             button.set_sensitive(has_templates and not self._busy)
         for widget in self._text_draft_template_menu_buttons:
             widget.set_sensitive(not self._busy)
+        for email_button in self._text_draft_template_email_buttons:
+            email_button.set_sensitive(not self._busy)
+
+    def _refresh_text_draft_template_email_buttons(self) -> None:
+        box = self._text_draft_template_email_box
+        if box is None:
+            return
+        self._clear_box(box)
+        self._text_draft_template_email_buttons = []
+        for label, address in self._text_draft_template_emails:
+            button = Gtk.Button(label=label, icon_name="mail-send-symbolic")
+            button.add_css_class("flat")
+            button.add_css_class("transform-pill")
+            button.add_css_class("transform-pill-compact")
+            button.set_tooltip_text(address)
+            button.connect("clicked", self._on_copy_text_draft_template_email_clicked, label, address)
+            button.set_sensitive(not self._busy)
+            box.append(button)
+            self._text_draft_template_email_buttons.append(button)
+        box.set_visible(bool(self._text_draft_template_emails))
 
     def _build_text_draft_templates_button(self) -> Gtk.MenuButton:
         popover = Gtk.Popover()
@@ -6408,11 +6488,14 @@ button.improve-profile-chip {{
 
     def _apply_text_draft_template_path(self, path: Path) -> None:
         try:
-            text = path.read_text(encoding="utf-8")
+            raw_text = path.read_text(encoding="utf-8")
         except (OSError, UnicodeError) as exc:
             self._status_label.set_label(f"Unable to load template: {exc}")
             self._show_toast(f"Unable to load template: {exc}")
             return
+        emails, text = self._parse_text_draft_template_content(raw_text)
+        self._text_draft_template_emails = emails
+        self._refresh_text_draft_template_email_buttons()
         self._replace_text_draft_with_text(text)
         self._status_label.set_label(f"Loaded text template: {path.name}")
         self._show_toast(f"Loaded template: {path.name}")
@@ -6420,24 +6503,7 @@ button.improve-profile-chip {{
     def _load_text_draft_template_path(self, path: Path) -> None:
         if self._busy:
             return
-        if not self._text_draft_has_user_text():
-            self._apply_text_draft_template_path(path)
-            return
-        dialog = Adw.MessageDialog.new(
-            self,
-            "Replace Draft with template?",
-            (
-                "Loading a template will replace the current Draft text.\n\n"
-                f"Template: {path.name}"
-            ),
-        )
-        dialog.add_response("cancel", "Cancel")
-        dialog.add_response("replace", "Replace Draft")
-        dialog.set_response_appearance("replace", Adw.ResponseAppearance.DESTRUCTIVE)
-        dialog.set_default_response("cancel")
-        dialog.set_close_response("cancel")
-        dialog.connect("response", self._on_text_draft_template_replace_response, path)
-        dialog.present()
+        self._apply_text_draft_template_path(path)
 
     def _on_text_draft_template_menu_clicked(
         self,
@@ -6449,15 +6515,19 @@ button.improve-profile-chip {{
             popover.popdown()
         self._load_text_draft_template_path(path)
 
-    def _on_text_draft_template_replace_response(
+    def _on_copy_text_draft_template_email_clicked(
         self,
-        _dialog: Adw.MessageDialog,
-        response: str,
-        path: Path,
+        _button: Gtk.Button,
+        label: str,
+        address: str,
     ) -> None:
-        if response != "replace":
+        if not address:
+            self._show_toast("Template email is empty.")
             return
-        self._apply_text_draft_template_path(path)
+        clipboard = self.get_clipboard()
+        clipboard.set(address)
+        self._status_label.set_label(f"Copied {label} email to clipboard.")
+        self._show_toast(f"Copied {label} email.")
 
     def _clear_text_draft_insert_marks(self) -> None:
         buffer = self._text_draft_buffer
@@ -9141,7 +9211,10 @@ class SettingsWindow(Adw.ApplicationWindow):
         text_draft_template_row, text_draft_template_entry = self._build_path_setting_row(
             title="Text Draft template directory",
             value=str(self._text_draft_template_dir or ""),
-            info_text="Optional. Prose lists top-level .txt files here as Text Draft templates.",
+            info_text=(
+                "Optional. Prose lists top-level .txt files here as Text Draft templates. "
+                "Add leading lines like [[email: Label <address@example.com>]] to create copy buttons."
+            ),
             on_changed=self._on_text_draft_template_dir_row_changed,
             on_choose=self._on_choose_text_draft_template_dir,
             on_clear=self._on_clear_text_draft_template_dir,
