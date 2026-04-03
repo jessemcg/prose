@@ -1,8 +1,4 @@
 __pycache__/
 .codex
 prompts/
-templates/
-ODT_files/
 config.json
-render_email_text_templates.py
-text_template.png
