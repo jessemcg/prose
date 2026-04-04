@@ -3090,7 +3090,7 @@ class ProseWindow(Adw.ApplicationWindow):
 .spelling-output-scroller {{
   border-radius: {SPELLING_OUTPUT_CORNER_RADIUS_PX}px;
   background-color: alpha(@window_fg_color, 0.08);
-  border: 1px solid alpha(@window_fg_color, 0.16);
+  border: none;
   box-shadow: none;
 }}
 .spelling-output-scroller > viewport {{
@@ -3165,7 +3165,7 @@ textview.spelling-output-view.view border {{
   box-shadow: none;
 }}
 .editable-text-scroller:focus-within {{
-  border-color: alpha(@window_fg_color, 0.24);
+  border: none;
   box-shadow: none;
 }}
 .editable-text-view,
@@ -3178,7 +3178,7 @@ textview.spelling-output-view.view border {{
 .editor-lookup-surface {{
   border-radius: {SPELLING_OUTPUT_CORNER_RADIUS_PX}px;
   background-color: alpha(@window_fg_color, 0.08);
-  border: 1px solid alpha(@window_fg_color, 0.16);
+  border: none;
   box-shadow: none;
 }}
 .editor-lookup-surface > stackpage {{
