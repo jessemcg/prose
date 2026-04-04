@@ -2288,6 +2288,7 @@ class ProseWindow(Adw.ApplicationWindow):
         self._thesaurus_rows: list[Gtk.Widget] = []
         self._reference_output_text = ""
         self._reference_placeholder_active = True
+        self._reference_output_mode = "thesaurus"
         self._combine_cites_doc = None
         self._combine_cites_cursor = None
         self._settings_window: SettingsWindow | None = None
@@ -2424,24 +2425,35 @@ class ProseWindow(Adw.ApplicationWindow):
 
         output_section.append(output_header)
 
+        output_surface = Gtk.Stack()
+        output_surface.set_hexpand(True)
+        output_surface.set_vexpand(True)
+        output_surface.add_css_class("editor-lookup-surface")
         output_scroller = Gtk.ScrolledWindow()
         output_scroller.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
         output_scroller.set_hexpand(True)
         output_scroller.set_vexpand(True)
         output_scroller.set_min_content_height(160)
         output_scroller.add_css_class("spelling-output-scroller")
+        output_scroller.add_css_class("editable-text-scroller")
+        output_scroller.add_css_class("editor-lookup-page")
         output_buffer = Gtk.TextBuffer()
         output_view = Gtk.TextView.new_with_buffer(output_buffer)
+        output_view.set_monospace(False)
         output_view.set_wrap_mode(Gtk.WrapMode.WORD_CHAR)
         output_view.set_vexpand(True)
         output_view.set_hexpand(True)
+        output_view.set_size_request(-1, 160)
         output_view.set_left_margin(SPELLING_OUTPUT_PADDING_PX)
         output_view.set_right_margin(SPELLING_OUTPUT_PADDING_PX)
         output_view.set_top_margin(SPELLING_OUTPUT_PADDING_PX)
         output_view.set_bottom_margin(SPELLING_OUTPUT_PADDING_PX)
         output_view.add_css_class("spelling-output-view")
+        output_view.add_css_class("editable-text-view")
         output_scroller.set_child(output_view)
-        output_section.append(output_scroller)
+        output_surface.add_named(output_scroller, "output")
+        output_surface.set_visible_child_name("output")
+        output_section.append(output_surface)
         self._spelling_output_buffer = output_buffer
 
         regenerate_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
@@ -2492,6 +2504,7 @@ class ProseWindow(Adw.ApplicationWindow):
         thesaurus_stack = Gtk.Stack()
         thesaurus_stack.set_hexpand(True)
         thesaurus_stack.set_vexpand(True)
+        thesaurus_stack.add_css_class("editor-lookup-surface")
 
         thesaurus_scroller = Gtk.ScrolledWindow()
         thesaurus_scroller.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
@@ -2499,13 +2512,21 @@ class ProseWindow(Adw.ApplicationWindow):
         thesaurus_scroller.set_vexpand(True)
         thesaurus_scroller.set_min_content_height(160)
         thesaurus_scroller.add_css_class("spelling-output-scroller")
-        thesaurus_list = Gtk.ListBox()
-        thesaurus_list.set_selection_mode(Gtk.SelectionMode.NONE)
-        thesaurus_list.add_css_class("thesaurus-list")
+        thesaurus_scroller.add_css_class("editor-lookup-page")
+        thesaurus_list = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        thesaurus_list.set_hexpand(True)
+        thesaurus_list.set_vexpand(True)
+        thesaurus_list.add_css_class("thesaurus-results")
         thesaurus_placeholder = Gtk.Label(label="")
         thesaurus_placeholder.add_css_class("dim-label")
         thesaurus_placeholder.set_wrap(True)
-        thesaurus_list.set_placeholder(thesaurus_placeholder)
+        thesaurus_placeholder.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
+        thesaurus_placeholder.set_margin_top(SPELLING_OUTPUT_PADDING_PX)
+        thesaurus_placeholder.set_margin_bottom(SPELLING_OUTPUT_PADDING_PX)
+        thesaurus_placeholder.set_margin_start(SPELLING_OUTPUT_PADDING_PX)
+        thesaurus_placeholder.set_margin_end(SPELLING_OUTPUT_PADDING_PX)
+        thesaurus_placeholder.set_xalign(0)
+        thesaurus_list.append(thesaurus_placeholder)
         thesaurus_scroller.set_child(thesaurus_list)
         thesaurus_stack.add_named(thesaurus_scroller, "thesaurus")
 
@@ -2515,7 +2536,11 @@ class ProseWindow(Adw.ApplicationWindow):
         reference_scroller.set_vexpand(True)
         reference_scroller.set_min_content_height(160)
         reference_scroller.add_css_class("spelling-output-scroller")
+        reference_scroller.add_css_class("editor-lookup-page")
         reference_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        reference_box.set_hexpand(True)
+        reference_box.set_vexpand(True)
+        reference_box.add_css_class("reference-output-box")
         reference_box.set_margin_top(SPELLING_OUTPUT_PADDING_PX)
         reference_box.set_margin_bottom(SPELLING_OUTPUT_PADDING_PX)
         reference_box.set_margin_start(SPELLING_OUTPUT_PADDING_PX)
@@ -2525,7 +2550,6 @@ class ProseWindow(Adw.ApplicationWindow):
         reference_label.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
         reference_label.set_selectable(True)
         reference_label.set_use_markup(True)
-        reference_label.add_css_class("dim-label")
         reference_label.add_css_class("reference-output")
         reference_label.connect("activate-link", self._on_reference_link_clicked)
         reference_box.append(reference_label)
@@ -2567,24 +2591,37 @@ class ProseWindow(Adw.ApplicationWindow):
         original_header.add_css_class("dim-label")
         original_section.append(original_header)
 
+        original_surface = Gtk.Stack()
+        original_surface.set_hexpand(True)
+        original_surface.set_vexpand(True)
+        original_surface.add_css_class("editor-lookup-surface")
         original_scroller = Gtk.ScrolledWindow()
         original_scroller.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
         original_scroller.set_hexpand(True)
         original_scroller.set_vexpand(True)
         original_scroller.set_min_content_height(150)
         original_scroller.add_css_class("spelling-output-scroller")
+        original_scroller.add_css_class("editable-text-scroller")
+        original_scroller.add_css_class("editor-lookup-page")
         original_buffer = Gtk.TextBuffer()
         original_view = Gtk.TextView.new_with_buffer(original_buffer)
+        original_view.set_monospace(False)
         original_view.set_wrap_mode(Gtk.WrapMode.WORD_CHAR)
-        original_view.set_editable(False)
-        original_view.set_cursor_visible(False)
+        original_view.set_editable(True)
+        original_view.set_cursor_visible(True)
+        original_view.set_vexpand(True)
+        original_view.set_hexpand(True)
+        original_view.set_size_request(-1, 150)
         original_view.set_left_margin(SPELLING_OUTPUT_PADDING_PX)
         original_view.set_right_margin(SPELLING_OUTPUT_PADDING_PX)
         original_view.set_top_margin(SPELLING_OUTPUT_PADDING_PX)
         original_view.set_bottom_margin(SPELLING_OUTPUT_PADDING_PX)
         original_view.add_css_class("spelling-output-view")
+        original_view.add_css_class("editable-text-view")
         original_scroller.set_child(original_view)
-        original_section.append(original_scroller)
+        original_surface.add_named(original_scroller, "original")
+        original_surface.set_visible_child_name("original")
+        original_section.append(original_surface)
         self._text_draft_original_output_buffer = original_buffer
 
         regenerate_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
@@ -2636,25 +2673,36 @@ class ProseWindow(Adw.ApplicationWindow):
 
         draft_section.append(draft_header_row)
 
+        draft_surface = Gtk.Stack()
+        draft_surface.set_hexpand(True)
+        draft_surface.set_vexpand(True)
+        draft_surface.add_css_class("editor-lookup-surface")
         draft_scroller = Gtk.ScrolledWindow()
         draft_scroller.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
         draft_scroller.set_hexpand(True)
         draft_scroller.set_vexpand(True)
         draft_scroller.set_min_content_height(260)
         draft_scroller.add_css_class("spelling-output-scroller")
+        draft_scroller.add_css_class("editable-text-scroller")
+        draft_scroller.add_css_class("editor-lookup-page")
         draft_buffer = Gtk.TextBuffer()
         draft_buffer.connect("changed", self._on_text_draft_buffer_changed)
         draft_view = Gtk.TextView.new_with_buffer(draft_buffer)
+        draft_view.set_monospace(False)
         draft_view.set_wrap_mode(Gtk.WrapMode.WORD_CHAR)
         draft_view.set_vexpand(True)
         draft_view.set_hexpand(True)
+        draft_view.set_size_request(-1, 260)
         draft_view.set_left_margin(SPELLING_OUTPUT_PADDING_PX)
         draft_view.set_right_margin(SPELLING_OUTPUT_PADDING_PX)
         draft_view.set_top_margin(SPELLING_OUTPUT_PADDING_PX)
         draft_view.set_bottom_margin(SPELLING_OUTPUT_PADDING_PX)
         draft_view.add_css_class("spelling-output-view")
+        draft_view.add_css_class("editable-text-view")
         draft_scroller.set_child(draft_view)
-        draft_section.append(draft_scroller)
+        draft_surface.add_named(draft_scroller, "draft")
+        draft_surface.set_visible_child_name("draft")
+        draft_section.append(draft_surface)
         self._text_draft_buffer = draft_buffer
         self._text_draft_view = draft_view
 
@@ -3041,23 +3089,120 @@ class ProseWindow(Adw.ApplicationWindow):
         css = f"""
 .spelling-output-scroller {{
   border-radius: {SPELLING_OUTPUT_CORNER_RADIUS_PX}px;
-  background-color: @view_bg_color;
+  background-color: alpha(@window_fg_color, 0.08);
+  border: 1px solid alpha(@window_fg_color, 0.16);
+  box-shadow: none;
 }}
 .spelling-output-scroller > viewport {{
   border-radius: {SPELLING_OUTPUT_CORNER_RADIUS_PX}px;
-  background-color: @view_bg_color;
+  background-color: transparent;
+  box-shadow: none;
 }}
 .spelling-output-view {{
   font-size: {SPELLING_OUTPUT_FONT_SIZE_PX}px;
-  background-color: @view_bg_color;
-  border-radius: {SPELLING_OUTPUT_CORNER_RADIUS_PX}px;
+  background-color: transparent;
+  background-image: none;
+  box-shadow: none;
+  color: @window_fg_color;
+  caret-color: @window_fg_color;
 }}
-.thesaurus-list row .title {{
+.spelling-output-view.view,
+textview.spelling-output-view,
+textview.spelling-output-view.view {{
+  background-color: transparent;
+  background-image: none;
+  box-shadow: none;
+  color: @window_fg_color;
+  caret-color: @window_fg_color;
+}}
+.spelling-output-view text {{
+  background-color: transparent;
+}}
+.spelling-output-view.view text,
+textview.spelling-output-view text,
+textview.spelling-output-view.view text,
+.spelling-output-view.view border,
+textview.spelling-output-view border,
+textview.spelling-output-view.view border {{
+  background-color: transparent;
+  background-image: none;
+  box-shadow: none;
+}}
+.editor-lookup-surface textview.spelling-output-view > border.top,
+.editor-lookup-surface textview.spelling-output-view > border.right,
+.editor-lookup-surface textview.spelling-output-view > border.bottom,
+.editor-lookup-surface textview.spelling-output-view > border.left,
+.editor-lookup-surface textview.spelling-output-view.view > border.top,
+.editor-lookup-surface textview.spelling-output-view.view > border.right,
+.editor-lookup-surface textview.spelling-output-view.view > border.bottom,
+.editor-lookup-surface textview.spelling-output-view.view > border.left,
+.editor-lookup-surface textview.spelling-output-view > text,
+.editor-lookup-surface textview.spelling-output-view.view > text {{
+  background-color: transparent;
+  background-image: none;
+  box-shadow: none;
+}}
+.spelling-output-view border,
+.spelling-output-view text {{
+  background-image: none;
+}}
+.thesaurus-results,
+.reference-output-box {{
+  background-color: transparent;
+}}
+.thesaurus-row,
+.thesaurus-row label {{
+  background-color: transparent;
+  box-shadow: none;
+}}
+.thesaurus-row {{
+  border-bottom: 1px solid alpha(@borders, 0.55);
+}}
+.thesaurus-row:last-child {{
+  border-bottom: none;
+}}
+.editable-text-scroller {{
+  box-shadow: none;
+}}
+.editable-text-scroller:focus-within {{
+  border-color: alpha(@window_fg_color, 0.24);
+  box-shadow: none;
+}}
+.editable-text-view,
+.editable-text-view text,
+.editable-text-view:focus,
+.editable-text-view text:focus {{
+  box-shadow: none;
+  outline: none;
+}}
+.editor-lookup-surface {{
+  border-radius: {SPELLING_OUTPUT_CORNER_RADIUS_PX}px;
+  background-color: alpha(@window_fg_color, 0.08);
+  border: 1px solid alpha(@window_fg_color, 0.16);
+  box-shadow: none;
+}}
+.editor-lookup-surface > stackpage {{
+  background-color: transparent;
+}}
+.editor-lookup-page {{
+  background-color: transparent;
+  border: none;
+  box-shadow: none;
+}}
+.editor-lookup-page > viewport {{
+  background-color: transparent;
+}}
+.editor-lookup-surface .thesaurus-results,
+.editor-lookup-surface .reference-output-box {{
+  background-color: transparent;
+}}
+.thesaurus-row label {{
   font-size: {SPELLING_OUTPUT_FONT_SIZE_PX}px;
+  color: @window_fg_color;
 }}
 .reference-toggle-active {{
-  background-color: @card_bg_color;
-  color: @view_fg_color;
+  background-color: alpha(@window_fg_color, 0.08);
+  color: @window_fg_color;
 }}
 button.transform-pill,
 menubutton.transform-pill > button {{
@@ -3082,6 +3227,7 @@ button.improve-profile-chip {{
 }}
 .reference-output {{
   font-size: {REFERENCE_OUTPUT_FONT_SIZE_PX}px;
+  color: @window_fg_color;
 }}
 .reference-query-entry {{
   font-size: {SPELLING_OUTPUT_FONT_SIZE_PX}px;
@@ -4431,7 +4577,7 @@ button.improve-profile-chip {{
         if not source_text.strip():
             self._show_toast("Select text in Writer first.")
             return
-        self._show_reference_output()
+        self._show_reference_output(mode="lookup")
         self._set_reference_placeholder("Looking up definition…")
         self._set_busy(True)
         self._status_label.set_label("Fetching reference definition…")
@@ -4449,7 +4595,7 @@ button.improve-profile-chip {{
                 "Add Ask API URL, API key, Tavily API key, and prompt in Settings. Tavily CLI (`tvly`) must also be installed."
             )
             return
-        self._show_reference_output()
+        self._show_reference_output(mode="ask")
         self._set_reference_placeholder("Answering question…")
         self._set_busy(True)
         self._status_label.set_label("Answering question…")
@@ -5162,25 +5308,30 @@ button.improve-profile-chip {{
     def _set_thesaurus_placeholder(self, text: str) -> None:
         if hasattr(self, "_thesaurus_placeholder"):
             self._thesaurus_placeholder.set_label(text)
+            self._thesaurus_placeholder.set_visible(bool(text) and not self._thesaurus_words)
 
     def _show_thesaurus_output(self) -> None:
         if hasattr(self, "_thesaurus_stack"):
             self._thesaurus_stack.set_visible_child_name("thesaurus")
         self._set_reference_toggle_state("thesaurus")
 
-    def _show_reference_output(self) -> None:
+    def _show_reference_output(self, *, mode: str = "lookup") -> None:
         if hasattr(self, "_thesaurus_stack"):
             self._thesaurus_stack.set_visible_child_name("reference")
-        self._set_reference_toggle_state("reference")
+        self._set_reference_toggle_state(mode)
 
     def _set_reference_toggle_state(self, active: str) -> None:
+        self._reference_output_mode = active
         if not hasattr(self, "_thesaurus_btn") or not hasattr(self, "_reference_btn"):
             return
-        if active == "reference":
+        if active == "lookup":
             self._reference_btn.add_css_class("reference-toggle-active")
             self._thesaurus_btn.remove_css_class("reference-toggle-active")
-        else:
+        elif active == "thesaurus":
             self._thesaurus_btn.add_css_class("reference-toggle-active")
+            self._reference_btn.remove_css_class("reference-toggle-active")
+        else:
+            self._thesaurus_btn.remove_css_class("reference-toggle-active")
             self._reference_btn.remove_css_class("reference-toggle-active")
 
     def _set_reference_placeholder(self, text: str) -> None:
@@ -5249,20 +5400,33 @@ button.improve-profile-chip {{
         for row in self._thesaurus_rows:
             self._thesaurus_list.remove(row)
         self._thesaurus_rows.clear()
+        if hasattr(self, "_thesaurus_placeholder"):
+            self._thesaurus_placeholder.set_visible(bool(self._thesaurus_placeholder.get_label()) and not self._thesaurus_words)
         for word in self._thesaurus_words:
             row = self._build_thesaurus_row(word)
             self._thesaurus_list.append(row)
             self._thesaurus_rows.append(row)
 
-    def _build_thesaurus_row(self, word: str) -> Adw.ActionRow:
-        row = Adw.ActionRow(title=word)
-        row.set_activatable(True)
+    def _build_thesaurus_row(self, word: str) -> Gtk.Box:
+        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+        row.add_css_class("thesaurus-row")
+        row.set_margin_top(6)
+        row.set_margin_bottom(6)
+        row.set_margin_start(SPELLING_OUTPUT_PADDING_PX)
+        row.set_margin_end(SPELLING_OUTPUT_PADDING_PX)
+        label = Gtk.Label(label=word, xalign=0)
+        label.set_wrap(True)
+        label.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
+        label.set_hexpand(True)
+        row.append(label)
         use_btn = Gtk.Button(label="Use")
         use_btn.add_css_class("flat")
+        use_btn.add_css_class("thesaurus-use-button")
         use_btn.connect("clicked", self._on_thesaurus_word_clicked, word)
-        row.add_suffix(use_btn)
-        row.set_activatable_widget(use_btn)
-        row.connect("activated", lambda *_args: self._on_thesaurus_word_clicked(None, word))
+        row.append(use_btn)
+        click = Gtk.GestureClick()
+        click.connect("released", lambda *_args: self._on_thesaurus_word_clicked(None, word))
+        row.add_controller(click)
         return row
 
     def _on_thesaurus_word_clicked(self, _button: Gtk.Button | None, word: str) -> None:
