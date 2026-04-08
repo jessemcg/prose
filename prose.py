@@ -55,6 +55,7 @@ CONFIG_KEY_SPELLING_MODEL_ID = "spellingstyle_model_id"
 CONFIG_KEY_SPELLING_API_KEY = "spellingstyle_api_key"
 CONFIG_KEY_SPELLING_PROMPT = "spellingstyle_prompt"
 CONFIG_KEY_SPELLING_DISABLE_REASONING = "spellingstyle_disable_reasoning"
+CONFIG_KEY_TEXT_DRAFT_SPELLING_PROMPT = "text_draft_spellingstyle_prompt"
 CONFIG_KEY_IMPROVE1_API_URL = "improve1_api_url"
 CONFIG_KEY_IMPROVE1_MODEL_ID = "improve1_model_id"
 CONFIG_KEY_IMPROVE1_API_KEY = "improve1_api_key"
@@ -259,6 +260,12 @@ DEFAULT_PROMPT = (
 DEFAULT_SPELLINGSTYLE_PROMPT = (
     "Revise the source text for spelling, grammar, and style. Preserve meaning and facts.\n\n"
     f"{STYLE_RULES_TOKEN}\n\n"
+    "Return only the revised text."
+)
+DEFAULT_TEXT_DRAFT_SPELLINGSTYLE_PROMPT = (
+    "Revise the source text for spelling, grammar, punctuation, and style. Improve clarity and flow for "
+    "general-purpose writing while preserving meaning and facts. Do not add legal phrasing or legal style rules "
+    "unless the source text already requires them.\n\n"
     "Return only the revised text."
 )
 DEFAULT_IMPROVE_PROMPT = (
@@ -1693,6 +1700,20 @@ def save_spellingstyle_settings(settings: SpellingStyleSettings) -> None:
     _write_config(data)
 
 
+def load_text_draft_spellingstyle_prompt() -> str:
+    raw = _read_config()
+    return str(
+        raw.get(CONFIG_KEY_TEXT_DRAFT_SPELLING_PROMPT, DEFAULT_TEXT_DRAFT_SPELLINGSTYLE_PROMPT)
+        or DEFAULT_TEXT_DRAFT_SPELLINGSTYLE_PROMPT
+    ).strip()
+
+
+def save_text_draft_spellingstyle_prompt(prompt: str) -> None:
+    data = _read_config()
+    data[CONFIG_KEY_TEXT_DRAFT_SPELLING_PROMPT] = prompt or DEFAULT_TEXT_DRAFT_SPELLINGSTYLE_PROMPT
+    _write_config(data)
+
+
 def load_improve1_settings() -> Improve1Settings:
     raw = _read_config()
     return Improve1Settings(
@@ -2189,6 +2210,7 @@ class ProseWindow(Adw.ApplicationWindow):
         self._shared_style_rules = load_shared_style_rules()
         self._proof_settings = load_proofread_settings()
         self._spelling_settings = load_spellingstyle_settings()
+        self._text_draft_spelling_prompt = load_text_draft_spellingstyle_prompt()
         self._improve1_settings = load_improve1_settings()
         self._improve2_settings = load_improve2_settings()
         self._combine_cites_settings = load_combine_cites_settings()
@@ -3582,6 +3604,7 @@ button.improve-profile-chip {{
             self._model_profiles,
             self._proof_settings,
             self._spelling_settings,
+            self._text_draft_spelling_prompt,
             self._improve1_settings,
             self._improve2_settings,
             self._combine_cites_settings,
@@ -3624,6 +3647,7 @@ button.improve-profile-chip {{
         model_profiles: list[ModelProfile],
         proof_settings: ProofreadSettings,
         spelling_settings: SpellingStyleSettings,
+        text_draft_spelling_prompt: str,
         improve1_settings: Improve1Settings,
         improve2_settings: Improve2Settings,
         combine_cites_settings: CombineCitesSettings,
@@ -3649,6 +3673,7 @@ button.improve-profile-chip {{
         self._model_profiles = model_profiles
         self._proof_settings = proof_settings
         self._spelling_settings = spelling_settings
+        self._text_draft_spelling_prompt = text_draft_spelling_prompt.strip() or DEFAULT_TEXT_DRAFT_SPELLINGSTYLE_PROMPT
         self._improve1_settings = improve1_settings
         self._improve2_settings = improve2_settings
         self._combine_cites_settings = combine_cites_settings
@@ -3677,6 +3702,7 @@ button.improve-profile-chip {{
         save_model_profiles(model_profiles)
         save_proofread_settings(proof_settings)
         save_spellingstyle_settings(spelling_settings)
+        save_text_draft_spellingstyle_prompt(self._text_draft_spelling_prompt)
         save_improve1_settings(improve1_settings)
         save_improve2_settings(improve2_settings)
         save_combine_cites_settings(combine_cites_settings)
@@ -7615,7 +7641,7 @@ button.improve-profile-chip {{
 
     def _run_text_draft_spellingstyle(self, source_text: str) -> None:
         try:
-            payload = self._compose_spellingstyle_payload(source_text)
+            payload = self._compose_text_draft_spellingstyle_payload(source_text)
             for chunk in self._stream_spellingstyle(payload):
                 GLib.idle_add(self._append_text_draft_inserted_text, chunk)
                 GLib.idle_add(self._append_text_draft_original_output_text, chunk)
@@ -8413,6 +8439,23 @@ button.improve-profile-chip {{
 
     def _compose_spellingstyle_payload(self, source_text: str) -> dict[str, Any]:
         system_prompt = _expand_shared_prompt_parts(self._spelling_settings.prompt or DEFAULT_SPELLINGSTYLE_PROMPT)
+        payload = {
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": source_text},
+            ],
+            "stream": True,
+        }
+        return self._add_model_id(
+            payload,
+            self._spelling_settings.model_id,
+            disable_reasoning=self._spelling_settings.disable_reasoning,
+        )
+
+    def _compose_text_draft_spellingstyle_payload(self, source_text: str) -> dict[str, Any]:
+        system_prompt = _expand_shared_prompt_parts(
+            self._text_draft_spelling_prompt or DEFAULT_TEXT_DRAFT_SPELLINGSTYLE_PROMPT
+        )
         payload = {
             "messages": [
                 {"role": "system", "content": system_prompt},
@@ -9367,6 +9410,7 @@ class SettingsWindow(Adw.ApplicationWindow):
         model_profiles: list[ModelProfile],
         proof_settings: ProofreadSettings,
         spelling_settings: SpellingStyleSettings,
+        text_draft_spelling_prompt: str,
         improve1_settings: Improve1Settings,
         improve2_settings: Improve2Settings,
         combine_cites_settings: CombineCitesSettings,
@@ -9396,6 +9440,7 @@ class SettingsWindow(Adw.ApplicationWindow):
                 list[ModelProfile],
                 ProofreadSettings,
                 SpellingStyleSettings,
+                str,
                 Improve1Settings,
                 Improve2Settings,
                 CombineCitesSettings,
@@ -9429,6 +9474,7 @@ class SettingsWindow(Adw.ApplicationWindow):
         self._model_profiles = model_profiles
         self._proof_settings = proof_settings
         self._spelling_settings = spelling_settings
+        self._text_draft_spelling_prompt = text_draft_spelling_prompt.strip() or DEFAULT_TEXT_DRAFT_SPELLINGSTYLE_PROMPT
         self._improve1_settings = improve1_settings
         self._improve2_settings = improve2_settings
         self._combine_cites_settings = combine_cites_settings
@@ -9463,6 +9509,7 @@ class SettingsWindow(Adw.ApplicationWindow):
         self._libreoffice_python_path = libreoffice_python_path
         self._concordance_file_path = concordance_file_path
         self._editor_source_file = editor_source_file
+        self._text_draft_spelling_prompt_buffer: Gtk.TextBuffer | None = None
         self._shared_style_rules_buffer: Gtk.TextBuffer | None = None
         self._model_profile_editors: dict[str, ModelProfileEditorWidgets] = {}
         self._prompt_editors: dict[str, PromptEditorWidgets] = {}
@@ -9642,6 +9689,18 @@ class SettingsWindow(Adw.ApplicationWindow):
 
             page = self._build_prompt_page(key, title, settings, default_prompt)
             prompt_stack.add_named(page, key)
+
+        text_draft_spelling_row = Gtk.ListBoxRow()
+        text_draft_spelling_row_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        text_draft_spelling_row_box.set_margin_top(8)
+        text_draft_spelling_row_box.set_margin_bottom(8)
+        text_draft_spelling_row_box.set_margin_start(12)
+        text_draft_spelling_row_box.set_margin_end(12)
+        text_draft_spelling_row_box.append(Gtk.Label(label="Text Draft SpellingStyle", xalign=0))
+        text_draft_spelling_row.set_child(text_draft_spelling_row_box)
+        prompt_list.append(text_draft_spelling_row)
+        self._prompt_row_keys[text_draft_spelling_row] = "text-draft-spelling"
+        prompt_stack.add_named(self._build_text_draft_spellingstyle_page(), "text-draft-spelling")
 
         quick_actions_row = Gtk.ListBoxRow()
         quick_actions_row_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
@@ -10475,6 +10534,7 @@ class SettingsWindow(Adw.ApplicationWindow):
         topic_sentence_widgets = self._prompt_editors.get("topic-sentence")
         concl_section_widgets = self._prompt_editors.get("concl-section")
         translate_widgets = self._prompt_editors.get("translate")
+        text_draft_spelling_prompt_buffer = self._text_draft_spelling_prompt_buffer
         if not all(
             (
                 proof_widgets,
@@ -10493,12 +10553,14 @@ class SettingsWindow(Adw.ApplicationWindow):
                 topic_sentence_widgets,
                 concl_section_widgets,
                 translate_widgets,
+                text_draft_spelling_prompt_buffer,
             )
         ):
             return
 
         proof_prompt_text = self._prompt_text(proof_widgets.prompt_buffer)
         spelling_prompt_text = self._prompt_text(spelling_widgets.prompt_buffer)
+        text_draft_spelling_prompt_text = self._prompt_text(text_draft_spelling_prompt_buffer)
         thesaurus_prompt_text = self._prompt_text(thesaurus_widgets.prompt_buffer)
         reference_prompt_text = self._prompt_text(reference_widgets.prompt_buffer)
         ask_prompt_text = self._prompt_text(ask_widgets.prompt_buffer)
@@ -10655,6 +10717,7 @@ class SettingsWindow(Adw.ApplicationWindow):
             model_profiles,
             proof_settings,
             spelling_settings,
+            text_draft_spelling_prompt_text.strip() or DEFAULT_TEXT_DRAFT_SPELLINGSTYLE_PROMPT,
             improve1_settings,
             improve2_settings,
             combine_cites_settings,
@@ -10884,6 +10947,59 @@ class SettingsWindow(Adw.ApplicationWindow):
             ask_prompt_buffer=ask_prompt_buffer,
             default_profile_dropdowns=default_profile_dropdowns or None,
         )
+        return page
+
+    def _build_text_draft_spellingstyle_page(self) -> Gtk.Widget:
+        page_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+        page_box.set_margin_top(12)
+        page_box.set_margin_bottom(12)
+        page_box.set_margin_start(12)
+        page_box.set_margin_end(12)
+        page_box.set_vexpand(True)
+
+        title_label = Gtk.Label(label="Text Draft SpellingStyle", xalign=0)
+        title_label.add_css_class("title-3")
+        page_box.append(title_label)
+
+        details_group = Adw.PreferencesGroup(title="Shared Credentials")
+        details_group.add_css_class("list-stack")
+        details_group.set_hexpand(True)
+        page_box.append(details_group)
+
+        details_row = Adw.ActionRow(
+            title="Uses the main SpellingStyle connection",
+            subtitle=(
+                "Text Draft SpellingStyle shares the API URL, model ID, API key, and Disable reasoning "
+                "setting from the SpellingStyle page. Only the prompt below is separate."
+            ),
+        )
+        details_row.set_activatable(False)
+        details_group.add(details_row)
+
+        prompt_section = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        prompt_section.set_hexpand(True)
+        prompt_section.set_vexpand(True)
+        prompt_label = Gtk.Label(label="Prompt", xalign=0)
+        prompt_label.add_css_class("dim-label")
+        prompt_section.append(prompt_label)
+        prompt_hint = Gtk.Label(label=STYLE_RULES_HINT_TEXT, xalign=0)
+        prompt_hint.add_css_class("caption")
+        prompt_hint.add_css_class("dim-label")
+        prompt_hint.set_wrap(True)
+        prompt_hint.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
+        prompt_section.append(prompt_hint)
+        prompt_scroller, buffer = self._build_prompt_editor(
+            self._text_draft_spelling_prompt or DEFAULT_TEXT_DRAFT_SPELLINGSTYLE_PROMPT
+        )
+        self._text_draft_spelling_prompt_buffer = buffer
+        prompt_section.append(prompt_scroller)
+        page_box.append(prompt_section)
+
+        page = Gtk.ScrolledWindow()
+        page.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        page.set_hexpand(True)
+        page.set_vexpand(True)
+        page.set_child(page_box)
         return page
 
     def _build_prompt_editor(self, text: str) -> tuple[Gtk.ScrolledWindow, Gtk.TextBuffer]:
