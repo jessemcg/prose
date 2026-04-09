@@ -257,6 +257,8 @@ DEFAULT_PROMPT = (
     "Do not shorten or embellish facts. Respond with concrete edits, not generic advice.\n\n"
     f"{STYLE_RULES_TOKEN}"
 )
+PROOFREAD_CHUNK_PARAGRAPH_LIMIT = 12
+PROOFREAD_CHUNK_CHAR_LIMIT = 6500
 DEFAULT_SPELLINGSTYLE_PROMPT = (
     "Revise the source text for spelling, grammar, and style. Preserve meaning and facts.\n\n"
     f"{STYLE_RULES_TOKEN}\n\n"
@@ -2184,6 +2186,18 @@ class Suggestion:
 
 
 @dataclass(frozen=True)
+class ProofreadChunk:
+    index: int
+    paragraphs: list[str]
+
+
+@dataclass(frozen=True)
+class ProofreadParagraph:
+    text: str
+    page: int | None
+
+
+@dataclass(frozen=True)
 class TextDraftTemplateCategory:
     key: str
     name: str
@@ -3273,21 +3287,27 @@ button.improve-profile-chip {{
         panel.set_margin_start(18)
         panel.set_margin_end(18)
 
+        intro = Gtk.Label(
+            label=(
+                "Proofread the open Writer document in paragraph batches. "
+                "Prose keeps paragraphs intact and merges the model's JSON into one suggestion list."
+            ),
+            xalign=0,
+        )
+        intro.set_wrap(True)
+        intro.add_css_class("dim-label")
+        panel.append(intro)
+
         page_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
         page_box.set_hexpand(True)
         self._start_spin = Gtk.SpinButton.new_with_range(1, 9999, 1)
         self._start_spin.set_value(1)
         self._end_spin = Gtk.SpinButton.new_with_range(1, 9999, 1)
-        self._end_spin.set_value(1)
+        self._end_spin.set_value(4)
         page_box.append(Gtk.Label(label="Page range:"))
         page_box.append(self._start_spin)
         page_box.append(Gtk.Label(label="to"))
         page_box.append(self._end_spin)
-        next_four_btn = Gtk.Button(label="Next 4")
-        next_four_btn.add_css_class("flat")
-        next_four_btn.add_css_class("transform-pill-compact")
-        next_four_btn.connect("clicked", self._on_next_four_clicked)
-        page_box.append(next_four_btn)
         panel.append(page_box)
 
         run_btn = Gtk.Button(label="Request Changes", icon_name="media-playback-start-symbolic")
@@ -3318,7 +3338,7 @@ button.improve-profile-chip {{
         scroller.set_child(list_box)
         self._list_box = list_box
 
-        info_label = Gtk.Label(label="Proof reading suggestions will appear here after running the tool.")
+        info_label = Gtk.Label(label="Proof reading suggestions will appear here after Prose finishes batching the document.")
         info_label.set_wrap(True)
         info_label.add_css_class("dim-label")
         self._empty_label = info_label
@@ -3846,17 +3866,6 @@ button.improve-profile-chip {{
         self._listener_proc = None
         return True, ""
 
-    def _on_next_four_clicked(self, _button: Gtk.Button) -> None:
-        start = int(self._start_spin.get_value())
-        end = int(self._end_spin.get_value())
-        if end < start:
-            end = start
-        upper = int(self._end_spin.get_adjustment().get_upper())
-        new_start = min(end + 1, upper)
-        new_end = min(new_start + 3, upper)
-        self._start_spin.set_value(new_start)
-        self._end_spin.set_value(new_end)
-
     def _on_request_clicked(self, _button: Gtk.Button) -> None:
         if self._busy:
             return
@@ -3880,7 +3889,7 @@ button.improve-profile-chip {{
             end = start
             self._end_spin.set_value(start)
         self._set_busy(True)
-        self._status_label.set_label(f"Reading page range with {profile.display_name()}…")
+        self._status_label.set_label(f"Proofreading pages {start}-{end} with {profile.display_name()}…")
         thread = threading.Thread(target=self._gather_and_request, args=(doc, start, end, profile), daemon=True)
         thread.start()
 
@@ -6076,47 +6085,57 @@ button.improve-profile-chip {{
         if hasattr(self, "_open_last_btn") and self._open_last_btn:
             self._open_last_btn.set_sensitive(bool(self._last_odt_path))
 
-    def _extract_page_texts(self, doc: XTextDocument, start: int, end: int) -> list[tuple[int, str]]:  # type: ignore[type-arg]
+    def _collect_proofreading_paragraphs(self, doc: XTextDocument) -> list[ProofreadParagraph]:  # type: ignore[type-arg]
+        try:
+            doc_text = doc.getText()
+            enum = doc_text.createEnumeration()
+        except Exception:
+            try:
+                fallback = str(doc.getText().getString() or "").strip()
+            except Exception:
+                fallback = ""
+            return [ProofreadParagraph(text=fallback, page=None)] if fallback else []
+
+        controller = None
+        view_cursor = None
+        original_range = None
         try:
             controller = doc.getCurrentController()
             view_cursor = controller.getViewCursor()
-            page_cursor = view_cursor  # XPageCursor interface
             original_range = view_cursor.getStart()
-            try:
-                results: list[tuple[int, str]] = []
-                text = doc.getText()
-                start_page = max(1, start)
-                end_page = max(start_page, end)
-                for page in range(start_page, end_page + 1):
+        except Exception:
+            view_cursor = None
+
+        paragraphs: list[ProofreadParagraph] = []
+        try:
+            while enum.hasMoreElements():
+                paragraph = enum.nextElement()
+                try:
+                    paragraph_text = str(paragraph.getString() or "")
+                except Exception:
+                    paragraph_text = ""
+                cleaned = paragraph_text.strip()
+                if not cleaned:
+                    continue
+                page_number: int | None = None
+                if view_cursor is not None:
                     try:
-                        page_cursor.jumpToPage(page)
-                        page_cursor.jumpToStartOfPage()
-                        page_start = view_cursor.getStart()
-                        page_cursor.jumpToEndOfPage()
-                        page_end = view_cursor.getEnd()
-                        cursor = text.createTextCursorByRange(page_start)
-                        cursor.gotoRange(page_end, True)
-                        page_text = cursor.getString().strip()
-                        if page_text:
-                            results.append((page, page_text))
+                        view_cursor.gotoRange(paragraph.getStart(), False)
+                        page_getter = getattr(view_cursor, "getPage", None)
+                        if callable(page_getter):
+                            page_value = page_getter()
+                            if isinstance(page_value, int) and page_value > 0:
+                                page_number = page_value
                     except Exception:
-                        continue
-            finally:
+                        page_number = None
+                paragraphs.append(ProofreadParagraph(text=cleaned, page=page_number))
+        finally:
+            if view_cursor is not None and original_range is not None:
                 try:
                     view_cursor.gotoRange(original_range, False)
                 except Exception:
                     pass
-            if results:
-                return results
-        except Exception:
-            pass
-        try:
-            fallback = doc.getText().getString()
-            if fallback.strip():
-                return [(start, fallback)]
-        except Exception:
-            pass
-        return []
+        return paragraphs
 
     def _find_range(self, doc: XTextDocument, snippet: str):  # type: ignore[type-arg]
         def _normalize_for_pattern(text: str) -> str:
@@ -7152,24 +7171,47 @@ button.improve-profile-chip {{
         end: int,
         profile: ModelProfile,
     ) -> None:
-        page_texts = self._extract_page_texts(doc, start, end)
-        if not page_texts:
-            GLib.idle_add(self._on_request_failed, "No text found for the selected page range.")
+        paragraphs = self._collect_proofreading_paragraphs(doc)
+        if not paragraphs:
+            GLib.idle_add(self._on_request_failed, "No text found in the open document.")
             return
-        payload = self._compose_llm_payload(page_texts, start, end, profile)
-        try:
-            suggestions = self._call_llm(payload, profile)
-        except Exception as exc:  # noqa: BLE001
-            GLib.idle_add(self._on_llm_failed, str(exc))
+        scoped_paragraphs = self._filter_proofreading_paragraphs_by_page(paragraphs, start, end)
+        if not scoped_paragraphs:
+            GLib.idle_add(self._on_request_failed, f"No paragraphs found in page range {start}-{end}.")
             return
-        filtered, dropped = self._filter_suggestions_by_range(suggestions, start, end)
-        if not filtered:
-            message = "No suggestions fell within the selected page range."
-            if dropped:
-                message += " The model returned out-of-range pages."
-            GLib.idle_add(self._on_request_failed, message)
+        chunks = self._build_proofreading_chunks(scoped_paragraphs)
+        if not chunks:
+            GLib.idle_add(self._on_request_failed, f"Unable to build proofreading chunks for pages {start}-{end}.")
             return
-        GLib.idle_add(self._on_request_finished, filtered, dropped, start, end)
+
+        merged: list[Suggestion] = []
+        total_chunks = len(chunks)
+        for chunk in chunks:
+            GLib.idle_add(
+                self._set_proofreading_progress,
+                chunk.index,
+                total_chunks,
+                profile.display_name(),
+                start,
+                end,
+            )
+            payload = self._compose_llm_payload(chunk, total_chunks, profile)
+            try:
+                suggestions = self._call_llm(payload, profile, allow_empty=True)
+            except Exception as exc:  # noqa: BLE001
+                GLib.idle_add(
+                    self._on_llm_failed,
+                    f"Chunk {chunk.index} of {total_chunks} failed: {exc}",
+                )
+                return
+            merged.extend(suggestions)
+
+        deduped = self._dedupe_suggestions(merged)
+        if not deduped:
+            GLib.idle_add(self._on_request_failed, "No suggestions returned after reviewing the document.")
+            return
+        self._last_raw_response = self._serialize_suggestions_json(deduped)
+        GLib.idle_add(self._on_request_finished, deduped, total_chunks)
 
     def _add_model_id(
         self,
@@ -7338,34 +7380,79 @@ button.improve-profile-chip {{
             raise ValueError("Gemini returned empty output.")
         return output
 
-    def _compose_llm_payload(
+    def _filter_proofreading_paragraphs_by_page(
         self,
-        pages: Iterable[tuple[int, str]],
+        paragraphs: list[ProofreadParagraph],
         start: int,
         end: int,
+    ) -> list[str]:
+        scoped = [
+            paragraph.text
+            for paragraph in paragraphs
+            if paragraph.text and (paragraph.page is None or start <= paragraph.page <= end)
+        ]
+        if scoped:
+            return scoped
+        # Fallback for environments where page numbers cannot be read reliably.
+        if any(paragraph.page is None for paragraph in paragraphs):
+            return [paragraph.text for paragraph in paragraphs if paragraph.text]
+        return []
+
+    def _build_proofreading_chunks(self, paragraphs: list[str]) -> list[ProofreadChunk]:
+        chunks: list[ProofreadChunk] = []
+        current: list[str] = []
+        current_chars = 0
+        for paragraph in paragraphs:
+            paragraph = paragraph.strip()
+            if not paragraph:
+                continue
+            separator_len = 2 if current else 0
+            would_exceed_count = len(current) >= PROOFREAD_CHUNK_PARAGRAPH_LIMIT
+            would_exceed_chars = bool(current) and (
+                current_chars + separator_len + len(paragraph) > PROOFREAD_CHUNK_CHAR_LIMIT
+            )
+            if would_exceed_count or would_exceed_chars:
+                chunks.append(ProofreadChunk(index=len(chunks) + 1, paragraphs=current))
+                current = []
+                current_chars = 0
+            if current:
+                current_chars += 2
+            current.append(paragraph)
+            current_chars += len(paragraph)
+        if current:
+            chunks.append(ProofreadChunk(index=len(chunks) + 1, paragraphs=current))
+        return chunks
+
+    def _compose_llm_payload(
+        self,
+        chunk: ProofreadChunk,
+        total_chunks: int,
         profile: ModelProfile,
     ) -> dict[str, Any]:
         system_prompt = _expand_shared_prompt_parts(self._proof_settings.prompt or DEFAULT_PROMPT)
         instructions = (
-            "Return a JSON array of suggested edits for ONLY the provided Writer page range. "
+            "Return a JSON array of suggested edits for ONLY the provided Writer paragraph batch. "
             "Each item must look like: {"
             '"title": short summary, '
-            '"page": page number as integer, '
             '"snippet": exact text that should be replaced, '
             '"replacement": improved text, '
             '"reasoning": short explanation'
             "}. "
             "Use standard JSON syntax (double quotes for keys and string values). "
             "Keep snippets short but unique. Only propose changes that truly improve clarity or correctness. "
-            f"Never cite or invent pages outside {start}-{end}; drop any content you think is beyond that range."
+            'Do not include a "page" field. '
+            "Do not return comments, summaries, or unchanged text."
         )
-        page_blocks = []
-        for page_num, text in pages:
-            cleaned = text.strip()
-            if not cleaned:
-                continue
-            page_blocks.append(f"[Page {page_num}]\n{cleaned}")
-        content = f"Selected pages: {start}-{end}\n\n" + "\n\n".join(page_blocks)
+        paragraph_blocks = [
+            f"[Paragraph {offset}]\n{text}"
+            for offset, text in enumerate(chunk.paragraphs, start=1)
+            if text.strip()
+        ]
+        content = (
+            f"Chunk {chunk.index} of {total_chunks}\n"
+            f"Paragraph count: {len(paragraph_blocks)}\n\n"
+            + "\n\n".join(paragraph_blocks)
+        )
         payload = {
             "messages": [
                 {"role": "system", "content": system_prompt},
@@ -7380,41 +7467,56 @@ button.improve-profile-chip {{
             disable_reasoning=profile.disable_reasoning,
         )
 
-    def _call_llm(self, payload: dict[str, Any], profile: ModelProfile) -> list[Suggestion]:
+    def _call_llm(
+        self,
+        payload: dict[str, Any],
+        profile: ModelProfile,
+        allow_empty: bool = False,
+    ) -> list[Suggestion]:
         raw = self._post_json_and_read(
             payload,
             profile.api_url,
             profile.api_key,
         )
         self._last_raw_response = raw
-        suggestions = self._parse_suggestions(raw)
+        suggestions = self._parse_suggestions(raw, allow_empty=allow_empty)
         return suggestions
 
-    def _filter_suggestions_by_range(
-        self, suggestions: list[Suggestion], start: int, end: int
-    ) -> tuple[list[Suggestion], int]:
-        filtered: list[Suggestion] = []
-        dropped = 0
-        for suggestion in suggestions:
-            if suggestion.page is None or start <= suggestion.page <= end:
-                filtered.append(suggestion)
-            else:
-                dropped += 1
-        return filtered, dropped
-
     def _sort_suggestions(self, suggestions: list[Suggestion]) -> list[Suggestion]:
-        indexed = list(enumerate(suggestions))
+        return list(suggestions)
 
-        def _key(item: tuple[int, Suggestion]) -> tuple[int, int, int]:
-            idx, suggestion = item
-            if suggestion.page is None:
-                return (1, 10**9, idx)  # page-less items last
-            return (0, suggestion.page, idx)
+    def _normalize_suggestion_key_part(self, value: str) -> str:
+        return re.sub(r"\s+", " ", str(value or "").strip()).casefold()
 
-        indexed.sort(key=_key)
-        return [suggestion for _, suggestion in indexed]
+    def _dedupe_suggestions(self, suggestions: list[Suggestion]) -> list[Suggestion]:
+        deduped: list[Suggestion] = []
+        seen: set[tuple[str, str]] = set()
+        for suggestion in suggestions:
+            key = (
+                self._normalize_suggestion_key_part(suggestion.snippet),
+                self._normalize_suggestion_key_part(suggestion.replacement),
+            )
+            if not all(key) or key in seen:
+                continue
+            seen.add(key)
+            deduped.append(suggestion)
+        return deduped
 
-    def _parse_suggestions(self, raw: str) -> list[Suggestion]:
+    def _serialize_suggestions_json(self, suggestions: list[Suggestion]) -> str:
+        payload: list[dict[str, str | int]] = []
+        for suggestion in suggestions:
+            item: dict[str, str | int] = {
+                "title": suggestion.title,
+                "snippet": suggestion.snippet,
+                "replacement": suggestion.replacement,
+                "reasoning": suggestion.reasoning,
+            }
+            if suggestion.page is not None:
+                item["page"] = suggestion.page
+            payload.append(item)
+        return json.dumps(payload, ensure_ascii=False)
+
+    def _parse_suggestions(self, raw: str, allow_empty: bool = False) -> list[Suggestion]:
         def _normalize_json_punctuation(text: str) -> str:
             # Some models return JSON-like text with curly quotes; normalize for JSON parsing.
             return text.translate(
@@ -7596,7 +7698,7 @@ button.improve-profile-chip {{
                     reasoning=str(item.get("reasoning") or item.get("why") or item.get("explanation") or ""),
                 )
             )
-        if not suggestions:
+        if not suggestions and not allow_empty:
             raise ValueError("No suggestions returned by the model.")
         return suggestions
 
@@ -7605,22 +7707,31 @@ button.improve-profile-chip {{
         self._status_label.set_label(message)
         return False
 
+    def _set_proofreading_progress(
+        self,
+        chunk_index: int,
+        total_chunks: int,
+        profile_name: str,
+        start: int,
+        end: int,
+    ) -> bool:
+        self._status_label.set_label(
+            f"Proofreading pages {start}-{end}: chunk {chunk_index} of {total_chunks} with {profile_name}…"
+        )
+        return False
+
     def _on_llm_failed(self, message: str) -> bool:
         self._set_busy(False)
         self._view_json_btn.set_sensitive(bool(self._last_raw_response))
         self._notify_llm_error(message)
         return False
 
-    def _on_request_finished(
-        self, suggestions: list[Suggestion], dropped: int = 0, start: int | None = None, end: int | None = None
-    ) -> bool:
+    def _on_request_finished(self, suggestions: list[Suggestion], total_chunks: int = 1) -> bool:
         self._set_busy(False)
-        extra = ""
-        if dropped and start is not None and end is not None:
-            extra = f" ({dropped} outside {start}-{end} ignored)"
-        elif dropped:
-            extra = f" ({dropped} out-of-range suggestions ignored)"
-        self._status_label.set_label(f"Received {len(suggestions)} suggestions.{extra}")
+        chunk_text = "chunk" if total_chunks == 1 else "chunks"
+        self._status_label.set_label(
+            f"Received {len(suggestions)} suggestions from {total_chunks} {chunk_text}."
+        )
         self._suggestions = self._sort_suggestions(suggestions)
         self._view_json_btn.set_sensitive(bool(self._last_raw_response))
         self._render_suggestions()
@@ -9011,10 +9122,7 @@ button.improve-profile-chip {{
         content.set_margin_end(8)
         content.set_margin_top(8)
         content.set_margin_bottom(8)
-        title = suggestion.title
-        if suggestion.page:
-            title = f"Page {suggestion.page}: {title}"
-        label = Gtk.Label(label=title, wrap=True, xalign=0)
+        label = Gtk.Label(label=suggestion.title, wrap=True, xalign=0)
         label.add_css_class("title-3")
         content.append(label)
 
