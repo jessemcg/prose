@@ -389,7 +389,7 @@ REGENERATE_INSERT_MODE_BY_ACTION = {
     "concl-no-issues": "editor",
     "concl-section": "editor",
 }
-REGENERATE_SOURCE_BUFFER_ACTION_KEYS = frozenset({"improve-generated", "rephrase-generated", "improve-selected"})
+REGENERATE_SOURCE_BUFFER_ACTION_KEYS = frozenset({"improve-generated", "rephrase-generated", "improve-selected", "shorten"})
 CITATION_NUMBER_WORDS = {
     "zero": "0",
     "one": "1",
@@ -4663,7 +4663,7 @@ button.improve-profile-chip {{
         if not source_text.strip():
             self._show_toast("Select text in Writer first.")
             return
-        self._set_spelling_output_text("")
+        self._set_spelling_output_text(source_text)
         if not self._prepare_selection_insertion(doc, view_cursor):
             self._show_toast("Unable to prepare selected text replacement.")
             return
@@ -7835,7 +7835,6 @@ button.improve-profile-chip {{
         try:
             for chunk in self._stream_custom(payload, profile.api_url, profile.api_key, request_title="Shorten"):
                 GLib.idle_add(self._append_improve1_text, chunk)
-                GLib.idle_add(self._append_spelling_output_text, chunk)
         except Exception as exc:  # noqa: BLE001
             GLib.idle_add(self._on_spellingstyle_failed, str(exc))
             return
