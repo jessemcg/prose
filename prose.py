@@ -3287,17 +3287,6 @@ button.improve-profile-chip {{
         panel.set_margin_start(18)
         panel.set_margin_end(18)
 
-        intro = Gtk.Label(
-            label=(
-                "Proofread the open Writer document in paragraph batches. "
-                "Prose keeps paragraphs intact and merges the model's JSON into one suggestion list."
-            ),
-            xalign=0,
-        )
-        intro.set_wrap(True)
-        intro.add_css_class("dim-label")
-        panel.append(intro)
-
         page_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
         page_box.set_hexpand(True)
         self._start_spin = Gtk.SpinButton.new_with_range(1, 9999, 1)
@@ -3309,6 +3298,12 @@ button.improve-profile-chip {{
         page_box.append(Gtk.Label(label="to"))
         page_box.append(self._end_spin)
         panel.append(page_box)
+
+        document_scope_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+        self._entire_document_check = Gtk.CheckButton(label="Entire document")
+        self._entire_document_check.connect("toggled", self._on_proof_entire_document_toggled)
+        document_scope_box.append(self._entire_document_check)
+        panel.append(document_scope_box)
 
         run_btn = Gtk.Button(label="Request Changes", icon_name="media-playback-start-symbolic")
         run_btn.add_css_class("suggested-action")
@@ -3883,15 +3878,25 @@ button.improve-profile-chip {{
             return
         self._last_raw_response = None
         self._view_json_btn.set_sensitive(False)
-        start = int(self._start_spin.get_value())
-        end = int(self._end_spin.get_value())
-        if end < start:
-            end = start
-            self._end_spin.set_value(start)
+        entire_document = self._entire_document_check.get_active()
+        start: int | None = None
+        end: int | None = None
+        if not entire_document:
+            start = int(self._start_spin.get_value())
+            end = int(self._end_spin.get_value())
+            if end < start:
+                end = start
+                self._end_spin.set_value(start)
+        scope_label = self._proofreading_scope_label(start, end)
         self._set_busy(True)
-        self._status_label.set_label(f"Proofreading pages {start}-{end} with {profile.display_name()}…")
+        self._status_label.set_label(f"Proofreading {scope_label} with {profile.display_name()}…")
         thread = threading.Thread(target=self._gather_and_request, args=(doc, start, end, profile), daemon=True)
         thread.start()
+
+    def _on_proof_entire_document_toggled(self, button: Gtk.CheckButton) -> None:
+        enabled = not button.get_active()
+        self._start_spin.set_sensitive(enabled)
+        self._end_spin.set_sensitive(enabled)
 
     def _on_spellingstyle_clicked(self, _button: Gtk.Button) -> None:
         if self._busy:
@@ -7164,24 +7169,30 @@ button.improve-profile-chip {{
             self._update_text_draft_template_controls()
 
     # Proofreading pipeline ----------------------------------------------
+    def _proofreading_scope_label(self, start: int | None, end: int | None) -> str:
+        if start is None or end is None:
+            return "entire document"
+        return f"pages {start}-{end}"
+
     def _gather_and_request(
         self,
         doc: XTextDocument,  # type: ignore[type-arg]
-        start: int,
-        end: int,
+        start: int | None,
+        end: int | None,
         profile: ModelProfile,
     ) -> None:
         paragraphs = self._collect_proofreading_paragraphs(doc)
         if not paragraphs:
             GLib.idle_add(self._on_request_failed, "No text found in the open document.")
             return
+        scope_label = self._proofreading_scope_label(start, end)
         scoped_paragraphs = self._filter_proofreading_paragraphs_by_page(paragraphs, start, end)
         if not scoped_paragraphs:
-            GLib.idle_add(self._on_request_failed, f"No paragraphs found in page range {start}-{end}.")
+            GLib.idle_add(self._on_request_failed, f"No paragraphs found in {scope_label}.")
             return
         chunks = self._build_proofreading_chunks(scoped_paragraphs)
         if not chunks:
-            GLib.idle_add(self._on_request_failed, f"Unable to build proofreading chunks for pages {start}-{end}.")
+            GLib.idle_add(self._on_request_failed, f"Unable to build proofreading chunks for {scope_label}.")
             return
 
         merged: list[Suggestion] = []
@@ -7192,8 +7203,7 @@ button.improve-profile-chip {{
                 chunk.index,
                 total_chunks,
                 profile.display_name(),
-                start,
-                end,
+                scope_label,
             )
             payload = self._compose_llm_payload(chunk, total_chunks, profile)
             try:
@@ -7383,9 +7393,11 @@ button.improve-profile-chip {{
     def _filter_proofreading_paragraphs_by_page(
         self,
         paragraphs: list[ProofreadParagraph],
-        start: int,
-        end: int,
+        start: int | None,
+        end: int | None,
     ) -> list[str]:
+        if start is None or end is None:
+            return [paragraph.text for paragraph in paragraphs if paragraph.text]
         scoped = [
             paragraph.text
             for paragraph in paragraphs
@@ -7712,11 +7724,10 @@ button.improve-profile-chip {{
         chunk_index: int,
         total_chunks: int,
         profile_name: str,
-        start: int,
-        end: int,
+        scope_label: str,
     ) -> bool:
         self._status_label.set_label(
-            f"Proofreading pages {start}-{end}: chunk {chunk_index} of {total_chunks} with {profile_name}…"
+            f"Proofreading {scope_label}: chunk {chunk_index} of {total_chunks} with {profile_name}…"
         )
         return False
 
