@@ -16,6 +16,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import zipfile
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -430,6 +431,10 @@ TAVILY_MAX_RESULTS = 5
 TAVILY_MAX_SOURCES = 2
 TAVILY_SOURCE_EXCERPT_CHARS = 2000
 TAVILY_CLI_INSTALL_HINT = "Install it with `uv tool install tavily-cli`."
+ODT_IMPORT_XML_MEMBERS = frozenset({"content.xml", "styles.xml"})
+ODT_PAGE_STYLE_ATTR_RE = re.compile(r'\s(?:style:master-page-name|style:page-number)="[^"]*"')
+ODT_MASTER_PAGE_TAG_RE = re.compile(r"<style:master-page\b[^>]*>")
+ODT_MASTER_PAGE_NEXT_STYLE_RE = re.compile(r'\sstyle:next-style-name="[^"]*"')
 OBSOLETE_REASONING_CONFIG_KEYS = (
     "proofread_kimi_reasoning",
     "proofread_deepseek_reasoning",
@@ -814,6 +819,17 @@ def _uno_status_message(configured_path: Path | None = None) -> str:
     if _UNO_ATTEMPTED_PATHS:
         return "python-uno unavailable. Set a LibreOffice Python path in Settings."
     return "python-uno unavailable."
+
+
+def _strip_odt_page_style_metadata(xml_text: str) -> tuple[str, int]:
+    stripped, attr_count = ODT_PAGE_STYLE_ATTR_RE.subn("", xml_text)
+
+    def _strip_master_page_next_style(match: re.Match[str]) -> str:
+        return ODT_MASTER_PAGE_NEXT_STYLE_RE.sub("", match.group(0))
+
+    stripped, master_count = ODT_MASTER_PAGE_TAG_RE.subn(_strip_master_page_next_style, stripped)
+    return stripped, attr_count + master_count
+
 
 def _action_command(
     action_name: str,
@@ -1223,6 +1239,13 @@ EDITOR_QUICK_ACTIONS = (
         title="Add Case",
         action_name="add-case",
         description="Add the selected case citation to concordance and AutoText.",
+    ),
+    QuickActionDefinition(
+        key="import-socf",
+        label="Import SOCF",
+        title="Import SOCF",
+        action_name="import-socf",
+        description="Insert a SOCF ODT at the cursor without importing page-number reset metadata.",
     ),
     QuickActionDefinition(
         key="intro",
@@ -3550,6 +3573,7 @@ button.improve-profile-chip {{
         )
         _add_string_action("transform-concl-section", lambda nickname: self._on_concl_section_clicked(None, nickname))
         _add_action("add-case", lambda: self._on_add_case_clicked(None))
+        _add_action("import-socf", lambda: self._on_import_socf_clicked(None))
         _add_action("request-changes", lambda: self._on_request_clicked(None))
         _add_action("view-last-editor-prompt", lambda: self._on_view_editor_prompt_clicked(None))
         _add_action("view-last-model-response", lambda: self._on_view_model_response_clicked(None))
@@ -3799,6 +3823,61 @@ button.improve-profile-chip {{
         if not path:
             return
         self._set_editor_source_file(path)
+
+    def _on_import_socf_clicked(self, _button: Gtk.Button | None) -> None:
+        if self._busy:
+            return
+        desktop = self._get_desktop()
+        if not desktop:
+            self._show_toast("Unable to reach LibreOffice listener. Is the service running?")
+            return
+        doc = self._get_active_writer(desktop)
+        if not doc:
+            self._show_toast("Open a Writer document (File → Launch Writer).")
+            return
+        dialog = Gtk.FileDialog(title="Choose SOCF ODT to import")
+        dialog.open(self, None, self._on_import_socf_file_chosen)
+
+    def _on_import_socf_file_chosen(self, dialog: Gtk.FileDialog, result: Gio.AsyncResult) -> None:  # noqa: D401
+        try:
+            file = dialog.open_finish(result)
+            source_path = Path(file.get_path() or "")
+        except Exception:
+            return
+        if not source_path:
+            return
+        if source_path.suffix.lower() != ".odt":
+            self._show_toast("Choose an .odt file.")
+            return
+        if not source_path.exists():
+            self._show_toast("Selected SOCF file no longer exists.")
+            return
+        desktop = self._get_desktop()
+        if not desktop:
+            self._show_toast("Unable to reach LibreOffice listener. Is the service running?")
+            return
+        doc = self._get_active_writer(desktop)
+        if not doc:
+            self._show_toast("Open a Writer document (File → Launch Writer).")
+            return
+        self._ensure_writer_frame_active(desktop, doc)
+        self._set_busy(True)
+        self._status_label.set_label(f"Importing {source_path.name} without page-number resets…")
+        temp_path: Path | None = None
+        try:
+            temp_path = self._create_page_safe_odt_import_copy(source_path)
+            self._insert_odt_at_current_cursor(doc, temp_path)
+        except Exception as exc:  # noqa: BLE001
+            self._set_busy(False)
+            self._status_label.set_label("SOCF import failed.")
+            self._show_toast(f"SOCF import failed: {exc}")
+            return
+        finally:
+            if temp_path is not None:
+                shutil.rmtree(temp_path.parent, ignore_errors=True)
+        self._set_busy(False)
+        self._status_label.set_label(f"Imported {source_path.name} without page-number reset metadata.")
+        self._show_toast(f"Imported {source_path.name}.")
 
     def _on_editor_source_file_updated(self, path: Path | None) -> None:
         self._set_editor_source_file(path)
@@ -5647,6 +5726,85 @@ button.improve-profile-chip {{
             desktop.setCurrentComponent(doc)
         except Exception:
             pass
+
+    def _create_page_safe_odt_import_copy(self, source_path: Path) -> Path:
+        temp_dir = Path(tempfile.mkdtemp(prefix="prose-odt-import-"))
+        output_path = temp_dir / f"{source_path.stem}-page-safe.odt"
+        try:
+            with zipfile.ZipFile(source_path, "r") as zin:
+                infos = zin.infolist()
+                if not any(info.filename == "content.xml" for info in infos):
+                    raise ValueError("Selected ODT has no content.xml.")
+                contents = {info.filename: zin.read(info.filename) for info in infos}
+        except zipfile.BadZipFile as exc:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+            raise ValueError("Selected file is not a valid ODT package.") from exc
+        except Exception:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+            raise
+
+        for name in ODT_IMPORT_XML_MEMBERS:
+            raw = contents.get(name)
+            if raw is None:
+                continue
+            try:
+                xml_text = raw.decode("utf-8")
+            except UnicodeDecodeError as exc:
+                shutil.rmtree(temp_dir, ignore_errors=True)
+                raise ValueError(f"Unable to read {name} as UTF-8.") from exc
+            stripped, _count = _strip_odt_page_style_metadata(xml_text)
+            contents[name] = stripped.encode("utf-8")
+
+        try:
+            with zipfile.ZipFile(output_path, "w") as zout:
+                def _write_member(info: zipfile.ZipInfo) -> None:
+                    zip_info = zipfile.ZipInfo(filename=info.filename, date_time=info.date_time)
+                    zip_info.comment = info.comment
+                    zip_info.extra = info.extra
+                    zip_info.internal_attr = info.internal_attr
+                    zip_info.external_attr = info.external_attr
+                    zip_info.create_system = info.create_system
+                    zip_info.compress_type = zipfile.ZIP_STORED if info.filename == "mimetype" else info.compress_type
+                    zout.writestr(zip_info, contents[info.filename])
+
+                mimetype_info = next((info for info in infos if info.filename == "mimetype"), None)
+                if mimetype_info is not None:
+                    _write_member(mimetype_info)
+                for info in infos:
+                    if info.filename == "mimetype":
+                        continue
+                    _write_member(info)
+        except Exception:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+            raise
+        return output_path
+
+    def _insert_odt_at_current_cursor(self, doc: XTextDocument, odt_path: Path) -> None:  # type: ignore[type-arg]
+        if uno is None:
+            raise ValueError("python-uno unavailable. Set the LibreOffice Python path in Settings.")
+        try:
+            controller = doc.getCurrentController()
+            view_cursor = controller.getViewCursor()
+            text = self._get_text_container(doc, view_cursor)
+            if not text:
+                raise ValueError("Unable to find the current Writer text cursor.")
+            try:
+                if view_cursor.getString():
+                    view_cursor.setString("")
+            except Exception:
+                pass
+            insert_cursor = text.createTextCursorByRange(view_cursor)
+            insert_url = uno.systemPathToFileUrl(str(odt_path))
+            insertable = getattr(insert_cursor, "insertDocumentFromURL", None)
+            if not callable(insertable):
+                insertable = getattr(view_cursor, "insertDocumentFromURL", None)
+            if not callable(insertable):
+                raise ValueError("LibreOffice cursor does not support document insertion.")
+            insertable(insert_url, ())
+        except Exception as exc:  # noqa: BLE001
+            if isinstance(exc, ValueError):
+                raise
+            raise ValueError(f"Unable to insert sanitized ODT: {exc}") from exc
 
     def _extract_section_between_headings(
         self, doc: XTextDocument, start_heading: str, end_heading: str
