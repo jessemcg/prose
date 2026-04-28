@@ -507,7 +507,9 @@ def _apply_disable_reasoning_to_body(
 ) -> None:
     if not disable_reasoning:
         return
-    if _model_looks_deepseek(model_id) or _model_looks_kimi(model_id):
+    if _model_looks_deepseek(model_id):
+        body["reasoning_effort"] = "none"
+    elif _model_looks_kimi(model_id):
         body["thinking"] = {"type": "disabled"}
     elif _model_looks_minimax(model_id):
         body["reasoning_effort"] = "low"
@@ -2272,8 +2274,12 @@ class ProseWindow(Adw.ApplicationWindow):
         self._suggestion_rows: list[Gtk.Box] = []
         self._current_doc_path: Path | None = None
         self._busy = False
-        self._last_raw_response: str | None = None
-        self._json_window: Adw.ApplicationWindow | None = None
+        self._last_model_response_raw: str | None = None
+        self._last_model_response_title: str | None = None
+        self._last_model_response_api_url: str | None = None
+        self._last_model_response_timestamp: str | None = None
+        self._last_model_response_diagnostic: str | None = None
+        self._model_response_window: Adw.ApplicationWindow | None = None
         self._last_editor_request_raw: str | None = None
         self._last_editor_request_title: str | None = None
         self._last_editor_request_api_url: str | None = None
@@ -3311,15 +3317,8 @@ button.improve-profile-chip {{
         run_btn.set_action_name("app.request-changes")
         self._run_btn = run_btn
 
-        view_json_btn = Gtk.Button(label="View Last JSON", icon_name="text-x-generic-symbolic")
-        view_json_btn.add_css_class("flat")
-        view_json_btn.set_sensitive(False)
-        view_json_btn.set_action_name("app.view-last-json")
-        self._view_json_btn = view_json_btn
-
         btn_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         btn_row.append(run_btn)
-        btn_row.append(view_json_btn)
         panel.append(btn_row)
 
         sep = Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL)
@@ -3466,6 +3465,7 @@ button.improve-profile-chip {{
     def _ensure_menu(self) -> None:
         menu = Gio.Menu()
         menu.append("Prompt Audit", "app.view-last-editor-prompt")
+        menu.append("Response Audit", "app.view-last-model-response")
         menu.append("Settings", "app.settings")
         menu.append("Keyboard Shortcuts", "app.show-shortcuts")
         self._menu_button.set_menu_model(menu)
@@ -3551,11 +3551,14 @@ button.improve-profile-chip {{
         _add_string_action("transform-concl-section", lambda nickname: self._on_concl_section_clicked(None, nickname))
         _add_action("add-case", lambda: self._on_add_case_clicked(None))
         _add_action("request-changes", lambda: self._on_request_clicked(None))
-        _add_action("view-last-json", lambda: self._on_view_json_clicked(None))
         _add_action("view-last-editor-prompt", lambda: self._on_view_editor_prompt_clicked(None))
+        _add_action("view-last-model-response", lambda: self._on_view_model_response_clicked(None))
         prompt_audit_action = app.lookup_action("view-last-editor-prompt")
         if prompt_audit_action is not None:
             prompt_audit_action.set_enabled(False)
+        response_audit_action = app.lookup_action("view-last-model-response")
+        if response_audit_action is not None:
+            response_audit_action.set_enabled(False)
         _add_action("focus-ask", self._on_focus_ask)
         _add_action("show-shortcuts", self._on_show_shortcuts)
         _add_action("save-settings", self._on_action_save_settings)
@@ -3876,8 +3879,6 @@ button.improve-profile-chip {{
         if not doc:
             self._show_toast("Open a Writer document (File → Launch Writer).")
             return
-        self._last_raw_response = None
-        self._view_json_btn.set_sensitive(False)
         entire_document = self._entire_document_check.get_active()
         start: int | None = None
         end: int | None = None
@@ -7207,7 +7208,12 @@ button.improve-profile-chip {{
             )
             payload = self._compose_llm_payload(chunk, total_chunks, profile)
             try:
-                suggestions = self._call_llm(payload, profile, allow_empty=True)
+                suggestions = self._call_llm(
+                    payload,
+                    profile,
+                    allow_empty=True,
+                    request_title=f"Proof Reading Chunk {chunk.index} of {total_chunks}",
+                )
             except Exception as exc:  # noqa: BLE001
                 GLib.idle_add(
                     self._on_llm_failed,
@@ -7220,7 +7226,6 @@ button.improve-profile-chip {{
         if not deduped:
             GLib.idle_add(self._on_request_failed, "No suggestions returned after reviewing the document.")
             return
-        self._last_raw_response = self._serialize_suggestions_json(deduped)
         GLib.idle_add(self._on_request_finished, deduped, total_chunks)
 
     def _add_model_id(
@@ -7266,7 +7271,16 @@ button.improve-profile-chip {{
             return True, attempted_without_thinking, True
         return False, attempted_without_thinking, attempted_without_reasoning_effort
 
+    def _clear_model_response_audit(self) -> None:
+        self._last_model_response_raw = None
+        self._last_model_response_title = None
+        self._last_model_response_api_url = None
+        self._last_model_response_timestamp = None
+        self._last_model_response_diagnostic = None
+        GLib.idle_add(self._set_model_response_view_available, False)
+
     def _remember_editor_request(self, title: str, api_url: str, payload: Any) -> None:
+        self._clear_model_response_audit()
         try:
             raw = json.dumps(payload, ensure_ascii=False)
         except Exception:
@@ -7282,6 +7296,160 @@ button.improve-profile-chip {{
         if action is not None:
             action.set_enabled(available)
         return False
+
+    def _remember_model_response(
+        self,
+        title: str,
+        api_url: str,
+        payload: Any,
+        raw_response: str,
+        response_obj: Any | None = None,
+    ) -> None:
+        self._last_model_response_raw = raw_response
+        self._last_model_response_title = title
+        self._last_model_response_api_url = api_url
+        self._last_model_response_timestamp = datetime.now().strftime("%B %d, %Y %I:%M:%S %p")
+        self._last_model_response_diagnostic = self._build_model_response_diagnostic(
+            payload,
+            raw_response,
+            response_obj=response_obj,
+        )
+        GLib.idle_add(self._set_model_response_view_available, True)
+
+    def _set_model_response_view_available(self, available: bool) -> bool:
+        action = self.get_application().lookup_action("view-last-model-response")
+        if action is not None:
+            action.set_enabled(available)
+        return False
+
+    def _build_model_response_diagnostic(
+        self,
+        payload: Any,
+        raw_response: str,
+        *,
+        response_obj: Any | None = None,
+    ) -> str:
+        if response_obj is None:
+            try:
+                response_obj = json.loads(raw_response)
+            except Exception:
+                response_obj = raw_response
+        usage = self._find_last_dict_value(response_obj, "usage")
+        perf_metrics = self._find_last_dict_value(response_obj, "perf_metrics")
+        return "\n".join(
+            [
+                f"Model: {self._audit_payload_model(payload)}",
+                f"Stream: {self._audit_payload_stream(payload)}",
+                f"Reasoning control sent: {self._audit_reasoning_control(payload)}",
+                f"reasoning_content seen: {self._yes_no(self._response_has_reasoning_content(response_obj))}",
+                f"<think> tag seen: {self._yes_no(self._response_has_think_tag(response_obj))}",
+                f"Usage: {self._format_usage_for_audit(usage)}",
+                f"Performance metrics: {self._format_perf_metrics_for_audit(perf_metrics)}",
+            ]
+        )
+
+    def _audit_payload_model(self, payload: Any) -> str:
+        if isinstance(payload, dict) and payload.get("model"):
+            return str(payload["model"])
+        return "not sent"
+
+    def _audit_payload_stream(self, payload: Any) -> str:
+        if isinstance(payload, dict) and "stream" in payload:
+            return str(bool(payload.get("stream"))).lower()
+        return "not sent"
+
+    def _audit_reasoning_control(self, payload: Any) -> str:
+        if not isinstance(payload, dict):
+            return "not sent"
+        controls: list[str] = []
+        if "reasoning_effort" in payload:
+            controls.append(f"reasoning_effort={self._json_audit_value(payload.get('reasoning_effort'))}")
+        if "thinking" in payload:
+            controls.append(f"thinking={self._json_audit_value(payload.get('thinking'))}")
+        return ", ".join(controls) if controls else "not sent"
+
+    def _json_audit_value(self, value: Any) -> str:
+        try:
+            return json.dumps(value, ensure_ascii=False)
+        except Exception:
+            return str(value)
+
+    def _json_value_has_content(self, value: Any) -> bool:
+        if value is None:
+            return False
+        if isinstance(value, str):
+            return bool(value.strip())
+        if isinstance(value, dict):
+            return any(self._json_value_has_content(item) for item in value.values())
+        if isinstance(value, list):
+            return any(self._json_value_has_content(item) for item in value)
+        return bool(value)
+
+    def _response_has_reasoning_content(self, value: Any) -> bool:
+        if isinstance(value, dict):
+            for key, item in value.items():
+                if key == "reasoning_content" and self._json_value_has_content(item):
+                    return True
+                if self._response_has_reasoning_content(item):
+                    return True
+        elif isinstance(value, list):
+            return any(self._response_has_reasoning_content(item) for item in value)
+        return False
+
+    def _response_has_think_tag(self, value: Any) -> bool:
+        if isinstance(value, str):
+            lowered = value.lower()
+            return "<think" in lowered or "</think" in lowered
+        if isinstance(value, dict):
+            return any(self._response_has_think_tag(item) for item in value.values())
+        if isinstance(value, list):
+            return any(self._response_has_think_tag(item) for item in value)
+        return False
+
+    def _find_last_dict_value(self, value: Any, key: str) -> dict[str, Any] | None:
+        found: dict[str, Any] | None = None
+        if isinstance(value, dict):
+            item = value.get(key)
+            if isinstance(item, dict) and item:
+                found = item
+            for child in value.values():
+                child_found = self._find_last_dict_value(child, key)
+                if child_found is not None:
+                    found = child_found
+        elif isinstance(value, list):
+            for child in value:
+                child_found = self._find_last_dict_value(child, key)
+                if child_found is not None:
+                    found = child_found
+        return found
+
+    def _format_usage_for_audit(self, usage: dict[str, Any] | None) -> str:
+        if not usage:
+            return "not returned"
+        parts: list[str] = []
+        for label, key in (
+            ("prompt", "prompt_tokens"),
+            ("completion", "completion_tokens"),
+            ("total", "total_tokens"),
+            ("reasoning", "reasoning_tokens"),
+        ):
+            if usage.get(key) is not None:
+                parts.append(f"{label}={usage[key]}")
+        details = usage.get("prompt_tokens_details")
+        if isinstance(details, dict) and details.get("cached_tokens") is not None:
+            parts.append(f"cached_prompt={details['cached_tokens']}")
+        completion_details = usage.get("completion_tokens_details")
+        if isinstance(completion_details, dict) and completion_details.get("reasoning_tokens") is not None:
+            parts.append(f"reasoning={completion_details['reasoning_tokens']}")
+        return ", ".join(parts) if parts else self._json_audit_value(usage)
+
+    def _format_perf_metrics_for_audit(self, perf_metrics: dict[str, Any] | None) -> str:
+        if not perf_metrics:
+            return "not returned"
+        return self._json_audit_value(perf_metrics)
+
+    def _yes_no(self, value: bool) -> str:
+        return "yes" if value else "no"
 
     def _post_json_and_read(
         self,
@@ -7309,7 +7477,10 @@ button.improve-profile-chip {{
             req = urllib.request.Request(api_url, data=data, headers=headers, method="POST")
             try:
                 with urllib.request.urlopen(req) as resp:
-                    return resp.read().decode("utf-8", errors="ignore")
+                    raw = resp.read().decode("utf-8", errors="ignore")
+                    if request_title:
+                        self._remember_model_response(request_title, api_url, payload, raw)
+                    return raw
             except urllib.error.HTTPError as exc:
                 detail = ""
                 try:
@@ -7362,6 +7533,8 @@ button.improve-profile-chip {{
         try:
             with urllib.request.urlopen(req) as resp:
                 raw = resp.read().decode("utf-8", errors="ignore")
+                if request_title:
+                    self._remember_model_response(request_title, api_url, payload, raw)
         except urllib.error.HTTPError as exc:
             detail = ""
             try:
@@ -7484,13 +7657,14 @@ button.improve-profile-chip {{
         payload: dict[str, Any],
         profile: ModelProfile,
         allow_empty: bool = False,
+        request_title: str = "Proof Reading",
     ) -> list[Suggestion]:
         raw = self._post_json_and_read(
             payload,
             profile.api_url,
             profile.api_key,
+            request_title=request_title,
         )
-        self._last_raw_response = raw
         suggestions = self._parse_suggestions(raw, allow_empty=allow_empty)
         return suggestions
 
@@ -7513,20 +7687,6 @@ button.improve-profile-chip {{
             seen.add(key)
             deduped.append(suggestion)
         return deduped
-
-    def _serialize_suggestions_json(self, suggestions: list[Suggestion]) -> str:
-        payload: list[dict[str, str | int]] = []
-        for suggestion in suggestions:
-            item: dict[str, str | int] = {
-                "title": suggestion.title,
-                "snippet": suggestion.snippet,
-                "replacement": suggestion.replacement,
-                "reasoning": suggestion.reasoning,
-            }
-            if suggestion.page is not None:
-                item["page"] = suggestion.page
-            payload.append(item)
-        return json.dumps(payload, ensure_ascii=False)
 
     def _parse_suggestions(self, raw: str, allow_empty: bool = False) -> list[Suggestion]:
         def _normalize_json_punctuation(text: str) -> str:
@@ -7733,7 +7893,6 @@ button.improve-profile-chip {{
 
     def _on_llm_failed(self, message: str) -> bool:
         self._set_busy(False)
-        self._view_json_btn.set_sensitive(bool(self._last_raw_response))
         self._notify_llm_error(message)
         return False
 
@@ -7744,7 +7903,6 @@ button.improve-profile-chip {{
             f"Received {len(suggestions)} suggestions from {total_chunks} {chunk_text}."
         )
         self._suggestions = self._sort_suggestions(suggestions)
-        self._view_json_btn.set_sensitive(bool(self._last_raw_response))
         self._render_suggestions()
         self._focus_first_suggestion(notify_success=False)
         return False
@@ -8712,11 +8870,14 @@ button.improve-profile-chip {{
                 self._remember_editor_request(request_title, api_url, payload)
             data = json.dumps(payload).encode("utf-8")
             req = urllib.request.Request(api_url, data=data, headers=headers, method="POST")
+            stream_events: list[Any] = []
             try:
                 with urllib.request.urlopen(req) as resp:
                     content_type = resp.headers.get("Content-Type", "")
                     if "text/event-stream" not in content_type:
                         raw = resp.read().decode("utf-8", errors="ignore")
+                        if request_title:
+                            self._remember_model_response(request_title, api_url, payload, raw)
                         for chunk in self._extract_response_text(raw):
                             cleaned = self._normalize_generated_output_chunk(chunk, is_first_chunk=not saw_output)
                             if not cleaned:
@@ -8735,6 +8896,7 @@ button.improve-profile-chip {{
                             data_obj = json.loads(payload_str)
                         except json.JSONDecodeError:
                             continue
+                        stream_events.append(data_obj)
                         chunk = self._extract_stream_delta(data_obj)
                         if chunk:
                             cleaned = self._normalize_generated_output_chunk(chunk, is_first_chunk=not saw_output)
@@ -8742,6 +8904,9 @@ button.improve-profile-chip {{
                                 continue
                             saw_output = True
                             yield cleaned
+                    if request_title:
+                        raw = json.dumps(stream_events, ensure_ascii=False)
+                        self._remember_model_response(request_title, api_url, payload, raw, response_obj=stream_events)
                 return
             except urllib.error.HTTPError as exc:
                 detail = ""
@@ -8784,11 +8949,14 @@ button.improve-profile-chip {{
                 self._remember_editor_request(request_title, api_url, payload)
             data = json.dumps(payload).encode("utf-8")
             req = urllib.request.Request(api_url, data=data, headers=headers, method="POST")
+            stream_events: list[Any] = []
             try:
                 with urllib.request.urlopen(req) as resp:
                     content_type = resp.headers.get("Content-Type", "")
                     if "text/event-stream" not in content_type:
                         raw = resp.read().decode("utf-8", errors="ignore")
+                        if request_title:
+                            self._remember_model_response(request_title, api_url, payload, raw)
                         for chunk in self._extract_responses_text(raw):
                             cleaned = self._normalize_generated_output_chunk(chunk, is_first_chunk=not saw_output)
                             if not cleaned:
@@ -8807,6 +8975,7 @@ button.improve-profile-chip {{
                             data_obj = json.loads(payload_str)
                         except json.JSONDecodeError:
                             continue
+                        stream_events.append(data_obj)
                         chunk = self._extract_responses_delta(data_obj)
                         if chunk:
                             cleaned = self._normalize_generated_output_chunk(chunk, is_first_chunk=not saw_output)
@@ -8814,6 +8983,9 @@ button.improve-profile-chip {{
                                 continue
                             saw_output = True
                             yield cleaned
+                    if request_title:
+                        raw = json.dumps(stream_events, ensure_ascii=False)
+                        self._remember_model_response(request_title, api_url, payload, raw, response_obj=stream_events)
                 return
             except urllib.error.HTTPError as exc:
                 detail = ""
@@ -9283,21 +9455,21 @@ button.improve-profile-chip {{
             return
         self._focus_suggestion(0, notify_success=notify_success, notify_failure=True)
 
-    def _on_view_json_clicked(self, _button: Gtk.Button) -> None:
-        if not self._last_raw_response:
+    def _on_view_model_response_clicked(self, _button: Gtk.Button | None) -> None:
+        if not self._last_model_response_raw:
             self._show_toast("No model response available yet.")
             return
-        text = self._format_last_response()
-        if self._json_window:
+        text = self._format_last_model_response()
+        if self._model_response_window:
             try:
-                self._json_window.destroy()
+                self._model_response_window.destroy()
             except Exception:
                 pass
-        window = Adw.ApplicationWindow(application=self.get_application(), title="Latest model JSON")
+        window = Adw.ApplicationWindow(application=self.get_application(), title="Model Response Audit")
         window.set_default_size(900, 720)
         view = Adw.ToolbarView()
         header = Adw.HeaderBar()
-        header.set_title_widget(Gtk.Label(label="Latest model JSON"))
+        header.set_title_widget(Gtk.Label(label="Model Response Audit"))
         header.set_show_end_title_buttons(True)
         view.add_top_bar(header)
         scroller = Gtk.ScrolledWindow()
@@ -9307,30 +9479,48 @@ button.improve-profile-chip {{
         textview = Gtk.TextView()
         textview.set_monospace(True)
         textview.set_wrap_mode(Gtk.WrapMode.WORD_CHAR)
+        textview.set_editable(False)
+        textview.set_cursor_visible(False)
         textview.get_buffer().set_text(text)
         scroller.set_child(textview)
-        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
         box.set_margin_top(12)
         box.set_margin_bottom(12)
         box.set_margin_start(12)
         box.set_margin_end(12)
+        title_label = Gtk.Label(label=self._last_model_response_title or "Latest Model Response", xalign=0)
+        title_label.add_css_class("title-4")
+        title_label.set_wrap(True)
+        box.append(title_label)
         box.append(scroller)
         view.set_content(box)
         window.set_content(view)
-        window.connect("close-request", self._on_json_window_closed)
-        self._json_window = window
+        window.connect("close-request", self._on_model_response_window_closed)
+        self._model_response_window = window
         window.present()
 
-    def _format_last_response(self) -> str:
-        raw = self._last_raw_response or ""
+    def _format_last_model_response(self) -> str:
+        raw = self._last_model_response_raw or ""
         try:
             loaded = json.loads(raw)
-            return json.dumps(loaded, indent=2, ensure_ascii=False)
+            formatted_response = json.dumps(loaded, indent=2, ensure_ascii=False)
         except Exception:
-            return raw
+            formatted_response = raw
+        lines = [
+            f"Action: {self._last_model_response_title or 'Unknown'}",
+            f"Timestamp: {self._last_model_response_timestamp or 'Unknown'}",
+            f"API URL: {self._last_model_response_api_url or 'Unknown'}",
+            "",
+            "Reasoning diagnostics:",
+            self._last_model_response_diagnostic or "not available",
+            "",
+            "Response:",
+            formatted_response,
+        ]
+        return "\n".join(lines)
 
-    def _on_json_window_closed(self, window: Adw.ApplicationWindow, *_args: object) -> bool:
-        self._json_window = None
+    def _on_model_response_window_closed(self, window: Adw.ApplicationWindow, *_args: object) -> bool:
+        self._model_response_window = None
         window.destroy()
         return True
 
