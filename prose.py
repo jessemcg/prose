@@ -3332,17 +3332,22 @@ button.improve-profile-chip {{
         self._entire_document_check = Gtk.CheckButton(label="Entire document")
         self._entire_document_check.connect("toggled", self._on_proof_entire_document_toggled)
         document_scope_box.append(self._entire_document_check)
-        panel.append(document_scope_box)
 
-        run_btn = Gtk.Button(label="Request Changes", icon_name="media-playback-start-symbolic")
+        run_btn = Gtk.Button(icon_name="media-playback-start-symbolic")
         run_btn.add_css_class("suggested-action")
         run_btn.add_css_class("flat")
         run_btn.set_action_name("app.request-changes")
+        run_btn.set_tooltip_text("Request changes")
         self._run_btn = run_btn
+        document_scope_box.append(run_btn)
 
-        btn_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        btn_row.append(run_btn)
-        panel.append(btn_row)
+        load_json_btn = Gtk.Button(icon_name="document-open-symbolic")
+        load_json_btn.add_css_class("flat")
+        load_json_btn.set_action_name("app.load-suggestions-json")
+        load_json_btn.set_tooltip_text("Load suggestions JSON")
+        self._load_json_btn = load_json_btn
+        document_scope_box.append(load_json_btn)
+        panel.append(document_scope_box)
 
         sep = Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL)
         panel.append(sep)
@@ -3575,6 +3580,7 @@ button.improve-profile-chip {{
         _add_action("add-case", lambda: self._on_add_case_clicked(None))
         _add_action("import-socf", lambda: self._on_import_socf_clicked(None))
         _add_action("request-changes", lambda: self._on_request_clicked(None))
+        _add_action("load-suggestions-json", lambda: self._on_load_suggestions_json_clicked(None))
         _add_action("view-last-editor-prompt", lambda: self._on_view_editor_prompt_clicked(None))
         _add_action("view-last-model-response", lambda: self._on_view_model_response_clicked(None))
         prompt_audit_action = app.lookup_action("view-last-editor-prompt")
@@ -3972,6 +3978,49 @@ button.improve-profile-chip {{
         self._status_label.set_label(f"Proofreading {scope_label} with {profile.display_name()}…")
         thread = threading.Thread(target=self._gather_and_request, args=(doc, start, end, profile), daemon=True)
         thread.start()
+
+    def _on_load_suggestions_json_clicked(self, _button: Gtk.Button | None) -> None:
+        if self._busy:
+            return
+        dialog = Gtk.FileDialog(title="Choose suggestions JSON")
+        dialog.open(self, None, self._on_suggestions_json_chosen)
+
+    def _on_suggestions_json_chosen(self, dialog: Gtk.FileDialog, result: Gio.AsyncResult) -> None:  # noqa: D401
+        try:
+            file = dialog.open_finish(result)
+            path = Path(file.get_path() or "")
+        except Exception:
+            return
+        if not path:
+            return
+        if path.suffix.lower() != ".json":
+            self._show_toast("Choose a .json file.")
+            return
+        if not path.exists():
+            self._show_toast("Selected JSON file no longer exists.")
+            return
+        try:
+            raw = path.read_text(encoding="utf-8")
+        except OSError as exc:
+            self._status_label.set_label(f"Unable to read {path.name}: {exc}")
+            self._show_toast("Unable to read suggestions JSON.")
+            return
+        try:
+            suggestions = self._dedupe_suggestions(self._parse_suggestions(raw, allow_empty=True))
+        except Exception as exc:  # noqa: BLE001
+            self._status_label.set_label(f"Unable to load {path.name}: {exc}")
+            self._show_toast("Invalid suggestions JSON.")
+            return
+        self._suggestions = self._sort_suggestions(suggestions)
+        if not self._suggestions:
+            self._empty_label.set_label("No usable suggestions were found in the selected JSON file.")
+        else:
+            self._empty_label.set_label("Proof reading suggestions will appear here after Prose finishes batching the document.")
+        self._render_suggestions()
+        count = len(self._suggestions)
+        label = "suggestion" if count == 1 else "suggestions"
+        self._status_label.set_label(f"Loaded {count} {label} from {path.name}.")
+        self._show_toast(f"Loaded {count} {label}.")
 
     def _on_proof_entire_document_toggled(self, button: Gtk.CheckButton) -> None:
         enabled = not button.get_active()
@@ -7294,6 +7343,8 @@ button.improve-profile-chip {{
             self._status_spinner.set_spinning(busy)
         if hasattr(self, "_run_btn"):
             self._run_btn.set_sensitive(not busy)
+        if hasattr(self, "_load_json_btn"):
+            self._load_json_btn.set_sensitive(not busy)
         if hasattr(self, "_spell_btn"):
             self._spell_btn.set_sensitive(not busy)
         if hasattr(self, "_direct_input_btn"):
@@ -8060,6 +8111,7 @@ button.improve-profile-chip {{
         self._status_label.set_label(
             f"Received {len(suggestions)} suggestions from {total_chunks} {chunk_text}."
         )
+        self._empty_label.set_label("Proof reading suggestions will appear here after Prose finishes batching the document.")
         self._suggestions = self._sort_suggestions(suggestions)
         self._render_suggestions()
         self._focus_first_suggestion(notify_success=False)
