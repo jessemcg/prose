@@ -57,6 +57,11 @@ CONFIG_KEY_SPELLING_API_KEY = "spellingstyle_api_key"
 CONFIG_KEY_SPELLING_PROMPT = "spellingstyle_prompt"
 CONFIG_KEY_SPELLING_DISABLE_REASONING = "spellingstyle_disable_reasoning"
 CONFIG_KEY_TEXT_DRAFT_SPELLING_PROMPT = "text_draft_spellingstyle_prompt"
+CONFIG_KEY_CITATION_VALIDATOR_API_URL = "citation_validator_api_url"
+CONFIG_KEY_CITATION_VALIDATOR_MODEL_ID = "citation_validator_model_id"
+CONFIG_KEY_CITATION_VALIDATOR_API_KEY = "citation_validator_api_key"
+CONFIG_KEY_CITATION_VALIDATOR_PROMPT = "citation_validator_prompt"
+CONFIG_KEY_CITATION_VALIDATOR_DISABLE_REASONING = "citation_validator_disable_reasoning"
 CONFIG_KEY_IMPROVE1_API_URL = "improve1_api_url"
 CONFIG_KEY_IMPROVE1_MODEL_ID = "improve1_model_id"
 CONFIG_KEY_IMPROVE1_API_KEY = "improve1_api_key"
@@ -270,6 +275,19 @@ DEFAULT_TEXT_DRAFT_SPELLINGSTYLE_PROMPT = (
     "general-purpose writing while preserving meaning and facts. Do not add legal phrasing or legal style rules "
     "unless the source text already requires them.\n\n"
     "Return only the revised text."
+)
+DEFAULT_CITATION_NUMBER_VALIDATOR_PROMPT = (
+    "You validate page-number text for appellate record citations.\n\n"
+    "Convert the source text into only the page number or page range it represents. "
+    "Return only ASCII digits, or two ASCII digit groups separated by a hyphen for a range. "
+    "Convert spoken digits and number words to numerals, including 'oh' and 'o' as 0 when used in a digit sequence. "
+    "Do not add RT, CT, prefixes, parentheses, punctuation, labels, explanations, or extra words. "
+    "If there is no usable page number, return NONE.\n\n"
+    "Examples:\n"
+    "Two, oh three -> 203\n"
+    "page thirty five -> 35\n"
+    "one twenty to one twenty two -> 120-122\n"
+    "no page given -> NONE"
 )
 DEFAULT_IMPROVE_PROMPT = (
     "Improve the following text for clarity and precision while preserving meaning.\n\n"
@@ -906,6 +924,21 @@ class SpellingStyleSettings:
         return all(
             value.strip()
             for value in (self.api_url, self.api_key, self.prompt or DEFAULT_SPELLINGSTYLE_PROMPT)
+        )
+
+
+@dataclass
+class CitationValidatorSettings:
+    api_url: str
+    model_id: str
+    api_key: str
+    prompt: str
+    disable_reasoning: bool
+
+    def is_configured(self) -> bool:
+        return all(
+            value.strip()
+            for value in (self.api_url, self.api_key, self.prompt or DEFAULT_CITATION_NUMBER_VALIDATOR_PROMPT)
         )
 
 
@@ -1741,6 +1774,42 @@ def save_text_draft_spellingstyle_prompt(prompt: str) -> None:
     _write_config(data)
 
 
+def load_citation_validator_settings() -> CitationValidatorSettings:
+    raw = _read_config()
+    has_saved_connection = any(
+        str(raw.get(key, "") or "").strip()
+        for key in (
+            CONFIG_KEY_CITATION_VALIDATOR_API_URL,
+            CONFIG_KEY_CITATION_VALIDATOR_MODEL_ID,
+            CONFIG_KEY_CITATION_VALIDATOR_API_KEY,
+        )
+    )
+    default_api_url = raw.get(CONFIG_KEY_SPELLING_API_URL, "") if not has_saved_connection else ""
+    default_model_id = raw.get(CONFIG_KEY_SPELLING_MODEL_ID, "") if not has_saved_connection else ""
+    default_api_key = raw.get(CONFIG_KEY_SPELLING_API_KEY, "") if not has_saved_connection else ""
+    default_disable_reasoning = raw.get(CONFIG_KEY_SPELLING_DISABLE_REASONING, False) if not has_saved_connection else False
+    return CitationValidatorSettings(
+        api_url=str(raw.get(CONFIG_KEY_CITATION_VALIDATOR_API_URL, default_api_url) or "").strip(),
+        model_id=str(raw.get(CONFIG_KEY_CITATION_VALIDATOR_MODEL_ID, default_model_id) or "").strip(),
+        api_key=str(raw.get(CONFIG_KEY_CITATION_VALIDATOR_API_KEY, default_api_key) or "").strip(),
+        prompt=str(
+            raw.get(CONFIG_KEY_CITATION_VALIDATOR_PROMPT, DEFAULT_CITATION_NUMBER_VALIDATOR_PROMPT)
+            or DEFAULT_CITATION_NUMBER_VALIDATOR_PROMPT
+        ).strip(),
+        disable_reasoning=bool(raw.get(CONFIG_KEY_CITATION_VALIDATOR_DISABLE_REASONING, default_disable_reasoning)),
+    )
+
+
+def save_citation_validator_settings(settings: CitationValidatorSettings) -> None:
+    data = _read_config()
+    data[CONFIG_KEY_CITATION_VALIDATOR_API_URL] = settings.api_url
+    data[CONFIG_KEY_CITATION_VALIDATOR_MODEL_ID] = settings.model_id
+    data[CONFIG_KEY_CITATION_VALIDATOR_API_KEY] = settings.api_key
+    data[CONFIG_KEY_CITATION_VALIDATOR_PROMPT] = settings.prompt or DEFAULT_CITATION_NUMBER_VALIDATOR_PROMPT
+    data[CONFIG_KEY_CITATION_VALIDATOR_DISABLE_REASONING] = bool(settings.disable_reasoning)
+    _write_config(data)
+
+
 def load_improve1_settings() -> Improve1Settings:
     raw = _read_config()
     return Improve1Settings(
@@ -2250,6 +2319,7 @@ class ProseWindow(Adw.ApplicationWindow):
         self._proof_settings = load_proofread_settings()
         self._spelling_settings = load_spellingstyle_settings()
         self._text_draft_spelling_prompt = load_text_draft_spellingstyle_prompt()
+        self._citation_validator_settings = load_citation_validator_settings()
         self._improve1_settings = load_improve1_settings()
         self._improve2_settings = load_improve2_settings()
         self._combine_cites_settings = load_combine_cites_settings()
@@ -3653,6 +3723,7 @@ button.improve-profile-chip {{
             self._proof_settings,
             self._spelling_settings,
             self._text_draft_spelling_prompt,
+            self._citation_validator_settings,
             self._improve1_settings,
             self._improve2_settings,
             self._combine_cites_settings,
@@ -3696,6 +3767,7 @@ button.improve-profile-chip {{
         proof_settings: ProofreadSettings,
         spelling_settings: SpellingStyleSettings,
         text_draft_spelling_prompt: str,
+        citation_validator_settings: CitationValidatorSettings,
         improve1_settings: Improve1Settings,
         improve2_settings: Improve2Settings,
         combine_cites_settings: CombineCitesSettings,
@@ -3722,6 +3794,7 @@ button.improve-profile-chip {{
         self._proof_settings = proof_settings
         self._spelling_settings = spelling_settings
         self._text_draft_spelling_prompt = text_draft_spelling_prompt.strip() or DEFAULT_TEXT_DRAFT_SPELLINGSTYLE_PROMPT
+        self._citation_validator_settings = citation_validator_settings
         self._improve1_settings = improve1_settings
         self._improve2_settings = improve2_settings
         self._combine_cites_settings = combine_cites_settings
@@ -3751,6 +3824,7 @@ button.improve-profile-chip {{
         save_proofread_settings(proof_settings)
         save_spellingstyle_settings(spelling_settings)
         save_text_draft_spellingstyle_prompt(self._text_draft_spelling_prompt)
+        save_citation_validator_settings(citation_validator_settings)
         save_improve1_settings(improve1_settings)
         save_improve2_settings(improve2_settings)
         save_combine_cites_settings(combine_cites_settings)
@@ -4165,6 +4239,12 @@ button.improve-profile-chip {{
             start, end = end, start
         return start, end
 
+    def _format_citation_pages_source(self, pages: tuple[int, int | None]) -> str:
+        start, end = pages
+        if end is None:
+            return str(start)
+        return f"{start}-{end}"
+
     def _build_prefixed_citation(self, label: str, prefix: str, source_text: str) -> str | None:
         pages = self._normalize_citation_input(source_text)
         if not pages:
@@ -4183,16 +4263,109 @@ button.improve-profile-chip {{
         if source_text is None:
             return
         self._set_spelling_output_text(source_text)
-        citation = self._build_prefixed_citation(label, prefix, source_text)
-        if not citation:
-            self._show_toast(f"No {label} page number found in source file.")
+        if not source_text.strip():
+            self._show_toast("Source file is empty.")
             return
+        self._set_busy(True)
+        self._status_label.set_label(f"Validating {label} citation number…")
+        thread = threading.Thread(
+            target=self._run_validated_citation_input,
+            args=(label, prefix, source_text),
+            daemon=True,
+        )
+        thread.start()
+
+    def _run_validated_citation_input(self, label: str, prefix: str, source_text: str) -> None:
+        validator_error = ""
+        validated_source = ""
+        try:
+            validated_source = self._validate_citation_number_with_llm(source_text)
+        except Exception as exc:  # noqa: BLE001
+            validator_error = str(exc)
+
+        citation_source = validated_source if self._normalize_citation_input(validated_source) else source_text
+        citation_pages = self._normalize_citation_input(citation_source)
+        citation = self._build_prefixed_citation(label, prefix, citation_source) if citation_pages else None
+        display_text = self._format_citation_pages_source(citation_pages) if citation_pages else source_text
+        GLib.idle_add(
+            self._finish_validated_citation_input,
+            label,
+            citation,
+            display_text,
+            validator_error,
+        )
+
+    def _validate_citation_number_with_llm(self, source_text: str) -> str:
+        settings = self._citation_validator_settings
+        if not settings.is_configured():
+            raise ValueError("Configure Citation Number Validator API URL, API key, and prompt in Settings.")
+        if settings.api_url.rstrip("/").endswith("/responses"):
+            raise ValueError("Citation Number Validator uses a chat endpoint. Update the API URL in Settings.")
+        payload = self._compose_citation_number_validator_payload(source_text)
+        raw = self._post_json_and_read(
+            payload,
+            settings.api_url,
+            settings.api_key,
+            request_title="Citation Number Validator",
+        )
+        text = self._normalize_generated_output_text("".join(self._extract_response_text(raw)))
+        cleaned = self._clean_citation_number_validator_output(text)
+        if not cleaned:
+            return ""
+        pages = self._normalize_citation_input(cleaned)
+        return self._format_citation_pages_source(pages) if pages else ""
+
+    def _compose_citation_number_validator_payload(self, source_text: str) -> dict[str, Any]:
+        settings = self._citation_validator_settings
+        system_prompt = _expand_shared_prompt_parts(settings.prompt or DEFAULT_CITATION_NUMBER_VALIDATOR_PROMPT)
+        payload = {
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": source_text},
+            ],
+            "stream": False,
+        }
+        return self._add_model_id(
+            payload,
+            settings.model_id,
+            disable_reasoning=settings.disable_reasoning,
+        )
+
+    def _clean_citation_number_validator_output(self, text: str) -> str:
+        cleaned = self._normalize_generated_output_text(text)
+        if cleaned.startswith("```"):
+            fence_match = re.match(r"^```(?:text)?\s*([\s\S]*?)\s*```$", cleaned, flags=re.IGNORECASE)
+            if fence_match:
+                cleaned = fence_match.group(1).strip()
+        cleaned = cleaned.strip().strip("\"'`")
+        if cleaned.casefold() in {"none", "no number", "n/a", "na", "null"}:
+            return ""
+        return cleaned
+
+    def _finish_validated_citation_input(
+        self,
+        label: str,
+        citation: str | None,
+        display_text: str,
+        validator_error: str,
+    ) -> bool:
+        self._set_spelling_output_text(display_text)
+        if not citation:
+            self._set_busy(False)
+            if validator_error:
+                self._status_label.set_label(f"Citation validator failed: {validator_error}")
+            else:
+                self._status_label.set_label(f"No {label} page number found in source file.")
+            self._show_toast(f"No {label} page number found in source file.")
+            return False
+        self._set_busy(False)
         self._insert_text_into_writer(
             citation,
             status_text=f"Inserting {label} citation…",
             completed_text=f"{label} citation inserted.",
             add_trailing_space=True,
         )
+        return False
 
     def _on_direct_input_clicked(self, _button: Gtk.Button) -> None:
         self._run_direct_input(add_trailing_space=True)
@@ -9929,6 +10102,7 @@ class SettingsWindow(Adw.ApplicationWindow):
         proof_settings: ProofreadSettings,
         spelling_settings: SpellingStyleSettings,
         text_draft_spelling_prompt: str,
+        citation_validator_settings: CitationValidatorSettings,
         improve1_settings: Improve1Settings,
         improve2_settings: Improve2Settings,
         combine_cites_settings: CombineCitesSettings,
@@ -9959,6 +10133,7 @@ class SettingsWindow(Adw.ApplicationWindow):
                 ProofreadSettings,
                 SpellingStyleSettings,
                 str,
+                CitationValidatorSettings,
                 Improve1Settings,
                 Improve2Settings,
                 CombineCitesSettings,
@@ -9993,6 +10168,7 @@ class SettingsWindow(Adw.ApplicationWindow):
         self._proof_settings = proof_settings
         self._spelling_settings = spelling_settings
         self._text_draft_spelling_prompt = text_draft_spelling_prompt.strip() or DEFAULT_TEXT_DRAFT_SPELLINGSTYLE_PROMPT
+        self._citation_validator_settings = citation_validator_settings
         self._improve1_settings = improve1_settings
         self._improve2_settings = improve2_settings
         self._combine_cites_settings = combine_cites_settings
@@ -10175,6 +10351,12 @@ class SettingsWindow(Adw.ApplicationWindow):
         prompt_definitions = [
             ("proof", "Proof Reading", self._proof_settings, DEFAULT_PROMPT),
             ("spelling", "SpellingStyle", self._spelling_settings, DEFAULT_SPELLINGSTYLE_PROMPT),
+            (
+                "citation-validator",
+                "Citation Number Validator",
+                self._citation_validator_settings,
+                DEFAULT_CITATION_NUMBER_VALIDATOR_PROMPT,
+            ),
             ("thesaurus", "Thesaurus", self._thesaurus_settings, DEFAULT_THESAURUS_PROMPT),
             ("reference", "Reference", self._reference_settings, DEFAULT_REFERENCE_PROMPT),
             ("ask", "Ask Field", self._ask_settings, DEFAULT_ASK_PROMPT),
@@ -11038,6 +11220,7 @@ class SettingsWindow(Adw.ApplicationWindow):
 
         proof_widgets = self._prompt_editors.get("proof")
         spelling_widgets = self._prompt_editors.get("spelling")
+        citation_validator_widgets = self._prompt_editors.get("citation-validator")
         thesaurus_widgets = self._prompt_editors.get("thesaurus")
         reference_widgets = self._prompt_editors.get("reference")
         ask_widgets = self._prompt_editors.get("ask")
@@ -11057,6 +11240,7 @@ class SettingsWindow(Adw.ApplicationWindow):
             (
                 proof_widgets,
                 spelling_widgets,
+                citation_validator_widgets,
                 thesaurus_widgets,
                 reference_widgets,
                 ask_widgets,
@@ -11078,6 +11262,7 @@ class SettingsWindow(Adw.ApplicationWindow):
 
         proof_prompt_text = self._prompt_text(proof_widgets.prompt_buffer)
         spelling_prompt_text = self._prompt_text(spelling_widgets.prompt_buffer)
+        citation_validator_prompt_text = self._prompt_text(citation_validator_widgets.prompt_buffer)
         text_draft_spelling_prompt_text = self._prompt_text(text_draft_spelling_prompt_buffer)
         thesaurus_prompt_text = self._prompt_text(thesaurus_widgets.prompt_buffer)
         reference_prompt_text = self._prompt_text(reference_widgets.prompt_buffer)
@@ -11111,6 +11296,13 @@ class SettingsWindow(Adw.ApplicationWindow):
             api_key=spelling_widgets.api_key_row.get_text().strip(),
             prompt=spelling_prompt_text.strip() or DEFAULT_SPELLINGSTYLE_PROMPT,
             disable_reasoning=spelling_widgets.disable_reasoning_row.get_active(),
+        )
+        citation_validator_settings = CitationValidatorSettings(
+            api_url=citation_validator_widgets.api_url_row.get_text().strip(),
+            model_id=citation_validator_widgets.model_row.get_text().strip(),
+            api_key=citation_validator_widgets.api_key_row.get_text().strip(),
+            prompt=citation_validator_prompt_text.strip() or DEFAULT_CITATION_NUMBER_VALIDATOR_PROMPT,
+            disable_reasoning=citation_validator_widgets.disable_reasoning_row.get_active(),
         )
         thesaurus_settings = ThesaurusSettings(
             api_url=thesaurus_widgets.api_url_row.get_text().strip(),
@@ -11236,6 +11428,7 @@ class SettingsWindow(Adw.ApplicationWindow):
             proof_settings,
             spelling_settings,
             text_draft_spelling_prompt_text.strip() or DEFAULT_TEXT_DRAFT_SPELLINGSTYLE_PROMPT,
+            citation_validator_settings,
             improve1_settings,
             improve2_settings,
             combine_cites_settings,
@@ -11317,6 +11510,7 @@ class SettingsWindow(Adw.ApplicationWindow):
         settings: (
             ProofreadSettings
             | SpellingStyleSettings
+            | CitationValidatorSettings
             | Improve1Settings
             | Improve2Settings
             | CombineCitesSettings
