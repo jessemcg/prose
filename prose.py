@@ -51,6 +51,7 @@ CONFIG_KEY_PROOFREAD_MODEL_ID = "model_id"
 CONFIG_KEY_PROOFREAD_API_KEY = "api_key"
 CONFIG_KEY_PROOFREAD_PROMPT = "proofread_prompt"
 CONFIG_KEY_PROOFREAD_DISABLE_REASONING = "proofread_disable_reasoning"
+CONFIG_KEY_PROOFREAD_SUGGESTIONS_JSON_PATH = "proofread_suggestions_json_path"
 CONFIG_KEY_SPELLING_API_URL = "spellingstyle_api_url"
 CONFIG_KEY_SPELLING_MODEL_ID = "spellingstyle_model_id"
 CONFIG_KEY_SPELLING_API_KEY = "spellingstyle_api_key"
@@ -904,6 +905,7 @@ class ProofreadSettings:
     api_key: str
     prompt: str
     disable_reasoning: bool
+    suggestions_json_path: Path | None
 
     def is_configured(self) -> bool:
         return all(
@@ -1669,12 +1671,18 @@ def save_editor_action_profile_defaults(defaults: dict[str, str | None]) -> None
 
 def load_proofread_settings() -> ProofreadSettings:
     raw = _read_config()
+    suggestions_path_raw = raw.get(CONFIG_KEY_PROOFREAD_SUGGESTIONS_JSON_PATH)
+    if isinstance(suggestions_path_raw, str) and suggestions_path_raw.strip():
+        suggestions_json_path = Path(suggestions_path_raw).expanduser().resolve(strict=False)
+    else:
+        suggestions_json_path = None
     settings = ProofreadSettings(
         api_url=str(raw.get(CONFIG_KEY_PROOFREAD_API_URL, "") or "").strip(),
         model_id=str(raw.get(CONFIG_KEY_PROOFREAD_MODEL_ID, "") or "").strip(),
         api_key=str(raw.get(CONFIG_KEY_PROOFREAD_API_KEY, "") or "").strip(),
         prompt=str(raw.get(CONFIG_KEY_PROOFREAD_PROMPT, DEFAULT_PROMPT) or DEFAULT_PROMPT).strip(),
         disable_reasoning=_coerce_bool_config(raw.get(CONFIG_KEY_PROOFREAD_DISABLE_REASONING), False),
+        suggestions_json_path=suggestions_json_path,
     )
     if settings.api_url.strip() and settings.api_key.strip():
         return settings
@@ -1690,6 +1698,7 @@ def load_proofread_settings() -> ProofreadSettings:
         api_key=legacy_profile.api_key,
         prompt=settings.prompt or DEFAULT_PROMPT,
         disable_reasoning=legacy_profile.disable_reasoning,
+        suggestions_json_path=settings.suggestions_json_path,
     )
 
 
@@ -1700,6 +1709,11 @@ def save_proofread_settings(settings: ProofreadSettings) -> None:
     data[CONFIG_KEY_PROOFREAD_API_KEY] = settings.api_key
     data[CONFIG_KEY_PROOFREAD_PROMPT] = settings.prompt or DEFAULT_PROMPT
     data[CONFIG_KEY_PROOFREAD_DISABLE_REASONING] = bool(settings.disable_reasoning)
+    data[CONFIG_KEY_PROOFREAD_SUGGESTIONS_JSON_PATH] = (
+        str(settings.suggestions_json_path.expanduser().resolve(strict=False))
+        if settings.suggestions_json_path
+        else ""
+    )
     _write_config(data)
 
 
@@ -2365,6 +2379,7 @@ class ProseWindow(Adw.ApplicationWindow):
         self._listener_proc: subprocess.Popen[str] | None = None
         self._suggestions: list[Suggestion] = []
         self._suggestion_rows: list[Gtk.Box] = []
+        self._auto_suggestions_json_attempt_signature: tuple[str, int, int] | None = None
         self._current_doc_path: Path | None = None
         self._busy = False
         self._last_model_response_raw: str | None = None
@@ -2499,6 +2514,8 @@ class ProseWindow(Adw.ApplicationWindow):
         stack = Adw.ViewStack()
         stack.set_hexpand(True)
         stack.set_vexpand(True)
+        stack.connect("notify::visible-child-name", self._on_main_stack_visible_child_name_changed)
+        self._main_stack = stack
         mode_switcher.set_stack(stack)
 
         editor_panel = self._build_editor_panel()
@@ -3711,6 +3728,64 @@ button.improve-profile-chip {{
         window.set_transient_for(self)
         window.present()
 
+    def _on_main_stack_visible_child_name_changed(self, stack: Adw.ViewStack, *_args: object) -> None:
+        if stack.get_visible_child_name() == "proof":
+            self._try_auto_load_suggestions_json()
+
+    def _try_auto_load_suggestions_json(self) -> None:
+        if self._busy:
+            return
+        path = self._proof_settings.suggestions_json_path
+        if path is None:
+            return
+        path = path.expanduser().resolve(strict=False)
+        if path.suffix.lower() != ".json":
+            return
+        try:
+            stat = path.stat()
+        except FileNotFoundError:
+            return
+        except OSError:
+            return
+        signature = (str(path), int(stat.st_mtime_ns), int(stat.st_size))
+        if signature == self._auto_suggestions_json_attempt_signature:
+            return
+        self._auto_suggestions_json_attempt_signature = signature
+        self._load_suggestions_json_path(path, auto=True)
+
+    def _load_suggestions_json_path(self, path: Path, *, auto: bool = False) -> bool:
+        if path.suffix.lower() != ".json":
+            self._show_toast("Choose a .json file.")
+            return False
+        if not path.exists():
+            if not auto:
+                self._show_toast("Selected JSON file no longer exists.")
+            return False
+        try:
+            raw = path.read_text(encoding="utf-8")
+        except OSError as exc:
+            self._status_label.set_label(f"Unable to read {path.name}: {exc}")
+            self._show_toast("Unable to read suggestions JSON.")
+            return False
+        try:
+            suggestions = self._dedupe_suggestions(self._parse_suggestions(raw, allow_empty=True))
+        except Exception as exc:  # noqa: BLE001
+            self._status_label.set_label(f"Unable to load {path.name}: {exc}")
+            self._show_toast("Invalid suggestions JSON.")
+            return False
+        self._suggestions = self._sort_suggestions(suggestions)
+        if not self._suggestions:
+            self._empty_label.set_label("No usable suggestions were found in the selected JSON file.")
+        else:
+            self._empty_label.set_label("Proof reading suggestions will appear here after Prose finishes batching the document.")
+        self._render_suggestions()
+        count = len(self._suggestions)
+        label = "suggestion" if count == 1 else "suggestions"
+        verb = "Auto-loaded" if auto else "Loaded"
+        self._status_label.set_label(f"{verb} {count} {label} from {path.name}.")
+        self._show_toast(f"{verb} {count} {label}.")
+        return True
+
 
     # Actions ------------------------------------------------------------
     def _on_open_settings(self, *_args: object) -> None:
@@ -3790,6 +3865,7 @@ button.improve-profile-chip {{
         libreoffice_python_path: Path | None,
         concordance_file_path: Path | None,
     ) -> None:
+        old_suggestions_json_path = self._proof_settings.suggestions_json_path
         self._model_profiles = model_profiles
         self._proof_settings = proof_settings
         self._spelling_settings = spelling_settings
@@ -3854,6 +3930,10 @@ button.improve-profile-chip {{
         self._ctx = None
         self._desktop = None
         self._update_uno_status()
+        if old_suggestions_json_path != self._proof_settings.suggestions_json_path:
+            self._auto_suggestions_json_attempt_signature = None
+            if getattr(self, "_main_stack", None) is not None and self._main_stack.get_visible_child_name() == "proof":
+                self._try_auto_load_suggestions_json()
 
     def _on_settings_closed(self, _window: Gtk.Window) -> bool:
         self._settings_window = None
@@ -4067,34 +4147,7 @@ button.improve-profile-chip {{
             return
         if not path:
             return
-        if path.suffix.lower() != ".json":
-            self._show_toast("Choose a .json file.")
-            return
-        if not path.exists():
-            self._show_toast("Selected JSON file no longer exists.")
-            return
-        try:
-            raw = path.read_text(encoding="utf-8")
-        except OSError as exc:
-            self._status_label.set_label(f"Unable to read {path.name}: {exc}")
-            self._show_toast("Unable to read suggestions JSON.")
-            return
-        try:
-            suggestions = self._dedupe_suggestions(self._parse_suggestions(raw, allow_empty=True))
-        except Exception as exc:  # noqa: BLE001
-            self._status_label.set_label(f"Unable to load {path.name}: {exc}")
-            self._show_toast("Invalid suggestions JSON.")
-            return
-        self._suggestions = self._sort_suggestions(suggestions)
-        if not self._suggestions:
-            self._empty_label.set_label("No usable suggestions were found in the selected JSON file.")
-        else:
-            self._empty_label.set_label("Proof reading suggestions will appear here after Prose finishes batching the document.")
-        self._render_suggestions()
-        count = len(self._suggestions)
-        label = "suggestion" if count == 1 else "suggestions"
-        self._status_label.set_label(f"Loaded {count} {label} from {path.name}.")
-        self._show_toast(f"Loaded {count} {label}.")
+        self._load_suggestions_json_path(path)
 
     def _on_proof_entire_document_toggled(self, button: Gtk.CheckButton) -> None:
         enabled = not button.get_active()
@@ -10349,6 +10402,7 @@ class SettingsWindow(Adw.ApplicationWindow):
         self._libreoffice_python_path = libreoffice_python_path
         self._concordance_file_path = concordance_file_path
         self._editor_source_file = editor_source_file
+        self._proof_suggestions_json_path = proof_settings.suggestions_json_path
         self._text_draft_spelling_prompt_buffer: Gtk.TextBuffer | None = None
         self._shared_style_rules_buffer: Gtk.TextBuffer | None = None
         self._model_profile_editors: dict[str, ModelProfileEditorWidgets] = {}
@@ -10358,6 +10412,7 @@ class SettingsWindow(Adw.ApplicationWindow):
         self._text_draft_template_dir_row_guard = False
         self._libreoffice_path_row_guard = False
         self._concordance_path_row_guard = False
+        self._proof_suggestions_json_path_row_guard = False
         self._quick_action_toggle_guard = False
         self._text_draft_quick_action_toggle_guard = False
         self.set_default_size(900, 720)
@@ -10408,6 +10463,20 @@ class SettingsWindow(Adw.ApplicationWindow):
         )
         source_group.add(text_draft_template_row)
         self._text_draft_template_dir_row = text_draft_template_entry
+
+        proof_suggestions_row, proof_suggestions_entry = self._build_path_setting_row(
+            title="Proofreading suggestions JSON",
+            value=str(self._proof_suggestions_json_path or ""),
+            info_text=(
+                "Optional. When this .json file exists, Prose auto-loads it when the Proof Reader tab is shown. "
+                "Clear this path to disable auto-load."
+            ),
+            on_changed=self._on_proof_suggestions_json_path_row_changed,
+            on_choose=self._on_choose_proof_suggestions_json_path,
+            on_clear=self._on_clear_proof_suggestions_json_path,
+        )
+        source_group.add(proof_suggestions_row)
+        self._proof_suggestions_json_path_row = proof_suggestions_entry
 
         libreoffice_row, libreoffice_entry = self._build_path_setting_row(
             title="LibreOffice Python path",
@@ -11096,6 +11165,38 @@ class SettingsWindow(Adw.ApplicationWindow):
         self._text_draft_template_dir_row.set_text(str(self._text_draft_template_dir or ""))
         self._text_draft_template_dir_row_guard = False
 
+    def _on_choose_proof_suggestions_json_path(self, _button: Gtk.Button) -> None:
+        dialog = Gtk.FileDialog(title="Choose proofreading suggestions JSON")
+        dialog.open(self, None, self._on_proof_suggestions_json_path_chosen)
+
+    def _on_proof_suggestions_json_path_chosen(self, dialog: Gtk.FileDialog, result: Gio.AsyncResult) -> None:  # noqa: D401
+        try:
+            file = dialog.open_finish(result)
+            path = Path(file.get_path() or "")
+        except Exception:
+            return
+        if not path:
+            return
+        self._set_proof_suggestions_json_path(path)
+
+    def _on_clear_proof_suggestions_json_path(self, _button: Gtk.Button) -> None:
+        self._set_proof_suggestions_json_path(None)
+
+    def _on_proof_suggestions_json_path_row_changed(self, row: Gtk.Editable) -> None:
+        if self._proof_suggestions_json_path_row_guard:
+            return
+        raw = row.get_text().strip()
+        if not raw:
+            self._set_proof_suggestions_json_path(None)
+            return
+        self._set_proof_suggestions_json_path(Path(raw))
+
+    def _set_proof_suggestions_json_path(self, path: Path | None) -> None:
+        self._proof_suggestions_json_path = path.expanduser().resolve(strict=False) if path else None
+        self._proof_suggestions_json_path_row_guard = True
+        self._proof_suggestions_json_path_row.set_text(str(self._proof_suggestions_json_path or ""))
+        self._proof_suggestions_json_path_row_guard = False
+
     def _on_choose_libreoffice_path(self, _button: Gtk.Button) -> None:
         dialog = Gtk.FileDialog(title="Choose LibreOffice Python directory")
         dialog.select_folder(self, None, self._on_libreoffice_path_chosen)
@@ -11435,6 +11536,7 @@ class SettingsWindow(Adw.ApplicationWindow):
             api_key=proof_widgets.api_key_row.get_text().strip(),
             prompt=proof_prompt_text.strip() or DEFAULT_PROMPT,
             disable_reasoning=proof_widgets.disable_reasoning_row.get_active(),
+            suggestions_json_path=self._proof_suggestions_json_path,
         )
         spelling_settings = SpellingStyleSettings(
             api_url=spelling_widgets.api_url_row.get_text().strip(),
