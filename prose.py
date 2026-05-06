@@ -6524,18 +6524,33 @@ button.improve-profile-chip {{
         return paragraphs
 
     def _find_range(self, doc: XTextDocument, snippet: str):  # type: ignore[type-arg]
-        def _normalize_for_pattern(text: str) -> str:
-            # Normalize dash/quotes to improve matching across typographic variants.
-            normalized = (
-                text.replace("“", '"')
-                .replace("”", '"')
-                .replace("’", "'")
-                .replace("‘", "'")
-                .replace("–", "-")
-                .replace("—", "-")
-            ).strip()
-            parts = [re.escape(part) for part in re.split(r"\s+", normalized) if part]
-            return r"\s+".join(parts)
+        def _loose_literal_pattern(text: str) -> str:
+            punctuation_variants = {
+                '"': '"“”',
+                "“": '"“”',
+                "”": '"“”',
+                "'": "'‘’",
+                "‘": "'‘’",
+                "’": "'‘’",
+                "-": "-–—",
+                "–": "-–—",
+                "—": "-–—",
+            }
+            parts: list[str] = []
+            last_was_space = False
+            for char in text.strip():
+                if char.isspace() or char == "\u00a0":
+                    if not last_was_space:
+                        parts.append(r"[ \t\r\n\u00a0]+")
+                        last_was_space = True
+                    continue
+                last_was_space = False
+                variants = punctuation_variants.get(char)
+                if variants is not None:
+                    parts.append(f"[{re.escape(variants)}]")
+                else:
+                    parts.append(re.escape(char))
+            return "".join(parts)
 
         try:
             search = doc.createSearchDescriptor()
@@ -6546,7 +6561,7 @@ button.improve-profile-chip {{
             if found:
                 return found
 
-            regex_pattern = _normalize_for_pattern(snippet)
+            regex_pattern = _loose_literal_pattern(snippet)
             if not regex_pattern:
                 return None
             search = doc.createSearchDescriptor()
@@ -8007,6 +8022,7 @@ button.improve-profile-chip {{
             "}. "
             "Use standard JSON syntax (double quotes for keys and string values). "
             "Keep snippets short but unique. Only propose changes that truly improve clarity or correctness. "
+            "For snippet values, copy exact text from the paragraph batch and preserve punctuation and spacing when possible. "
             'Do not include a "page" field. '
             "Do not return comments, summaries, or unchanged text."
         )
