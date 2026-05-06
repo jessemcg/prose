@@ -5857,6 +5857,135 @@ button.improve-profile-chip {{
         except Exception:
             return 0 if name == "NONE" else 2
 
+    def _case_citation_italic_spans(self, text: str) -> list[tuple[int, int]]:
+        if not text.strip():
+            return []
+
+        word = r"[A-Z][A-Za-z0-9.&'’\-]*"
+        lower_word = r"(?:a|an|and|as|at|by|de|del|for|in|la|of|on|or|the|to)"
+        entity_word = (
+            r"(?:Agency|Association|Bank|Bd\.|Board|Bureau|Cal\.|City|Co\.|Corp\.|"
+            r"Corporation|County|Court|Department|Dept\.|District|Division|Inc\.|"
+            r"LLC|L\.L\.C\.|People|Regents|Services|State|Superior|University)"
+        )
+        name_part = rf"(?:{word}|{lower_word}|{entity_word}|ex|rel\.)"
+        party = rf"{word}(?:\s+{name_part}){{0,10}}"
+        in_re_prefix = (
+            r"(?:In re|Estate of|Conservatorship of|Guardianship of|Marriage of|"
+            r"Adoption of|Matter of)"
+        )
+        citation_signal = (
+            r"(?=\s*(?:"
+            r"\(\d{4}\)|"
+            r",\s+supra\b|"
+            r"\d{1,4}\s+(?:Cal\.|Cal\.App\.|Cal\.Rptr\.|P\.\d+d|U\.S\.|S\.Ct\.|"
+            r"L\.Ed\.|F\.\d+d|F\.Supp\.)"
+            r"))"
+        )
+        patterns = (
+            re.compile(
+                rf"(?<![\w'’])(?P<name>{party}\s+v\.?\s+{party}){citation_signal}"
+            ),
+            re.compile(rf"(?<![\w'’])(?P<name>{in_re_prefix}\s+{party}){citation_signal}"),
+        )
+
+        spans: list[tuple[int, int]] = []
+        for pattern in patterns:
+            for match in pattern.finditer(text):
+                start, end = match.span("name")
+                start, end = self._trim_citation_intro_words(text, start, end)
+                if end > start:
+                    spans.append((start, end))
+        if not spans:
+            return []
+
+        spans.sort()
+        merged: list[tuple[int, int]] = []
+        for start, end in spans:
+            if not merged or start > merged[-1][1]:
+                merged.append((start, end))
+                continue
+            merged[-1] = (merged[-1][0], max(merged[-1][1], end))
+        return merged
+
+    def _trim_citation_intro_words(self, text: str, start: int, end: int) -> tuple[int, int]:
+        candidate = text[start:end]
+        intro_pattern = re.compile(
+            r"(?i)^(?:(?:see also|but see|pursuant to|based on|relying on|"
+            r"according to|the court in|see|cf\.|compare|accord|contra|e\.g\.|"
+            r"under|following|applying),?\s+)+"
+        )
+        match = intro_pattern.match(candidate)
+        if not match:
+            return start, end
+        trimmed_start = start + match.end()
+        trimmed = text[trimmed_start:end].lstrip()
+        if not trimmed or trimmed.startswith(("v.", "v ")):
+            return start, end
+        return trimmed_start, end
+
+    def _replace_writer_range_text(  # type: ignore[type-arg]
+        self,
+        doc: XTextDocument,
+        text_range: Any,
+        replacement: str,
+    ):
+        text = self._get_text_container(doc, text_range)
+        if not text:
+            text_range.setString(replacement)
+            return text_range
+        try:
+            start_anchor = text.createTextCursorByRange(text_range.getStart())
+            replace_cursor = text.createTextCursorByRange(text_range.getStart())
+            replace_cursor.gotoRange(text_range.getEnd(), True)
+            replace_cursor.setString(replacement)
+            try:
+                if str(replace_cursor.getString() or "") == replacement:
+                    return replace_cursor
+            except Exception:
+                pass
+            inserted_cursor = text.createTextCursorByRange(start_anchor)
+            if replacement and inserted_cursor.goRight(len(replacement), True):
+                return inserted_cursor
+            return replace_cursor
+        except Exception:
+            text_range.setString(replacement)
+            return text_range
+
+    def _apply_case_citation_italics_to_range(
+        self,
+        doc: XTextDocument,  # type: ignore[type-arg]
+        text_range: Any,
+        replacement: str,
+    ) -> None:
+        spans = self._case_citation_italic_spans(replacement)
+        if not spans:
+            return
+        text = self._get_text_container(doc, text_range)
+        if not text:
+            return
+        try:
+            selected_text = str(text_range.getString() or "")
+        except Exception:
+            selected_text = ""
+        if selected_text != replacement:
+            return
+        italic = self._get_font_slant("ITALIC")
+        for start, end in spans:
+            try:
+                cursor = text.createTextCursorByRange(text_range.getStart())
+                if start and not cursor.goRight(start, False):
+                    continue
+                if not cursor.goRight(end - start, True):
+                    continue
+                for prop_name in ("CharPosture", "CharPostureAsian", "CharPostureComplex"):
+                    try:
+                        cursor.setPropertyValue(prop_name, italic)
+                    except Exception:
+                        continue
+            except Exception:
+                continue
+
     def _get_autotext_group(self, container, title: str):
         if hasattr(container, "hasByName") and container.hasByName(title):
             return container.getByName(title)
@@ -9778,7 +9907,8 @@ button.improve-profile-chip {{
             self._show_toast("Snippet not found in document.")
             return
         try:
-            found.setString(suggestion.replacement)
+            replacement_range = self._replace_writer_range_text(doc, found, suggestion.replacement)
+            self._apply_case_citation_italics_to_range(doc, replacement_range, suggestion.replacement)
         except Exception:
             try:
                 found.String = suggestion.replacement  # type: ignore[attr-defined]
