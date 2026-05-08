@@ -150,6 +150,8 @@ CONFIG_KEY_CONCORDANCE_FILE_PATH = "concordance_file_path"
 CONFIG_KEY_EDITOR_PINNED_ACTIONS = "editor_pinned_actions"
 CONFIG_KEY_TEXT_DRAFT_PINNED_ACTIONS = "text_draft_pinned_actions"
 CONFIG_KEY_SHARED_STYLE_RULES = "shared_style_rules"
+CONFIG_KEY_TEXT_DRAFT_EXTERNAL_ACTION = "text_draft_external_action"
+TEXT_DRAFT_EXTERNAL_ACTION_DRAFT_FILE_TOKEN = "{draft_file}"
 
 DEFAULT_SHARED_STYLE_RULES = """## STYLE RULES
 
@@ -1160,6 +1162,18 @@ class RegenerateContext:
 
 
 @dataclass
+class TextDraftExternalAction:
+    enabled: bool
+    label: str
+    command: list[str]
+    cwd: Path | None
+    env: dict[str, str]
+
+    def is_configured(self) -> bool:
+        return self.enabled and bool(self.command)
+
+
+@dataclass
 class PromptEditorWidgets:
     api_url_row: Adw.EntryRow
     model_row: Adw.EntryRow
@@ -1451,6 +1465,15 @@ def _text_draft_command_items() -> list[tuple[str, str, str | None, str, bool]]:
     ]
     commands.append(
         ("Copy Draft", "text-draft-copy", None, "Copy the full Text Draft buffer to the clipboard.", False)
+    )
+    commands.append(
+        (
+            "External Draft Action",
+            "text-draft-external-action",
+            None,
+            "Run the configured external command with the full Text Draft buffer.",
+            False,
+        )
     )
     return commands
 
@@ -2164,6 +2187,63 @@ def save_text_draft_template_dir(path: Path | None) -> None:
     _write_config(data)
 
 
+def load_text_draft_external_action() -> TextDraftExternalAction:
+    raw = _read_config().get(CONFIG_KEY_TEXT_DRAFT_EXTERNAL_ACTION)
+    if not isinstance(raw, dict):
+        return TextDraftExternalAction(enabled=False, label="", command=[], cwd=None, env={})
+
+    enabled = _coerce_bool_config(raw.get("enabled"), False)
+    label = str(raw.get("label") or "External").strip() or "External"
+
+    command: list[str] = []
+    raw_command = raw.get("command")
+    if isinstance(raw_command, list):
+        command = [str(part) for part in raw_command if str(part)]
+    elif isinstance(raw_command, str) and raw_command.strip():
+        try:
+            command = shlex.split(raw_command)
+        except ValueError:
+            command = []
+
+    cwd = None
+    raw_cwd = raw.get("cwd")
+    if isinstance(raw_cwd, str) and raw_cwd.strip():
+        cwd = Path(raw_cwd).expanduser().resolve(strict=False)
+
+    env: dict[str, str] = {}
+    raw_env = raw.get("env")
+    if isinstance(raw_env, dict):
+        env = {str(key): str(value) for key, value in raw_env.items() if str(key)}
+
+    return TextDraftExternalAction(
+        enabled=enabled,
+        label=label,
+        command=command,
+        cwd=cwd,
+        env=env,
+    )
+
+
+def save_text_draft_external_action(action: TextDraftExternalAction) -> None:
+    data = _read_config()
+    label = action.label.strip()
+    has_custom_label = bool(label and label != "External")
+    if not action.is_configured() and not has_custom_label and action.cwd is None and not action.env:
+        data.pop(CONFIG_KEY_TEXT_DRAFT_EXTERNAL_ACTION, None)
+    else:
+        payload: dict[str, Any] = {
+            "enabled": bool(action.enabled),
+            "label": label or "External",
+            "command": [str(part) for part in action.command if str(part)],
+        }
+        if action.cwd is not None:
+            payload["cwd"] = str(action.cwd.expanduser().resolve(strict=False))
+        if action.env:
+            payload["env"] = dict(action.env)
+        data[CONFIG_KEY_TEXT_DRAFT_EXTERNAL_ACTION] = payload
+    _write_config(data)
+
+
 def load_last_odt_file() -> Path | None:
     raw = _read_config()
     path = raw.get(CONFIG_KEY_LAST_ODT_FILE)
@@ -2369,6 +2449,7 @@ class ProseWindow(Adw.ApplicationWindow):
         self._prefix_settings = load_prefix_settings()
         self._editor_source_file = load_editor_source_file()
         self._text_draft_template_dir = load_text_draft_template_dir()
+        self._text_draft_external_action = load_text_draft_external_action()
         self._last_odt_path = load_last_odt_file()
         self._concordance_file_path = load_concordance_file_path()
         self._editor_pinned_action_ids = load_editor_pinned_actions()
@@ -2428,6 +2509,8 @@ class ProseWindow(Adw.ApplicationWindow):
         self._text_draft_template_email_box: Gtk.Box | None = None
         self._text_draft_template_email_buttons: list[Gtk.Button] = []
         self._text_draft_template_emails: list[tuple[str, str]] = []
+        self._text_draft_external_action_box: Gtk.Box | None = None
+        self._text_draft_external_action_button: Gtk.Button | None = None
         self._text_draft_temp_path: Path | None = None
         self._text_draft_temp_flush_source_id = 0
         self._text_draft_temp_dirty = False
@@ -2814,6 +2897,11 @@ class ProseWindow(Adw.ApplicationWindow):
         template_email_box.set_visible(False)
         draft_header_row.append(template_email_box)
         self._text_draft_template_email_box = template_email_box
+
+        external_action_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
+        draft_header_row.append(external_action_box)
+        self._text_draft_external_action_box = external_action_box
+        self._rebuild_text_draft_external_action_button()
 
         copy_draft_btn = Gtk.Button(label="Copy", icon_name="edit-copy-symbolic")
         copy_draft_btn.add_css_class("flat")
@@ -3235,6 +3323,25 @@ class ProseWindow(Adw.ApplicationWindow):
         for widget in self._text_draft_action_buttons:
             widget.set_sensitive(not self._busy)
 
+    def _rebuild_text_draft_external_action_button(self) -> None:
+        box = self._text_draft_external_action_box
+        if box is None:
+            return
+        self._clear_box(box)
+        self._text_draft_external_action_button = None
+        external_action = self._text_draft_external_action
+        if not external_action.is_configured():
+            return
+        button = Gtk.Button(label=external_action.label, icon_name="utilities-terminal-symbolic")
+        button.add_css_class("flat")
+        button.add_css_class("transform-pill")
+        button.add_css_class("transform-pill-compact")
+        button.set_tooltip_text("Run the configured external Draft action.")
+        button.set_sensitive(not self._busy)
+        button.connect("clicked", self._on_text_draft_external_action_clicked)
+        box.append(button)
+        self._text_draft_external_action_button = button
+
     def _ensure_css(self) -> None:
         if self._css_provider is not None:
             return
@@ -3648,6 +3755,7 @@ button.improve-profile-chip {{
         _add_action("text-draft-keep-original", lambda: self._on_text_draft_keep_original_clicked(None))
         _add_action("text-draft-wrap-quotes", lambda: self._on_text_draft_wrap_quotes_clicked(None))
         _add_action("text-draft-copy", lambda: self._on_copy_text_draft_clicked(None))
+        _add_action("text-draft-external-action", lambda: self._on_text_draft_external_action_clicked(None))
         _add_action("reference-lookup", lambda: self._on_reference_clicked(None))
         _add_string_action("transform-shorten", lambda nickname: self._on_shorten_clicked(None, nickname))
         _add_action("transform-wrap-quotes", lambda: self._on_wrap_quotes_clicked(None))
@@ -3818,6 +3926,7 @@ button.improve-profile-chip {{
             self._editor_pinned_action_ids,
             self._text_draft_pinned_action_ids,
             self._text_draft_template_dir,
+            self._text_draft_external_action,
             self._libreoffice_python_path,
             self._concordance_file_path,
             self._editor_source_file,
@@ -3862,6 +3971,7 @@ button.improve-profile-chip {{
         editor_pinned_action_ids: list[str],
         text_draft_pinned_action_ids: list[str],
         text_draft_template_dir: Path | None,
+        text_draft_external_action: TextDraftExternalAction,
         libreoffice_python_path: Path | None,
         concordance_file_path: Path | None,
     ) -> None:
@@ -3892,6 +4002,7 @@ button.improve-profile-chip {{
         self._text_draft_template_dir = (
             text_draft_template_dir.expanduser().resolve(strict=False) if text_draft_template_dir else None
         )
+        self._text_draft_external_action = text_draft_external_action
         self._libreoffice_python_path = libreoffice_python_path.expanduser().resolve(strict=False) if libreoffice_python_path else None
         self._concordance_file_path = (
             concordance_file_path.expanduser().resolve(strict=False) if concordance_file_path else None
@@ -3920,10 +4031,12 @@ button.improve-profile-chip {{
         save_editor_pinned_actions(self._editor_pinned_action_ids)
         save_text_draft_pinned_actions(self._text_draft_pinned_action_ids)
         save_text_draft_template_dir(self._text_draft_template_dir)
+        save_text_draft_external_action(self._text_draft_external_action)
         save_libreoffice_python_path(self._libreoffice_python_path)
         save_concordance_file_path(self._concordance_file_path)
         self._rebuild_transform_action_buttons()
         self._rebuild_text_draft_action_buttons()
+        self._rebuild_text_draft_external_action_button()
         self._rebuild_regenerate_profile_chips()
         self._refresh_text_draft_templates()
         _import_uno_from_candidates(self._libreoffice_python_path, force_retry=True)
@@ -4574,6 +4687,47 @@ button.improve-profile-chip {{
         clipboard.set(text)
         self._status_label.set_label("Draft copied to clipboard.")
         self._show_toast("Draft copied to clipboard.")
+
+    def _expand_text_draft_external_action_value(self, value: str, draft_path: Path) -> str:
+        expanded = value.replace(TEXT_DRAFT_EXTERNAL_ACTION_DRAFT_FILE_TOKEN, str(draft_path))
+        return os.path.expandvars(os.path.expanduser(expanded))
+
+    def _on_text_draft_external_action_clicked(self, _button: Gtk.Button | None) -> None:
+        action = self._text_draft_external_action
+        if not action.is_configured():
+            self._show_toast("No Text Draft external action is configured.")
+            return
+        if self._busy:
+            return
+        text = self._get_text_draft_text()
+        if not text.strip():
+            self._show_toast("Draft is empty.")
+            return
+        draft_path = self._write_text_draft_temp_file_now()
+        if draft_path is None:
+            return
+
+        command = [
+            self._expand_text_draft_external_action_value(part, draft_path)
+            for part in action.command
+        ]
+        env = os.environ.copy()
+        env["PROSE_TEXT_DRAFT_FILE"] = str(draft_path)
+        env.update(
+            {
+                key: self._expand_text_draft_external_action_value(value, draft_path)
+                for key, value in action.env.items()
+            }
+        )
+        cwd = str(action.cwd) if action.cwd is not None else None
+        try:
+            subprocess.Popen(command, cwd=cwd, env=env, start_new_session=True)
+        except (OSError, ValueError) as exc:
+            self._status_label.set_label(f"Unable to launch {action.label}: {exc}")
+            self._show_toast(f"Unable to launch {action.label}.")
+            return
+        self._status_label.set_label(f"Launched {action.label} with Draft text.")
+        self._show_toast(f"Launched {action.label}.")
 
     def _prepare_text_draft_regenerate_output_state(self, context: RegenerateContext) -> None:
         if context.action_key in REGENERATE_SOURCE_BUFFER_ACTION_KEYS:
@@ -7074,6 +7228,21 @@ button.improve-profile-chip {{
             return None
         return self._text_draft_temp_path
 
+    def _write_text_draft_temp_file_now(self) -> Path | None:
+        if self._text_draft_temp_flush_source_id:
+            GLib.Source.remove(self._text_draft_temp_flush_source_id)
+            self._text_draft_temp_flush_source_id = 0
+        path = self._ensure_text_draft_temp_path()
+        if path is None:
+            return None
+        try:
+            path.write_text(self._get_text_draft_text(), encoding="utf-8")
+            self._text_draft_temp_dirty = False
+        except OSError as exc:
+            self._show_toast(f"Unable to sync text draft temp file: {exc}")
+            return None
+        return path
+
     def _flush_text_draft_temp_file(self) -> bool:
         self._text_draft_temp_flush_source_id = 0
         if not self._text_draft_temp_dirty:
@@ -7745,6 +7914,8 @@ button.improve-profile-chip {{
         if hasattr(self, "_text_draft_action_buttons"):
             for button in self._text_draft_action_buttons:
                 button.set_sensitive(not busy)
+        if hasattr(self, "_text_draft_external_action_button") and self._text_draft_external_action_button is not None:
+            self._text_draft_external_action_button.set_sensitive(not busy)
         if hasattr(self, "_update_text_draft_template_controls"):
             self._update_text_draft_template_controls()
 
@@ -10321,6 +10492,7 @@ class SettingsWindow(Adw.ApplicationWindow):
         editor_pinned_action_ids: list[str],
         text_draft_pinned_action_ids: list[str],
         text_draft_template_dir: Path | None,
+        text_draft_external_action: TextDraftExternalAction,
         libreoffice_python_path: Path | None,
         concordance_file_path: Path | None,
         editor_source_file: Path | None,
@@ -10352,6 +10524,7 @@ class SettingsWindow(Adw.ApplicationWindow):
                 list[str],
                 list[str],
                 Path | None,
+                TextDraftExternalAction,
                 Path | None,
                 Path | None,
             ],
@@ -10399,6 +10572,7 @@ class SettingsWindow(Adw.ApplicationWindow):
         self._text_draft_template_dir = (
             text_draft_template_dir.expanduser().resolve(strict=False) if text_draft_template_dir else None
         )
+        self._text_draft_external_action = text_draft_external_action
         self._libreoffice_python_path = libreoffice_python_path
         self._concordance_file_path = concordance_file_path
         self._editor_source_file = editor_source_file
@@ -10410,6 +10584,7 @@ class SettingsWindow(Adw.ApplicationWindow):
         self._prompt_row_keys: dict[Gtk.ListBoxRow, str] = {}
         self._source_row_guard = False
         self._text_draft_template_dir_row_guard = False
+        self._text_draft_external_action_cwd_row_guard = False
         self._libreoffice_path_row_guard = False
         self._concordance_path_row_guard = False
         self._proof_suggestions_json_path_row_guard = False
@@ -10431,88 +10606,6 @@ class SettingsWindow(Adw.ApplicationWindow):
         box.set_margin_bottom(12)
         box.set_margin_start(18)
         box.set_margin_end(18)
-
-        source_group = Adw.PreferencesGroup(title="Source Text")
-        source_group.add_css_class("list-stack")
-        source_group.set_hexpand(True)
-        box.append(source_group)
-
-        source_row = Adw.EntryRow(title="Source text file")
-        source_row.set_hexpand(True)
-        if self._editor_source_file:
-            source_row.set_text(str(self._editor_source_file))
-        source_row.connect("changed", self._on_source_row_changed)
-        choose_btn = Gtk.Button(label="Choose")
-        choose_btn.add_css_class("flat")
-        choose_btn.connect("clicked", self._on_choose_source_file)
-        source_row.add_suffix(choose_btn)
-        source_group.add(source_row)
-        self._source_row = source_row
-
-        text_draft_template_row, text_draft_template_entry = self._build_path_setting_row(
-            title="Text Draft template directory",
-            value=str(self._text_draft_template_dir or ""),
-            info_text=(
-                "Optional. Prose treats immediate subfolders here as template categories, and root-level .txt files "
-                "appear under Uncategorized. "
-                "Add leading lines like [[email: Label <address@example.com>]] to create copy buttons."
-            ),
-            on_changed=self._on_text_draft_template_dir_row_changed,
-            on_choose=self._on_choose_text_draft_template_dir,
-            on_clear=self._on_clear_text_draft_template_dir,
-        )
-        source_group.add(text_draft_template_row)
-        self._text_draft_template_dir_row = text_draft_template_entry
-
-        proof_suggestions_row, proof_suggestions_entry = self._build_path_setting_row(
-            title="Proofreading suggestions JSON",
-            value=str(self._proof_suggestions_json_path or ""),
-            info_text=(
-                "Optional. When this .json file exists, Prose auto-loads it when the Proof Reader tab is shown. "
-                "Clear this path to disable auto-load."
-            ),
-            on_changed=self._on_proof_suggestions_json_path_row_changed,
-            on_choose=self._on_choose_proof_suggestions_json_path,
-            on_clear=self._on_clear_proof_suggestions_json_path,
-        )
-        source_group.add(proof_suggestions_row)
-        self._proof_suggestions_json_path_row = proof_suggestions_entry
-
-        libreoffice_row, libreoffice_entry = self._build_path_setting_row(
-            title="LibreOffice Python path",
-            value=str(self._libreoffice_python_path or ""),
-            info_text="Required. Point this at LibreOffice's Python bridge directory, usually .../libreoffice/program.",
-            on_changed=self._on_libreoffice_path_row_changed,
-            on_choose=self._on_choose_libreoffice_path,
-            on_clear=self._on_clear_libreoffice_path,
-        )
-        source_group.add(libreoffice_row)
-        self._libreoffice_path_row = libreoffice_entry
-
-        concordance_row, concordance_entry = self._build_path_setting_row(
-            title="Concordance file",
-            value=str(self._concordance_file_path or ""),
-            info_text="Optional. Used by Add Case when appending citations to the concordance file.",
-            on_changed=self._on_concordance_path_row_changed,
-            on_choose=self._on_choose_concordance_file,
-            on_clear=self._on_clear_concordance_file,
-        )
-        source_group.add(concordance_row)
-        self._concordance_path_row = concordance_entry
-
-        profile_row = Adw.ActionRow(
-            title="LibreOffice Profile Import",
-            subtitle=(
-                f"Copy {_normal_libreoffice_profile_path()} into {LIBREOFFICE_PROFILE}.\n"
-                "Overwrites the Prose LibreOffice profile after confirmation. Close any Prose Writer window first."
-            ),
-        )
-        profile_row.set_subtitle_lines(4)
-        profile_copy_btn = Gtk.Button(label="Copy Normal Profile to Prose")
-        profile_copy_btn.add_css_class("flat")
-        profile_copy_btn.connect("clicked", self._on_copy_normal_profile_clicked)
-        profile_row.add_suffix(profile_copy_btn)
-        source_group.add(profile_row)
 
         split = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
         split.set_hexpand(True)
@@ -10538,6 +10631,31 @@ class SettingsWindow(Adw.ApplicationWindow):
 
         first_row: Gtk.ListBoxRow | None = None
 
+        source_row = Gtk.ListBoxRow()
+        source_row_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        source_row_box.set_margin_top(8)
+        source_row_box.set_margin_bottom(8)
+        source_row_box.set_margin_start(12)
+        source_row_box.set_margin_end(12)
+        source_row_box.append(Gtk.Label(label="Source Text", xalign=0))
+        source_row.set_child(source_row_box)
+        prompt_list.append(source_row)
+        self._prompt_row_keys[source_row] = "source-text"
+        prompt_stack.add_named(self._build_source_text_page(), "source-text")
+        first_row = source_row
+
+        external_action_row = Gtk.ListBoxRow()
+        external_action_row_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        external_action_row_box.set_margin_top(8)
+        external_action_row_box.set_margin_bottom(8)
+        external_action_row_box.set_margin_start(12)
+        external_action_row_box.set_margin_end(12)
+        external_action_row_box.append(Gtk.Label(label="Text Draft External Action", xalign=0))
+        external_action_row.set_child(external_action_row_box)
+        prompt_list.append(external_action_row)
+        self._prompt_row_keys[external_action_row] = "text-draft-external-action"
+        prompt_stack.add_named(self._build_text_draft_external_action_page(), "text-draft-external-action")
+
         profiles_row = Gtk.ListBoxRow()
         profiles_row_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         profiles_row_box.set_margin_top(8)
@@ -10549,7 +10667,6 @@ class SettingsWindow(Adw.ApplicationWindow):
         prompt_list.append(profiles_row)
         self._prompt_row_keys[profiles_row] = "model-profiles"
         prompt_stack.add_named(self._build_model_profiles_page(), "model-profiles")
-        first_row = profiles_row
 
         style_rules_row = Gtk.ListBoxRow()
         style_rules_row_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
@@ -10703,6 +10820,154 @@ class SettingsWindow(Adw.ApplicationWindow):
 
     def set_source_file(self, path: Path | None) -> None:
         self._set_editor_source_file(path, notify=False)
+
+    def _build_source_text_page(self) -> Gtk.Widget:
+        page_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+        page_box.set_margin_top(12)
+        page_box.set_margin_bottom(12)
+        page_box.set_margin_start(12)
+        page_box.set_margin_end(12)
+        page_box.set_valign(Gtk.Align.START)
+
+        title_label = Gtk.Label(label="Source Text", xalign=0)
+        title_label.add_css_class("title-3")
+        page_box.append(title_label)
+
+        source_group = Adw.PreferencesGroup(title="Source Text")
+        source_group.add_css_class("list-stack")
+        source_group.set_hexpand(True)
+        page_box.append(source_group)
+
+        source_row = Adw.EntryRow(title="Source text file")
+        source_row.set_hexpand(True)
+        if self._editor_source_file:
+            source_row.set_text(str(self._editor_source_file))
+        source_row.connect("changed", self._on_source_row_changed)
+        choose_btn = Gtk.Button(label="Choose")
+        choose_btn.add_css_class("flat")
+        choose_btn.connect("clicked", self._on_choose_source_file)
+        source_row.add_suffix(choose_btn)
+        source_group.add(source_row)
+        self._source_row = source_row
+
+        text_draft_template_row, text_draft_template_entry = self._build_path_setting_row(
+            title="Text Draft template directory",
+            value=str(self._text_draft_template_dir or ""),
+            info_text=(
+                "Optional. Prose treats immediate subfolders here as template categories, and root-level .txt files "
+                "appear under Uncategorized. "
+                "Add leading lines like [[email: Label <address@example.com>]] to create copy buttons."
+            ),
+            on_changed=self._on_text_draft_template_dir_row_changed,
+            on_choose=self._on_choose_text_draft_template_dir,
+            on_clear=self._on_clear_text_draft_template_dir,
+        )
+        source_group.add(text_draft_template_row)
+        self._text_draft_template_dir_row = text_draft_template_entry
+
+        proof_suggestions_row, proof_suggestions_entry = self._build_path_setting_row(
+            title="Proofreading suggestions JSON",
+            value=str(self._proof_suggestions_json_path or ""),
+            info_text=(
+                "Optional. When this .json file exists, Prose auto-loads it when the Proof Reader tab is shown. "
+                "Clear this path to disable auto-load."
+            ),
+            on_changed=self._on_proof_suggestions_json_path_row_changed,
+            on_choose=self._on_choose_proof_suggestions_json_path,
+            on_clear=self._on_clear_proof_suggestions_json_path,
+        )
+        source_group.add(proof_suggestions_row)
+        self._proof_suggestions_json_path_row = proof_suggestions_entry
+
+        libreoffice_row, libreoffice_entry = self._build_path_setting_row(
+            title="LibreOffice Python path",
+            value=str(self._libreoffice_python_path or ""),
+            info_text="Required. Point this at LibreOffice's Python bridge directory, usually .../libreoffice/program.",
+            on_changed=self._on_libreoffice_path_row_changed,
+            on_choose=self._on_choose_libreoffice_path,
+            on_clear=self._on_clear_libreoffice_path,
+        )
+        source_group.add(libreoffice_row)
+        self._libreoffice_path_row = libreoffice_entry
+
+        concordance_row, concordance_entry = self._build_path_setting_row(
+            title="Concordance file",
+            value=str(self._concordance_file_path or ""),
+            info_text="Optional. Used by Add Case when appending citations to the concordance file.",
+            on_changed=self._on_concordance_path_row_changed,
+            on_choose=self._on_choose_concordance_file,
+            on_clear=self._on_clear_concordance_file,
+        )
+        source_group.add(concordance_row)
+        self._concordance_path_row = concordance_entry
+
+        profile_row = Adw.ActionRow(
+            title="LibreOffice Profile Import",
+            subtitle=(
+                f"Copy {_normal_libreoffice_profile_path()} into {LIBREOFFICE_PROFILE}.\n"
+                "Overwrites the Prose LibreOffice profile after confirmation. Close any Prose Writer window first."
+            ),
+        )
+        profile_row.set_subtitle_lines(4)
+        profile_copy_btn = Gtk.Button(label="Copy Normal Profile to Prose")
+        profile_copy_btn.add_css_class("flat")
+        profile_copy_btn.connect("clicked", self._on_copy_normal_profile_clicked)
+        profile_row.add_suffix(profile_copy_btn)
+        source_group.add(profile_row)
+
+        return page_box
+
+    def _build_text_draft_external_action_page(self) -> Gtk.Widget:
+        page_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+        page_box.set_margin_top(12)
+        page_box.set_margin_bottom(12)
+        page_box.set_margin_start(12)
+        page_box.set_margin_end(12)
+        page_box.set_valign(Gtk.Align.START)
+
+        title_label = Gtk.Label(label="Text Draft External Action", xalign=0)
+        title_label.add_css_class("title-3")
+        page_box.append(title_label)
+
+        external_group = Adw.PreferencesGroup(title="External Action")
+        external_group.add_css_class("list-stack")
+        external_group.set_hexpand(True)
+        page_box.append(external_group)
+
+        external_enable_row = Adw.SwitchRow(
+            title="Enable external Draft action",
+            subtitle="Show a Text Draft button that launches a configured local command.",
+        )
+        external_enable_row.set_active(self._text_draft_external_action.enabled)
+        external_group.add(external_enable_row)
+        self._text_draft_external_action_enabled_row = external_enable_row
+
+        external_label_row = Adw.EntryRow(title="Button label")
+        external_label_row.set_text(self._text_draft_external_action.label or "External")
+        external_group.add(external_label_row)
+        self._text_draft_external_action_label_row = external_label_row
+
+        external_command_row = Adw.EntryRow(title="Command")
+        external_command_row.set_text(shlex.join(self._text_draft_external_action.command))
+        external_command_row.set_show_apply_button(False)
+        external_command_row.set_tooltip_text(
+            f"Use {TEXT_DRAFT_EXTERNAL_ACTION_DRAFT_FILE_TOKEN} where the Draft temp-file path should go."
+        )
+        external_group.add(external_command_row)
+        self._text_draft_external_action_command_row = external_command_row
+
+        external_cwd_row, external_cwd_entry = self._build_path_setting_row(
+            title="Working directory",
+            value=str(self._text_draft_external_action.cwd or ""),
+            info_text="Optional. The external command starts in this directory.",
+            on_changed=self._on_text_draft_external_action_cwd_row_changed,
+            on_choose=self._on_choose_text_draft_external_action_cwd,
+            on_clear=self._on_clear_text_draft_external_action_cwd,
+        )
+        external_group.add(external_cwd_row)
+        self._text_draft_external_action_cwd_row = external_cwd_entry
+
+        return page_box
 
     def _profile_dropdown_model(self, include_unset: bool = False) -> Gtk.StringList:
         labels = [profile.display_name() for profile in self._model_profiles]
@@ -11164,6 +11429,49 @@ class SettingsWindow(Adw.ApplicationWindow):
         self._text_draft_template_dir_row_guard = True
         self._text_draft_template_dir_row.set_text(str(self._text_draft_template_dir or ""))
         self._text_draft_template_dir_row_guard = False
+
+    def _on_choose_text_draft_external_action_cwd(self, _button: Gtk.Button) -> None:
+        dialog = Gtk.FileDialog(title="Choose external action working directory")
+        dialog.select_folder(self, None, self._on_text_draft_external_action_cwd_chosen)
+
+    def _on_text_draft_external_action_cwd_chosen(
+        self,
+        dialog: Gtk.FileDialog,
+        result: Gio.AsyncResult,
+    ) -> None:
+        try:
+            file = dialog.select_folder_finish(result)
+            path = Path(file.get_path() or "")
+        except Exception:
+            return
+        self._set_text_draft_external_action_cwd(path)
+
+    def _on_clear_text_draft_external_action_cwd(self, _button: Gtk.Button) -> None:
+        self._set_text_draft_external_action_cwd(None)
+
+    def _on_text_draft_external_action_cwd_row_changed(self, row: Gtk.Editable) -> None:
+        if self._text_draft_external_action_cwd_row_guard:
+            return
+        raw = row.get_text().strip()
+        self._text_draft_external_action = TextDraftExternalAction(
+            enabled=self._text_draft_external_action.enabled,
+            label=self._text_draft_external_action.label,
+            command=self._text_draft_external_action.command,
+            cwd=Path(raw).expanduser() if raw else None,
+            env=self._text_draft_external_action.env,
+        )
+
+    def _set_text_draft_external_action_cwd(self, path: Path | None) -> None:
+        self._text_draft_external_action = TextDraftExternalAction(
+            enabled=self._text_draft_external_action.enabled,
+            label=self._text_draft_external_action.label,
+            command=self._text_draft_external_action.command,
+            cwd=path.expanduser().resolve(strict=False) if path else None,
+            env=self._text_draft_external_action.env,
+        )
+        self._text_draft_external_action_cwd_row_guard = True
+        self._text_draft_external_action_cwd_row.set_text(str(self._text_draft_external_action.cwd or ""))
+        self._text_draft_external_action_cwd_row_guard = False
 
     def _on_choose_proof_suggestions_json_path(self, _button: Gtk.Button) -> None:
         dialog = Gtk.FileDialog(title="Choose proofreading suggestions JSON")
@@ -11671,6 +11979,21 @@ class SettingsWindow(Adw.ApplicationWindow):
             editor_action_profile_defaults[key] = MODEL_PROFILE_IDS[selected_index]
         editor_pinned_action_ids = self._current_editor_pinned_actions()
         text_draft_pinned_action_ids = self._current_text_draft_pinned_actions()
+        external_action_command: list[str] = []
+        external_action_command_text = self._text_draft_external_action_command_row.get_text().strip()
+        if external_action_command_text:
+            try:
+                external_action_command = shlex.split(external_action_command_text)
+            except ValueError as exc:
+                self._parent_window._show_toast(f"External action command is invalid: {exc}")
+                return
+        text_draft_external_action = TextDraftExternalAction(
+            enabled=self._text_draft_external_action_enabled_row.get_active(),
+            label=self._text_draft_external_action_label_row.get_text().strip() or "External",
+            command=external_action_command,
+            cwd=self._text_draft_external_action.cwd,
+            env=self._text_draft_external_action.env,
+        )
         self._on_save(
             model_profiles,
             proof_settings,
@@ -11696,6 +12019,7 @@ class SettingsWindow(Adw.ApplicationWindow):
             editor_pinned_action_ids,
             text_draft_pinned_action_ids,
             self._text_draft_template_dir,
+            text_draft_external_action,
             self._libreoffice_python_path,
             self._concordance_file_path,
         )
