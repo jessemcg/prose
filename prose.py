@@ -1162,6 +1162,17 @@ class RegenerateContext:
 
 
 @dataclass
+class MultiDraftChoice:
+    profile: ModelProfile
+    buffer: Gtk.TextBuffer
+    status_label: Gtk.Label
+    insert_button: Gtk.Button
+    text: str = ""
+    complete: bool = False
+    failed: bool = False
+
+
+@dataclass
 class TextDraftExternalAction:
     enabled: bool
     label: str
@@ -1305,12 +1316,26 @@ EDITOR_QUICK_ACTIONS = (
         supports_profiles=True,
     ),
     QuickActionDefinition(
+        key="intro-choices",
+        label="Introduction Choices",
+        title="Introduction Choices",
+        action_name="transform-introduction-choices",
+        description="Compare introductions from all configured model profiles.",
+    ),
+    QuickActionDefinition(
         key="intro-reply",
         label="Introduction Reply",
         title="Introduction Reply",
         action_name="transform-introduction-reply",
         description="Write an introduction for a reply brief from the current argument section.",
         supports_profiles=True,
+    ),
+    QuickActionDefinition(
+        key="intro-reply-choices",
+        label="Introduction Reply Choices",
+        title="Introduction Reply Choices",
+        action_name="transform-introduction-reply-choices",
+        description="Compare reply introductions from all configured model profiles.",
     ),
     QuickActionDefinition(
         key="conclusion",
@@ -1321,12 +1346,26 @@ EDITOR_QUICK_ACTIONS = (
         supports_profiles=True,
     ),
     QuickActionDefinition(
+        key="conclusion-choices",
+        label="Conclusion Choices",
+        title="Conclusion Choices",
+        action_name="transform-conclusion-choices",
+        description="Compare conclusions from all configured model profiles.",
+    ),
+    QuickActionDefinition(
         key="concl-no-issues",
         label="Conclusion No Issues",
         title="Conclusion No Issues",
         action_name="transform-concl-no-issues",
         description="Write a conclusion from the current issues-considered section.",
         supports_profiles=True,
+    ),
+    QuickActionDefinition(
+        key="concl-no-issues-choices",
+        label="Conclusion No Issues Choices",
+        title="Conclusion No Issues Choices",
+        action_name="transform-concl-no-issues-choices",
+        description="Compare no-issues conclusions from all configured model profiles.",
     ),
     QuickActionDefinition(
         key="quotes",
@@ -1350,12 +1389,26 @@ EDITOR_QUICK_ACTION_BY_ACTION_NAME = {
 EDITOR_PROFILE_ACTION_KEYS = tuple(
     definition.key for definition in EDITOR_QUICK_ACTIONS if definition.supports_profiles
 )
+EDITOR_SINGLE_DRAFT_ACTION_KEYS = frozenset(
+    {
+        "intro",
+        "intro-reply",
+        "conclusion",
+        "concl-no-issues",
+    }
+)
+EDITOR_DRAFT_CHOICE_ACTION_KEYS = (
+    "intro-choices",
+    "intro-reply-choices",
+    "conclusion-choices",
+    "concl-no-issues-choices",
+)
+EDITOR_DEDICATED_QUICK_ACTION_KEYS = frozenset(EDITOR_DRAFT_CHOICE_ACTION_KEYS)
+EDITOR_TOOLBAR_EXCLUDED_ACTION_KEYS = EDITOR_SINGLE_DRAFT_ACTION_KEYS | EDITOR_DEDICATED_QUICK_ACTION_KEYS
 DEFAULT_EDITOR_PINNED_ACTION_IDS = (
     "shorten",
     "topic-sentence",
     "concl-section",
-    "intro",
-    "conclusion",
 )
 DEFAULT_TEXT_DRAFT_PINNED_ACTION_IDS = (
     "text-draft-improve-generated",
@@ -1393,6 +1446,7 @@ def _editor_command_items() -> list[tuple[str, str, str | None, str, bool]]:
             definition.supports_profiles,
         )
         for definition in EDITOR_QUICK_ACTIONS
+        if definition.key not in EDITOR_SINGLE_DRAFT_ACTION_KEYS
     )
     return commands
 
@@ -2272,7 +2326,7 @@ def _sanitize_editor_pinned_actions(raw: Any) -> list[str]:
         return pinned
     for item in raw:
         key = _normalize_editor_quick_action_key(str(item or "").strip())
-        if key not in EDITOR_QUICK_ACTION_BY_KEY or key in seen:
+        if key not in EDITOR_QUICK_ACTION_BY_KEY or key in EDITOR_TOOLBAR_EXCLUDED_ACTION_KEYS or key in seen:
             continue
         pinned.append(key)
         seen.add(key)
@@ -2286,12 +2340,12 @@ def _ordered_editor_quick_action_keys(pinned_action_ids: Iterable[str]) -> list[
     seen: set[str] = set()
     for key in pinned_action_ids:
         key = _normalize_editor_quick_action_key(key)
-        if key not in EDITOR_QUICK_ACTION_BY_KEY or key in seen:
+        if key not in EDITOR_QUICK_ACTION_BY_KEY or key in EDITOR_TOOLBAR_EXCLUDED_ACTION_KEYS or key in seen:
             continue
         ordered.append(key)
         seen.add(key)
     for definition in EDITOR_QUICK_ACTIONS:
-        if definition.key in seen:
+        if definition.key in seen or definition.key in EDITOR_TOOLBAR_EXCLUDED_ACTION_KEYS:
             continue
         ordered.append(definition.key)
     return ordered
@@ -2486,6 +2540,14 @@ class ProseWindow(Adw.ApplicationWindow):
         self._pending_regenerate_context: RegenerateContext | None = None
         self._last_regenerate_context: RegenerateContext | None = None
         self._spelling_output_buffer: Gtk.TextBuffer | None = None
+        self._editor_output_surface: Gtk.Stack | None = None
+        self._multi_draft_window: Adw.ApplicationWindow | None = None
+        self._multi_draft_grid: Gtk.Grid | None = None
+        self._multi_draft_choices: dict[str, MultiDraftChoice] = {}
+        self._multi_draft_lock = threading.Lock()
+        self._multi_draft_run_id = 0
+        self._multi_draft_remaining = 0
+        self._multi_draft_insert_buttons: list[Gtk.Button] = []
         self._text_draft_original_output_buffer: Gtk.TextBuffer | None = None
         self._text_draft_buffer: Gtk.TextBuffer | None = None
         self._text_draft_view: Gtk.TextView | None = None
@@ -2690,6 +2752,7 @@ class ProseWindow(Adw.ApplicationWindow):
         output_surface.set_visible_child_name("output")
         output_section.append(output_surface)
         self._spelling_output_buffer = output_buffer
+        self._editor_output_surface = output_surface
 
         regenerate_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         regenerate_row.set_hexpand(True)
@@ -3259,6 +3322,49 @@ class ProseWindow(Adw.ApplicationWindow):
         self._apply_quick_action_button_classes(more_button)
         return more_button, action_buttons
 
+    def _build_draft_choices_button(self) -> tuple[Gtk.MenuButton, list[Gtk.Widget]]:
+        definitions = [
+            EDITOR_QUICK_ACTION_BY_KEY[key]
+            for key in EDITOR_DRAFT_CHOICE_ACTION_KEYS
+            if key in EDITOR_QUICK_ACTION_BY_KEY
+        ]
+        popover = Gtk.Popover()
+        popover.set_autohide(True)
+        popover.set_cascade_popdown(True)
+        popover.set_position(Gtk.PositionType.BOTTOM)
+
+        content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+        content.set_margin_top(10)
+        content.set_margin_bottom(10)
+        content.set_margin_start(10)
+        content.set_margin_end(10)
+
+        title = Gtk.Label(label="Draft Choices", xalign=0)
+        title.add_css_class("caption")
+        title.add_css_class("dim-label")
+        content.append(title)
+
+        action_grid = Gtk.FlowBox()
+        action_grid.set_selection_mode(Gtk.SelectionMode.NONE)
+        action_grid.set_column_spacing(6)
+        action_grid.set_row_spacing(6)
+        action_grid.set_max_children_per_line(2)
+
+        action_buttons: list[Gtk.Widget] = []
+        for definition in definitions:
+            widget = self._build_quick_action_widget(definition, label=definition.label, close_popover=popover)
+            action_grid.append(widget)
+            action_buttons.append(widget)
+        content.append(action_grid)
+
+        popover.set_child(content)
+
+        draft_choices_button = Gtk.MenuButton(label="Draft Choices")
+        draft_choices_button.set_tooltip_text("Show introduction and conclusion choice generators")
+        draft_choices_button.set_popover(popover)
+        self._apply_quick_action_button_classes(draft_choices_button)
+        return draft_choices_button, action_buttons
+
     def _rebuild_transform_action_buttons(self) -> None:
         flow_box = self._transform_actions_wrap
         if flow_box is None:
@@ -3280,6 +3386,11 @@ class ProseWindow(Adw.ApplicationWindow):
                 action_buttons.append(widget)
             else:
                 remaining_actions.append(definition)
+
+        draft_choices_button, draft_choice_buttons = self._build_draft_choices_button()
+        flow_box.append(draft_choices_button)
+        action_buttons.append(draft_choices_button)
+        action_buttons.extend(draft_choice_buttons)
 
         if remaining_actions:
             more_button, more_action_buttons = self._build_more_actions_button(remaining_actions)
@@ -3453,6 +3564,22 @@ textview.spelling-output-view.view border {{
 }}
 .editor-lookup-surface .thesaurus-results,
 .editor-lookup-surface .reference-output-box {{
+  background-color: transparent;
+}}
+.multi-draft-results {{
+  background-color: transparent;
+}}
+.multi-draft-choice {{
+  border-radius: {SPELLING_OUTPUT_CORNER_RADIUS_PX}px;
+  background-color: alpha(@window_fg_color, 0.05);
+  padding: 10px;
+}}
+.multi-draft-choice-output {{
+  border-radius: {SPELLING_OUTPUT_CORNER_RADIUS_PX}px;
+  background-color: alpha(@window_fg_color, 0.06);
+  box-shadow: none;
+}}
+.multi-draft-choice-output > viewport {{
   background-color: transparent;
 }}
 .thesaurus-row label {{
@@ -3762,15 +3889,19 @@ button.improve-profile-chip {{
         _add_action("transform-translate", lambda: self._on_translate_clicked(None))
         _add_string_action("transform-topic-sentence", lambda nickname: self._on_topic_sentence_clicked(None, nickname))
         _add_string_action("transform-introduction", lambda nickname: self._on_introduction_clicked(None, nickname))
+        _add_action("transform-introduction-choices", lambda: self._on_introduction_choices_clicked(None))
         _add_string_action(
             "transform-introduction-reply",
             lambda nickname: self._on_introduction_reply_clicked(None, nickname),
         )
+        _add_action("transform-introduction-reply-choices", lambda: self._on_introduction_reply_choices_clicked(None))
         _add_string_action("transform-conclusion", lambda nickname: self._on_conclusion_clicked(None, nickname))
+        _add_action("transform-conclusion-choices", lambda: self._on_conclusion_choices_clicked(None))
         _add_string_action(
             "transform-concl-no-issues",
             lambda nickname: self._on_concl_no_issues_clicked(None, nickname),
         )
+        _add_action("transform-concl-no-issues-choices", lambda: self._on_concl_no_issues_choices_clicked(None))
         _add_string_action("transform-concl-section", lambda nickname: self._on_concl_section_clicked(None, nickname))
         _add_action("add-case", lambda: self._on_add_case_clicked(None))
         _add_action("import-socf", lambda: self._on_import_socf_clicked(None))
@@ -5440,6 +5571,50 @@ button.improve-profile-chip {{
         thread = threading.Thread(target=self._run_conclusion_no_issues, args=(source_text, profile), daemon=True)
         thread.start()
 
+    def _on_introduction_choices_clicked(self, _button: Gtk.Button | None) -> None:
+        self._start_multi_draft_choices(
+            title="Introduction Choices",
+            source_start="ARGUMENT",
+            source_end="CONCLUSION",
+            payload_builder=self._compose_introduction_payload,
+            prompt_text=self._introduction_settings.prompt,
+            default_prompt=DEFAULT_INTRO_PROMPT,
+            request_title="Introduction Choice",
+        )
+
+    def _on_introduction_reply_choices_clicked(self, _button: Gtk.Button | None) -> None:
+        self._start_multi_draft_choices(
+            title="Introduction Reply Choices",
+            source_start="ARGUMENT",
+            source_end="CONCLUSION",
+            payload_builder=self._compose_introduction_reply_payload,
+            prompt_text=self._introduction_reply_settings.prompt,
+            default_prompt=DEFAULT_INTRO_REPLY_PROMPT,
+            request_title="Introduction Reply Choice",
+        )
+
+    def _on_conclusion_choices_clicked(self, _button: Gtk.Button | None) -> None:
+        self._start_multi_draft_choices(
+            title="Conclusion Choices",
+            source_start="ARGUMENT",
+            source_end="CONCLUSION",
+            payload_builder=self._compose_conclusion_payload,
+            prompt_text=self._conclusion_settings.prompt,
+            default_prompt=DEFAULT_CONCLUSION_PROMPT,
+            request_title="Conclusion Choice",
+        )
+
+    def _on_concl_no_issues_choices_clicked(self, _button: Gtk.Button | None) -> None:
+        self._start_multi_draft_choices(
+            title="Conclusion No Issues Choices",
+            source_start="ISSUES CONSIDERED",
+            source_end="CONCLUSION",
+            payload_builder=self._compose_conclusion_no_issues_payload,
+            prompt_text=self._concl_no_issues_settings.prompt,
+            default_prompt=DEFAULT_CONCL_NO_ISSUES_PROMPT,
+            request_title="Conclusion No Issues Choice",
+        )
+
     def _on_concl_section_clicked(self, _button: Gtk.Button | None, profile_nickname: str | None = None) -> None:
         if self._busy:
             return
@@ -5471,6 +5646,285 @@ button.improve-profile-chip {{
         self._status_label.set_label(f"Writing section conclusion with {profile.display_name()}…")
         thread = threading.Thread(target=self._run_concl_section, args=(source_text, profile), daemon=True)
         thread.start()
+
+    def _start_multi_draft_choices(
+        self,
+        *,
+        title: str,
+        source_start: str,
+        source_end: str,
+        payload_builder: Callable[[str, ModelProfile], dict[str, Any]],
+        prompt_text: str,
+        default_prompt: str,
+        request_title: str,
+    ) -> None:
+        if self._busy:
+            return
+        desktop = self._get_desktop()
+        if not desktop:
+            self._show_toast("Unable to reach LibreOffice listener. Is the service running?")
+            return
+        doc = self._get_active_writer(desktop)
+        if not doc:
+            self._show_toast("Open a Writer document (File → Launch Writer).")
+            return
+        source_text = self._extract_section_between_headings(doc, source_start, source_end)
+        if not source_text:
+            self._show_toast(f'Unable to find text between "{source_start}" and "{source_end}".')
+            return
+
+        self._multi_draft_run_id += 1
+        run_id = self._multi_draft_run_id
+        self._clear_pending_regenerate_context()
+        self._show_multi_draft_choices(title, self._model_profiles)
+        self._set_spelling_output_text(f"{title} opened in a separate review window.")
+        configured_profiles = [profile for profile in self._model_profiles if profile.is_configured()]
+        for profile in self._model_profiles:
+            if not profile.is_configured():
+                self._mark_multi_draft_choice_unconfigured(run_id, profile.key)
+        if not configured_profiles:
+            self._status_label.set_label(f"{title}: no configured model profiles.")
+            self._show_toast("Configure at least one model profile in Settings first.")
+            return
+
+        with self._multi_draft_lock:
+            self._multi_draft_remaining = len(configured_profiles)
+        self._set_busy(True)
+        self._status_label.set_label(f"Writing {title.lower()} with {len(configured_profiles)} model profiles…")
+        for profile in configured_profiles:
+            thread = threading.Thread(
+                target=self._run_multi_draft_choice,
+                args=(
+                    run_id,
+                    source_text,
+                    profile,
+                    payload_builder,
+                    prompt_text,
+                    default_prompt,
+                    request_title,
+                ),
+                daemon=True,
+            )
+            thread.start()
+
+    def _show_multi_draft_choices(self, title: str, profiles: list[ModelProfile]) -> None:
+        if self._multi_draft_window is not None:
+            self._multi_draft_window.close()
+            self._multi_draft_window = None
+        app = self.get_application()
+        if app is None:
+            return
+
+        self._multi_draft_choices = {}
+        self._multi_draft_insert_buttons = []
+
+        window = Adw.ApplicationWindow(application=app, title=title, default_width=1280, default_height=900)
+        window.set_transient_for(self)
+        window.connect("close-request", self._on_multi_draft_window_closed)
+
+        view = Adw.ToolbarView()
+        header = Adw.HeaderBar()
+        header.add_css_class("flat")
+        view.add_top_bar(header)
+
+        grid = Gtk.Grid()
+        grid.set_hexpand(True)
+        grid.set_vexpand(True)
+        grid.set_column_homogeneous(True)
+        grid.set_row_homogeneous(True)
+        grid.set_column_spacing(10)
+        grid.set_row_spacing(10)
+        grid.set_margin_top(12)
+        grid.set_margin_bottom(12)
+        grid.set_margin_start(12)
+        grid.set_margin_end(12)
+        grid.add_css_class("multi-draft-results")
+        view.set_content(grid)
+        window.set_content(view)
+        self._multi_draft_window = window
+        self._multi_draft_grid = grid
+
+        for index, profile in enumerate(profiles):
+            choice_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+            choice_box.set_hexpand(True)
+            choice_box.set_vexpand(True)
+            choice_box.add_css_class("multi-draft-choice")
+
+            header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+            header.set_hexpand(True)
+            label = Gtk.Label(label=self._profile_slot_label(profile), xalign=0)
+            label.add_css_class("heading")
+            label.set_tooltip_text(profile.display_name())
+            header.append(label)
+
+            status_label = Gtk.Label(label="Waiting…", xalign=0)
+            status_label.add_css_class("dim-label")
+            status_label.set_hexpand(True)
+            header.append(status_label)
+
+            insert_button = Gtk.Button(label="Insert")
+            insert_button.add_css_class("flat")
+            insert_button.add_css_class("suggested-action")
+            insert_button.set_sensitive(False)
+            insert_button.connect("clicked", self._on_multi_draft_insert_clicked, profile.key)
+            header.append(insert_button)
+            choice_box.append(header)
+
+            buffer = Gtk.TextBuffer()
+            text_view = Gtk.TextView.new_with_buffer(buffer)
+            text_view.set_editable(False)
+            text_view.set_cursor_visible(False)
+            text_view.set_wrap_mode(Gtk.WrapMode.WORD_CHAR)
+            text_view.set_hexpand(True)
+            text_view.set_vexpand(True)
+            text_view.set_left_margin(8)
+            text_view.set_right_margin(8)
+            text_view.set_top_margin(8)
+            text_view.set_bottom_margin(8)
+            text_view.add_css_class("spelling-output-view")
+
+            scroller = Gtk.ScrolledWindow()
+            scroller.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
+            scroller.set_hexpand(True)
+            scroller.set_vexpand(True)
+            scroller.set_child(text_view)
+            scroller.add_css_class("multi-draft-choice-output")
+            choice_box.append(scroller)
+
+            grid.attach(choice_box, index % 2, index // 2, 1, 1)
+            self._multi_draft_insert_buttons.append(insert_button)
+            self._multi_draft_choices[profile.key] = MultiDraftChoice(
+                profile=profile,
+                buffer=buffer,
+                status_label=status_label,
+                insert_button=insert_button,
+            )
+        window.present()
+
+    def _on_multi_draft_window_closed(self, window: Adw.ApplicationWindow, *_args: object) -> bool:
+        if self._multi_draft_window is window:
+            self._multi_draft_window = None
+            self._multi_draft_grid = None
+        return False
+
+    def _mark_multi_draft_choice_unconfigured(self, run_id: int, profile_key: str) -> bool:
+        if run_id != self._multi_draft_run_id:
+            return False
+        choice = self._multi_draft_choices.get(profile_key)
+        if choice is None:
+            return False
+        choice.failed = True
+        choice.complete = True
+        choice.status_label.set_label("Not configured")
+        choice.buffer.set_text("Configure this model profile in Settings to include it here.")
+        choice.insert_button.set_sensitive(False)
+        return False
+
+    def _append_multi_draft_choice_text(self, run_id: int, profile_key: str, text: str) -> bool:
+        if run_id != self._multi_draft_run_id or not text:
+            return False
+        choice = self._multi_draft_choices.get(profile_key)
+        if choice is None:
+            return False
+        choice.text += text
+        end_iter = choice.buffer.get_end_iter()
+        choice.buffer.insert(end_iter, text)
+        choice.status_label.set_label("Writing…")
+        return False
+
+    def _finish_multi_draft_choice(self, run_id: int, profile_key: str, error: str | None = None) -> bool:
+        if run_id != self._multi_draft_run_id:
+            return False
+        choice = self._multi_draft_choices.get(profile_key)
+        if choice is not None:
+            choice.complete = True
+            if error:
+                choice.failed = True
+                choice.status_label.set_label("Failed")
+                choice.buffer.set_text(f"Unable to generate this draft: {error}")
+                choice.insert_button.set_sensitive(False)
+            else:
+                choice.text = self._normalize_generated_output_text(choice.text)
+                choice.buffer.set_text(choice.text)
+                if choice.text:
+                    choice.status_label.set_label("Ready")
+                    choice.insert_button.set_sensitive(True)
+                else:
+                    choice.failed = True
+                    choice.status_label.set_label("No text returned")
+                    choice.insert_button.set_sensitive(False)
+
+        remaining = 0
+        with self._multi_draft_lock:
+            self._multi_draft_remaining = max(0, self._multi_draft_remaining - 1)
+            remaining = self._multi_draft_remaining
+        if remaining == 0:
+            self._set_busy(False)
+            self._status_label.set_label("Draft choices complete.")
+        return False
+
+    def _run_multi_draft_choice(
+        self,
+        run_id: int,
+        source_text: str,
+        profile: ModelProfile,
+        payload_builder: Callable[[str, ModelProfile], dict[str, Any]],
+        prompt_text: str,
+        default_prompt: str,
+        request_title: str,
+    ) -> None:
+        error = None
+        try:
+            title = f"{request_title} - {profile.display_name()}"
+            if self._is_gemini_generate_content_url(profile.api_url):
+                prompt = _expand_shared_prompt_parts(prompt_text or default_prompt)
+                combined = f"{prompt}\n\n{source_text}" if prompt else source_text
+                output = self._call_gemini_generate_content(
+                    profile.api_url,
+                    profile.api_key,
+                    combined,
+                    request_title=title,
+                )
+                GLib.idle_add(self._append_multi_draft_choice_text, run_id, profile.key, output)
+            else:
+                payload = payload_builder(source_text, profile)
+                for chunk in self._stream_custom(
+                    payload,
+                    profile.api_url,
+                    profile.api_key,
+                    request_title=title,
+                ):
+                    GLib.idle_add(self._append_multi_draft_choice_text, run_id, profile.key, chunk)
+        except Exception as exc:  # noqa: BLE001
+            error = str(exc)
+        GLib.idle_add(self._finish_multi_draft_choice, run_id, profile.key, error)
+
+    def _on_multi_draft_insert_clicked(self, _button: Gtk.Button, profile_key: str) -> None:
+        choice = self._multi_draft_choices.get(profile_key)
+        if choice is None or not choice.text.strip():
+            return
+        desktop = self._get_desktop()
+        if not desktop:
+            self._show_toast("Unable to reach LibreOffice listener. Is the service running?")
+            return
+        doc = self._get_active_writer(desktop)
+        if not doc:
+            self._show_toast("Open a Writer document (File → Launch Writer).")
+            return
+        if not self._prepare_editor_insertion(doc):
+            self._show_toast("Unable to prepare Writer insertion point.")
+            return
+        self._append_editor_text(choice.text)
+        if self._editor_insert_doc and self._editor_insert_cursor:
+            self._flush_pending_newlines(
+                self._editor_insert_doc,
+                self._editor_insert_cursor,
+                "_editor_pending_newlines",
+            )
+            self._ensure_single_trailing_space(self._editor_insert_doc, self._editor_insert_cursor)
+        self._capture_spellingstyle_range_end()
+        self._status_label.set_label(f"Inserted {choice.profile.display_name()} draft.")
+
 
     # Thesaurus pipeline -------------------------------------------------
     def _run_thesaurus(self, source_text: str, profile: ModelProfile) -> None:
@@ -7190,12 +7644,16 @@ button.improve-profile-chip {{
         setattr(self, pending_attr, 0)
 
     def _set_spelling_output_text(self, text: str) -> bool:
+        if self._editor_output_surface is not None:
+            self._editor_output_surface.set_visible_child_name("output")
         if self._spelling_output_buffer is None:
             return False
         self._spelling_output_buffer.set_text(text or "")
         return False
 
     def _append_spelling_output_text(self, text: str) -> bool:
+        if self._editor_output_surface is not None:
+            self._editor_output_surface.set_visible_child_name("output")
         if not text or self._spelling_output_buffer is None:
             return False
         end_iter = self._spelling_output_buffer.get_end_iter()
