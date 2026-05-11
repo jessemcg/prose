@@ -1262,6 +1262,13 @@ EDITOR_QUICK_ACTIONS = (
         supports_profiles=True,
     ),
     QuickActionDefinition(
+        key="rephrase-selected-choices",
+        label="Rephrase Selected Choices",
+        title="Rephrase Selected Choices",
+        action_name="rephrase-selected-choices",
+        description="Compare rephrased versions of selected Writer text from all configured model profiles.",
+    ),
+    QuickActionDefinition(
         key="improve-selected",
         label="Improve Selected",
         title="Improve Selected",
@@ -1398,6 +1405,7 @@ EDITOR_SINGLE_DRAFT_ACTION_KEYS = frozenset(
     }
 )
 EDITOR_DRAFT_CHOICE_ACTION_KEYS = (
+    "rephrase-selected-choices",
     "intro-choices",
     "intro-reply-choices",
     "conclusion-choices",
@@ -2548,6 +2556,10 @@ class ProseWindow(Adw.ApplicationWindow):
         self._multi_draft_run_id = 0
         self._multi_draft_remaining = 0
         self._multi_draft_insert_buttons: list[Gtk.Button] = []
+        self._multi_draft_insert_mode = "editor"
+        self._multi_draft_replace_doc: XTextDocument | None = None  # type: ignore[type-arg]
+        self._multi_draft_replace_start = None
+        self._multi_draft_replace_end = None
         self._text_draft_original_output_buffer: Gtk.TextBuffer | None = None
         self._text_draft_buffer: Gtk.TextBuffer | None = None
         self._text_draft_view: Gtk.TextView | None = None
@@ -3890,6 +3902,7 @@ button.improve-profile-chip {{
         _add_string_action("transform-topic-sentence", lambda nickname: self._on_topic_sentence_clicked(None, nickname))
         _add_string_action("transform-introduction", lambda nickname: self._on_introduction_clicked(None, nickname))
         _add_action("transform-introduction-choices", lambda: self._on_introduction_choices_clicked(None))
+        _add_action("rephrase-selected-choices", lambda: self._on_rephrase_selected_choices_clicked(None))
         _add_string_action(
             "transform-introduction-reply",
             lambda nickname: self._on_introduction_reply_clicked(None, nickname),
@@ -5615,6 +5628,41 @@ button.improve-profile-chip {{
             request_title="Conclusion No Issues Choice",
         )
 
+    def _on_rephrase_selected_choices_clicked(self, _button: Gtk.Button | None) -> None:
+        if self._busy:
+            return
+        desktop = self._get_desktop()
+        if not desktop:
+            self._show_toast("Unable to reach LibreOffice listener. Is the service running?")
+            return
+        doc = self._get_active_writer(desktop)
+        if not doc:
+            self._show_toast("Open a Writer document (File → Launch Writer).")
+            return
+        view_cursor = doc.getCurrentController().getViewCursor()
+        source_text = view_cursor.getString()
+        if not source_text.strip():
+            self._show_toast("Select text in Writer first.")
+            return
+        try:
+            selection_start = view_cursor.getStart()
+            selection_end = view_cursor.getEnd()
+        except Exception:
+            self._show_toast("Unable to remember the selected text range.")
+            return
+        self._start_multi_draft_choices_for_text(
+            title="Rephrase Selected Choices",
+            source_text=source_text,
+            payload_builder=self._compose_rephrase_generated_payload,
+            prompt_text=self._improve2_settings.prompt,
+            default_prompt=DEFAULT_IMPROVE2_PROMPT,
+            request_title="Rephrase Selected Choice",
+        )
+        self._multi_draft_insert_mode = "replace-selection"
+        self._multi_draft_replace_doc = doc
+        self._multi_draft_replace_start = selection_start
+        self._multi_draft_replace_end = selection_end
+
     def _on_concl_section_clicked(self, _button: Gtk.Button | None, profile_nickname: str | None = None) -> None:
         if self._busy:
             return
@@ -5673,6 +5721,29 @@ button.improve-profile-chip {{
             self._show_toast(f'Unable to find text between "{source_start}" and "{source_end}".')
             return
 
+        self._multi_draft_insert_mode = "editor"
+        self._multi_draft_replace_doc = None
+        self._multi_draft_replace_start = None
+        self._multi_draft_replace_end = None
+        self._start_multi_draft_choices_for_text(
+            title=title,
+            source_text=source_text,
+            payload_builder=payload_builder,
+            prompt_text=prompt_text,
+            default_prompt=default_prompt,
+            request_title=request_title,
+        )
+
+    def _start_multi_draft_choices_for_text(
+        self,
+        *,
+        title: str,
+        source_text: str,
+        payload_builder: Callable[[str, ModelProfile], dict[str, Any]],
+        prompt_text: str,
+        default_prompt: str,
+        request_title: str,
+    ) -> None:
         self._multi_draft_run_id += 1
         run_id = self._multi_draft_run_id
         self._clear_pending_regenerate_context()
@@ -5805,6 +5876,10 @@ button.improve-profile-chip {{
         if self._multi_draft_window is window:
             self._multi_draft_window = None
             self._multi_draft_grid = None
+            self._multi_draft_insert_mode = "editor"
+            self._multi_draft_replace_doc = None
+            self._multi_draft_replace_start = None
+            self._multi_draft_replace_end = None
         return False
 
     def _mark_multi_draft_choice_unconfigured(self, run_id: int, profile_key: str) -> bool:
@@ -5911,6 +5986,24 @@ button.improve-profile-chip {{
         if not doc:
             self._show_toast("Open a Writer document (File → Launch Writer).")
             return
+        if self._multi_draft_insert_mode == "replace-selection":
+            if not self._prepare_multi_draft_selection_replacement(doc):
+                self._show_toast("Unable to replace the selected text.")
+                return
+            self._append_improve1_text(choice.text)
+            if self._improve_insert_doc and self._improve_insert_cursor:
+                self._flush_pending_newlines(
+                    self._improve_insert_doc,
+                    self._improve_insert_cursor,
+                    "_improve_pending_newlines",
+                )
+                self._ensure_single_trailing_space(self._improve_insert_doc, self._improve_insert_cursor)
+            self._capture_improve1_range_end()
+            for insert_button in self._multi_draft_insert_buttons:
+                insert_button.set_sensitive(False)
+            self._status_label.set_label(f"Inserted {choice.profile.display_name()} draft.")
+            self._close_multi_draft_window_after_insert()
+            return
         if not self._prepare_editor_insertion(doc):
             self._show_toast("Unable to prepare Writer insertion point.")
             return
@@ -5924,6 +6017,38 @@ button.improve-profile-chip {{
             self._ensure_single_trailing_space(self._editor_insert_doc, self._editor_insert_cursor)
         self._capture_spellingstyle_range_end()
         self._status_label.set_label(f"Inserted {choice.profile.display_name()} draft.")
+        self._close_multi_draft_window_after_insert()
+
+    def _close_multi_draft_window_after_insert(self) -> None:
+        window = self._multi_draft_window
+        if window is not None:
+            window.close()
+
+    def _prepare_multi_draft_selection_replacement(self, _doc: XTextDocument) -> bool:  # type: ignore[type-arg]
+        replace_doc = self._multi_draft_replace_doc
+        selection_start = self._multi_draft_replace_start
+        selection_end = self._multi_draft_replace_end
+        if replace_doc is None or selection_start is None or selection_end is None:
+            return False
+        try:
+            text = self._get_text_container(replace_doc, selection_start)
+            if not text:
+                return False
+            range_cursor = text.createTextCursorByRange(selection_start)
+            range_cursor.gotoRange(selection_end, True)
+            try:
+                range_cursor.setString("")
+            except Exception:
+                pass
+            self._improve_insert_cursor = text.createTextCursorByRange(range_cursor)
+            self._improve_insert_doc = replace_doc
+            self._editor_insert_end = None
+            self._last_insert_len = 0
+            self._improve_pending_newlines = 0
+            self._improve_started = False
+            return True
+        except Exception:
+            return False
 
 
     # Thesaurus pipeline -------------------------------------------------
