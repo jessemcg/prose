@@ -1165,6 +1165,7 @@ class RegenerateContext:
 class MultiDraftChoice:
     profile: ModelProfile
     buffer: Gtk.TextBuffer
+    text_view: Gtk.TextView
     status_label: Gtk.Label
     insert_button: Gtk.Button
     text: str = ""
@@ -5975,6 +5976,7 @@ button.improve-profile-chip {{
             self._multi_draft_choices[profile.key] = MultiDraftChoice(
                 profile=profile,
                 buffer=buffer,
+                text_view=text_view,
                 status_label=status_label,
                 insert_button=insert_button,
             )
@@ -6001,6 +6003,8 @@ button.improve-profile-chip {{
         choice.complete = True
         choice.status_label.set_label("Not configured")
         choice.buffer.set_text("Configure this model profile in Settings to include it here.")
+        choice.text_view.set_editable(False)
+        choice.text_view.set_cursor_visible(False)
         choice.insert_button.set_sensitive(False)
         return False
 
@@ -6026,16 +6030,22 @@ button.improve-profile-chip {{
                 choice.failed = True
                 choice.status_label.set_label("Failed")
                 choice.buffer.set_text(f"Unable to generate this draft: {error}")
+                choice.text_view.set_editable(False)
+                choice.text_view.set_cursor_visible(False)
                 choice.insert_button.set_sensitive(False)
             else:
                 choice.text = self._normalize_generated_output_text(choice.text)
                 choice.buffer.set_text(choice.text)
                 if choice.text:
                     choice.status_label.set_label("Ready")
+                    choice.text_view.set_editable(True)
+                    choice.text_view.set_cursor_visible(True)
                     choice.insert_button.set_sensitive(True)
                 else:
                     choice.failed = True
                     choice.status_label.set_label("No text returned")
+                    choice.text_view.set_editable(False)
+                    choice.text_view.set_cursor_visible(False)
                     choice.insert_button.set_sensitive(False)
 
         remaining = 0
@@ -6102,22 +6112,31 @@ button.improve-profile-chip {{
         for insert_button in self._multi_draft_insert_buttons:
             insert_button.set_sensitive(False)
 
+    def _get_multi_draft_choice_text(self, choice: MultiDraftChoice) -> str:
+        start_iter, end_iter = choice.buffer.get_bounds()
+        text = choice.buffer.get_text(start_iter, end_iter, True)
+        return self._normalize_generated_output_text(text)
+
     def _on_multi_draft_insert_clicked(self, _button: Gtk.Button, profile_key: str) -> None:
         choice = self._multi_draft_choices.get(profile_key)
-        if choice is None or not choice.text.strip():
+        if choice is None:
             return
+        insert_text = self._get_multi_draft_choice_text(choice)
+        if not insert_text:
+            return
+        choice.text = insert_text
         if self._multi_draft_insert_mode == "text-draft-replace-generated":
             if not self._prepare_text_draft_generated_replace():
                 self._show_toast("Unable to replace the last generated draft output.")
                 return
-            self._append_text_draft_inserted_text(choice.text)
+            self._append_text_draft_inserted_text(insert_text)
             self._finish_text_draft_multi_choice_insert(choice)
             return
         if self._multi_draft_insert_mode == "text-draft-replace-selection":
             if not self._prepare_text_draft_saved_selection_replace():
                 self._show_toast("Unable to replace the selected Draft text.")
                 return
-            self._append_text_draft_inserted_text(choice.text)
+            self._append_text_draft_inserted_text(insert_text)
             self._finish_text_draft_multi_choice_insert(choice)
             return
         desktop = self._get_desktop()
@@ -6132,7 +6151,7 @@ button.improve-profile-chip {{
             if not self._prepare_multi_draft_selection_replacement(doc):
                 self._show_toast("Unable to replace the selected text.")
                 return
-            self._append_improve1_text(choice.text)
+            self._append_improve1_text(insert_text)
             if self._improve_insert_doc and self._improve_insert_cursor:
                 self._flush_pending_newlines(
                     self._improve_insert_doc,
@@ -6150,7 +6169,7 @@ button.improve-profile-chip {{
             if not self._prepare_improve_insertion(doc):
                 self._show_toast("Unable to prepare Improve Generated insertion point.")
                 return
-            self._append_improve1_text(choice.text)
+            self._append_improve1_text(insert_text)
             if self._improve_insert_doc and self._improve_insert_cursor:
                 self._flush_pending_newlines(
                     self._improve_insert_doc,
@@ -6167,7 +6186,7 @@ button.improve-profile-chip {{
         if not self._prepare_editor_insertion(doc):
             self._show_toast("Unable to prepare Writer insertion point.")
             return
-        self._append_editor_text(choice.text)
+        self._append_editor_text(insert_text)
         if self._editor_insert_doc and self._editor_insert_cursor:
             self._flush_pending_newlines(
                 self._editor_insert_doc,
