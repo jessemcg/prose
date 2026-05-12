@@ -387,6 +387,8 @@ PROFILE_BACKED_COMMAND_TITLES = {
     "improve-generated": "Improve Generated",
     "rephrase-generated": "Rephrase Generated",
     "improve-selected": "Improve Selected",
+    "choices-profile-1": "Choices Profile 1",
+    "choices-profile-2": "Choices Profile 2",
     "combine": "Combine Cites",
     "thesaurus": "Thesaurus",
     "shorten": "Shorten",
@@ -1163,6 +1165,8 @@ class RegenerateContext:
 
 @dataclass
 class MultiDraftChoice:
+    key: str
+    label: str
     profile: ModelProfile
     buffer: Gtk.TextBuffer
     text_view: Gtk.TextView
@@ -1171,6 +1175,17 @@ class MultiDraftChoice:
     text: str = ""
     complete: bool = False
     failed: bool = False
+
+
+@dataclass(frozen=True)
+class MultiDraftRequest:
+    key: str
+    label: str
+    profile: ModelProfile
+    payload_builder: Callable[[str, ModelProfile], dict[str, Any]]
+    prompt_text: str
+    default_prompt: str
+    request_title: str
 
 
 @dataclass
@@ -1263,18 +1278,18 @@ EDITOR_QUICK_ACTIONS = (
         supports_profiles=True,
     ),
     QuickActionDefinition(
-        key="improve-generated-choices",
-        label="Improve Generated Choices",
-        title="Improve Generated Choices",
-        action_name="improve-generated-choices",
-        description="Compare improved versions of the latest SpellingStyle output from all configured model profiles.",
+        key="generated-choices",
+        label="Generated Choices",
+        title="Generated Choices",
+        action_name="generated-choices",
+        description="Compare improve and rephrase outputs for the latest SpellingStyle output using the two Choices profiles.",
     ),
     QuickActionDefinition(
-        key="improve-selected-choices",
-        label="Improve Selected Choices",
-        title="Improve Selected Choices",
-        action_name="improve-selected-choices",
-        description="Compare improved versions of selected Writer text from all configured model profiles.",
+        key="selected-choices",
+        label="Selected Choices",
+        title="Selected Choices",
+        action_name="selected-choices",
+        description="Compare improve and rephrase outputs for selected Writer text using the two Choices profiles.",
     ),
     QuickActionDefinition(
         key="improve-selected",
@@ -1413,8 +1428,8 @@ EDITOR_SINGLE_DRAFT_ACTION_KEYS = frozenset(
     }
 )
 EDITOR_DRAFT_CHOICE_ACTION_KEYS = (
-    "improve-generated-choices",
-    "improve-selected-choices",
+    "generated-choices",
+    "selected-choices",
     "intro-choices",
     "intro-reply-choices",
     "conclusion-choices",
@@ -1478,11 +1493,11 @@ TEXT_DRAFT_QUICK_ACTIONS = (
         supports_profiles=True,
     ),
     QuickActionDefinition(
-        key="text-draft-improve-generated-choices",
-        label="Improve Generated Choices",
-        title="Improve Generated Choices",
-        action_name="text-draft-improve-generated-choices",
-        description="Compare improved versions of the latest Text Draft Original Output from all configured model profiles.",
+        key="text-draft-generated-choices",
+        label="Generated Choices",
+        title="Generated Choices",
+        action_name="text-draft-generated-choices",
+        description="Compare improve and rephrase outputs for the latest Text Draft Original Output using the two Choices profiles.",
     ),
     QuickActionDefinition(
         key="text-draft-rephrase-generated",
@@ -1501,11 +1516,11 @@ TEXT_DRAFT_QUICK_ACTIONS = (
         supports_profiles=True,
     ),
     QuickActionDefinition(
-        key="text-draft-improve-selected-choices",
-        label="Improve Selected Choices",
-        title="Improve Selected Choices",
-        action_name="text-draft-improve-selected-choices",
-        description="Compare improved versions of selected Text Draft text from all configured model profiles.",
+        key="text-draft-selected-choices",
+        label="Selected Choices",
+        title="Selected Choices",
+        action_name="text-draft-selected-choices",
+        description="Compare improve and rephrase outputs for selected Text Draft text using the two Choices profiles.",
     ),
     QuickActionDefinition(
         key="text-draft-keep-original",
@@ -3375,7 +3390,7 @@ class ProseWindow(Adw.ApplicationWindow):
         content.set_margin_start(10)
         content.set_margin_end(10)
 
-        title = Gtk.Label(label="Draft Choices", xalign=0)
+        title = Gtk.Label(label="Choices", xalign=0)
         title.add_css_class("caption")
         title.add_css_class("dim-label")
         content.append(title)
@@ -3395,8 +3410,8 @@ class ProseWindow(Adw.ApplicationWindow):
 
         popover.set_child(content)
 
-        draft_choices_button = Gtk.MenuButton(label="Draft Choices")
-        draft_choices_button.set_tooltip_text("Show introduction and conclusion choice generators")
+        draft_choices_button = Gtk.MenuButton(label="Choices")
+        draft_choices_button.set_tooltip_text("Show choice generators")
         draft_choices_button.set_popover(popover)
         self._apply_quick_action_button_classes(draft_choices_button)
         return draft_choices_button, action_buttons
@@ -3890,7 +3905,7 @@ button.improve-profile-chip {{
         _add_string_action("improve-generated", lambda nickname: self._on_improve_clicked(None, nickname))
         _add_string_action("rephrase-generated", lambda nickname: self._on_rephrase_generated_clicked(None, nickname))
         _add_string_action("text-draft-improve-generated", lambda nickname: self._on_text_draft_improve_clicked(None, nickname))
-        _add_action("text-draft-improve-generated-choices", lambda: self._on_text_draft_improve_generated_choices_clicked(None))
+        _add_action("text-draft-generated-choices", lambda: self._on_text_draft_generated_choices_clicked(None))
         _add_string_action(
             "text-draft-rephrase-generated",
             lambda nickname: self._on_text_draft_rephrase_generated_clicked(None, nickname),
@@ -3915,7 +3930,7 @@ button.improve-profile-chip {{
             "text-draft-improve-selected",
             lambda nickname: self._on_text_draft_improve_selected_clicked(None, nickname),
         )
-        _add_action("text-draft-improve-selected-choices", lambda: self._on_text_draft_improve_selected_choices_clicked(None))
+        _add_action("text-draft-selected-choices", lambda: self._on_text_draft_selected_choices_clicked(None))
         _add_action("keep-original", lambda: self._on_keep_original_clicked(None))
         _add_action("text-draft-keep-original", lambda: self._on_text_draft_keep_original_clicked(None))
         _add_action("text-draft-wrap-quotes", lambda: self._on_text_draft_wrap_quotes_clicked(None))
@@ -3928,8 +3943,8 @@ button.improve-profile-chip {{
         _add_string_action("transform-topic-sentence", lambda nickname: self._on_topic_sentence_clicked(None, nickname))
         _add_string_action("transform-introduction", lambda nickname: self._on_introduction_clicked(None, nickname))
         _add_action("transform-introduction-choices", lambda: self._on_introduction_choices_clicked(None))
-        _add_action("improve-generated-choices", lambda: self._on_improve_generated_choices_clicked(None))
-        _add_action("improve-selected-choices", lambda: self._on_improve_selected_choices_clicked(None))
+        _add_action("generated-choices", lambda: self._on_generated_choices_clicked(None))
+        _add_action("selected-choices", lambda: self._on_selected_choices_clicked(None))
         _add_string_action(
             "transform-introduction-reply",
             lambda nickname: self._on_introduction_reply_clicked(None, nickname),
@@ -4758,7 +4773,7 @@ button.improve-profile-chip {{
         thread = threading.Thread(target=self._run_text_draft_improve, args=(source_text, profile), daemon=True)
         thread.start()
 
-    def _on_text_draft_improve_generated_choices_clicked(self, _button: Gtk.Button | None) -> None:
+    def _on_text_draft_generated_choices_clicked(self, _button: Gtk.Button | None) -> None:
         if self._busy:
             return
         source_text = self._get_text_draft_original_output_text().strip()
@@ -4769,12 +4784,13 @@ button.improve-profile-chip {{
             self._show_toast("Unable to replace the last generated draft output.")
             return
         self._start_multi_draft_choices_for_text(
-            title="Text Draft Improve Generated Choices",
+            title="Text Draft Generated Choices",
             source_text=source_text,
             payload_builder=self._compose_improve_payload,
             prompt_text=self._improve1_settings.prompt,
             default_prompt=DEFAULT_IMPROVE_PROMPT,
-            request_title="Text Draft Improve Generated Choice",
+            request_title="Text Draft Generated Choice",
+            requests=self._build_improve_rephrase_choice_requests("Text Draft Generated Choice"),
         )
         self._multi_draft_insert_mode = "text-draft-replace-generated"
         self._multi_draft_replace_doc = None
@@ -4838,7 +4854,7 @@ button.improve-profile-chip {{
         thread = threading.Thread(target=self._run_text_draft_improve_selected, args=(source_text, profile), daemon=True)
         thread.start()
 
-    def _on_text_draft_improve_selected_choices_clicked(self, _button: Gtk.Button | None) -> None:
+    def _on_text_draft_selected_choices_clicked(self, _button: Gtk.Button | None) -> None:
         if self._busy:
             return
         source_text = self._get_text_draft_selected_text().strip()
@@ -4851,12 +4867,13 @@ button.improve-profile-chip {{
             return
         self._set_text_draft_original_output_text(source_text)
         self._start_multi_draft_choices_for_text(
-            title="Text Draft Improve Selected Choices",
+            title="Text Draft Selected Choices",
             source_text=source_text,
             payload_builder=self._compose_improve_payload,
             prompt_text=self._improve1_settings.prompt,
             default_prompt=DEFAULT_IMPROVE_PROMPT,
-            request_title="Text Draft Improve Selected Choice",
+            request_title="Text Draft Selected Choice",
+            requests=self._build_improve_rephrase_choice_requests("Text Draft Selected Choice"),
         )
         self._multi_draft_insert_mode = "text-draft-replace-selection"
         self._multi_draft_replace_doc = None
@@ -5703,7 +5720,7 @@ button.improve-profile-chip {{
             request_title="Conclusion No Issues Choice",
         )
 
-    def _on_improve_generated_choices_clicked(self, _button: Gtk.Button | None) -> None:
+    def _on_generated_choices_clicked(self, _button: Gtk.Button | None) -> None:
         if self._busy:
             return
         source_text = self._get_spelling_output_text().strip()
@@ -5722,19 +5739,20 @@ button.improve-profile-chip {{
             self._show_toast("Unable to select the last SpellingStyle range.")
             return
         self._start_multi_draft_choices_for_text(
-            title="Improve Generated Choices",
+            title="Generated Choices",
             source_text=source_text,
             payload_builder=self._compose_improve_payload,
             prompt_text=self._improve1_settings.prompt,
             default_prompt=DEFAULT_IMPROVE_PROMPT,
-            request_title="Improve Generated Choice",
+            request_title="Generated Choice",
+            requests=self._build_improve_rephrase_choice_requests("Generated Choice"),
         )
         self._multi_draft_insert_mode = "replace-generated"
         self._multi_draft_replace_doc = None
         self._multi_draft_replace_start = None
         self._multi_draft_replace_end = None
 
-    def _on_improve_selected_choices_clicked(self, _button: Gtk.Button | None) -> None:
+    def _on_selected_choices_clicked(self, _button: Gtk.Button | None) -> None:
         if self._busy:
             return
         desktop = self._get_desktop()
@@ -5757,12 +5775,13 @@ button.improve-profile-chip {{
             self._show_toast("Unable to remember the selected text range.")
             return
         self._start_multi_draft_choices_for_text(
-            title="Improve Selected Choices",
+            title="Selected Choices",
             source_text=source_text,
             payload_builder=self._compose_improve_payload,
             prompt_text=self._improve1_settings.prompt,
             default_prompt=DEFAULT_IMPROVE_PROMPT,
-            request_title="Improve Selected Choice",
+            request_title="Selected Choice",
+            requests=self._build_improve_rephrase_choice_requests("Selected Choice"),
         )
         self._multi_draft_insert_mode = "replace-selection"
         self._multi_draft_replace_doc = doc
@@ -5800,6 +5819,39 @@ button.improve-profile-chip {{
         self._status_label.set_label(f"Writing section conclusion with {profile.display_name()}…")
         thread = threading.Thread(target=self._run_concl_section, args=(source_text, profile), daemon=True)
         thread.start()
+
+    def _build_improve_rephrase_choice_requests(self, request_title: str) -> list[MultiDraftRequest]:
+        requests: list[MultiDraftRequest] = []
+        seen_profiles: set[str] = set()
+        for slot_key in ("choices-profile-1", "choices-profile-2"):
+            profile_key = self._editor_action_profile_defaults.get(slot_key)
+            profile = self._model_profile_by_key(profile_key or "")
+            if profile is None or profile.key in seen_profiles:
+                continue
+            seen_profiles.add(profile.key)
+            requests.extend(
+                [
+                    MultiDraftRequest(
+                        key=f"{profile.key}-improve",
+                        label=f"{profile.display_name()} Improve",
+                        profile=profile,
+                        payload_builder=self._compose_improve_payload,
+                        prompt_text=self._improve1_settings.prompt,
+                        default_prompt=DEFAULT_IMPROVE_PROMPT,
+                        request_title=f"{request_title} Improve",
+                    ),
+                    MultiDraftRequest(
+                        key=f"{profile.key}-rephrase",
+                        label=f"{profile.display_name()} Rephrase",
+                        profile=profile,
+                        payload_builder=self._compose_rephrase_generated_payload,
+                        prompt_text=self._improve2_settings.prompt,
+                        default_prompt=DEFAULT_IMPROVE2_PROMPT,
+                        request_title=f"{request_title} Rephrase",
+                    ),
+                ]
+            )
+        return requests
 
     def _start_multi_draft_choices(
         self,
@@ -5849,45 +5901,59 @@ button.improve-profile-chip {{
         prompt_text: str,
         default_prompt: str,
         request_title: str,
+        requests: list[MultiDraftRequest] | None = None,
     ) -> None:
         self._cancel_multi_draft_run()
         self._clear_pending_regenerate_context()
-        self._show_multi_draft_choices(title, self._model_profiles)
+        if requests is None:
+            requests = [
+                MultiDraftRequest(
+                    key=profile.key,
+                    label=profile.display_name(),
+                    profile=profile,
+                    payload_builder=payload_builder,
+                    prompt_text=prompt_text,
+                    default_prompt=default_prompt,
+                    request_title=request_title,
+                )
+                for profile in self._model_profiles
+            ]
+        if not requests:
+            self._status_label.set_label(f"{title}: choose two Choices profiles in Settings.")
+            self._show_toast("Choose Choices Profile 1 and Choices Profile 2 in Settings first.")
+            return
+        self._show_multi_draft_choices(title, requests)
         self._multi_draft_run_id += 1
         run_id = self._multi_draft_run_id
         cancel_event = threading.Event()
         self._multi_draft_cancel_event = cancel_event
-        configured_profiles = [profile for profile in self._model_profiles if profile.is_configured()]
-        for profile in self._model_profiles:
-            if not profile.is_configured():
-                self._mark_multi_draft_choice_unconfigured(run_id, profile.key)
-        if not configured_profiles:
+        configured_requests = [request for request in requests if request.profile.is_configured()]
+        for request in requests:
+            if not request.profile.is_configured():
+                self._mark_multi_draft_choice_unconfigured(run_id, request.key)
+        if not configured_requests:
             self._status_label.set_label(f"{title}: no configured model profiles.")
             self._show_toast("Configure at least one model profile in Settings first.")
             return
 
         with self._multi_draft_lock:
-            self._multi_draft_remaining = len(configured_profiles)
+            self._multi_draft_remaining = len(configured_requests)
         self._set_busy(True)
-        self._status_label.set_label(f"Writing {title.lower()} with {len(configured_profiles)} model profiles…")
-        for profile in configured_profiles:
+        self._status_label.set_label(f"Writing {title.lower()} with {len(configured_requests)} choices…")
+        for request in configured_requests:
             thread = threading.Thread(
                 target=self._run_multi_draft_choice,
                 args=(
                     run_id,
                     source_text,
-                    profile,
-                    payload_builder,
-                    prompt_text,
-                    default_prompt,
-                    request_title,
+                    request,
                     cancel_event,
                 ),
                 daemon=True,
             )
             thread.start()
 
-    def _show_multi_draft_choices(self, title: str, profiles: list[ModelProfile]) -> None:
+    def _show_multi_draft_choices(self, title: str, requests: list[MultiDraftRequest]) -> None:
         if self._multi_draft_window is not None:
             self._multi_draft_window.close()
             self._multi_draft_window = None
@@ -5924,7 +5990,8 @@ button.improve-profile-chip {{
         self._multi_draft_window = window
         self._multi_draft_grid = grid
 
-        for index, profile in enumerate(profiles):
+        for index, request in enumerate(requests):
+            profile = request.profile
             choice_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
             choice_box.set_hexpand(True)
             choice_box.set_vexpand(True)
@@ -5932,7 +5999,7 @@ button.improve-profile-chip {{
 
             header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
             header.set_hexpand(True)
-            label = Gtk.Label(label=self._profile_slot_label(profile), xalign=0)
+            label = Gtk.Label(label=request.label, xalign=0)
             label.add_css_class("heading")
             label.set_tooltip_text(profile.display_name())
             header.append(label)
@@ -5946,7 +6013,7 @@ button.improve-profile-chip {{
             insert_button.add_css_class("flat")
             insert_button.add_css_class("suggested-action")
             insert_button.set_sensitive(False)
-            insert_button.connect("clicked", self._on_multi_draft_insert_clicked, profile.key)
+            insert_button.connect("clicked", self._on_multi_draft_insert_clicked, request.key)
             header.append(insert_button)
             choice_box.append(header)
 
@@ -5973,7 +6040,9 @@ button.improve-profile-chip {{
 
             grid.attach(choice_box, index % 2, index // 2, 1, 1)
             self._multi_draft_insert_buttons.append(insert_button)
-            self._multi_draft_choices[profile.key] = MultiDraftChoice(
+            self._multi_draft_choices[request.key] = MultiDraftChoice(
+                key=request.key,
+                label=request.label,
                 profile=profile,
                 buffer=buffer,
                 text_view=text_view,
@@ -6061,20 +6130,17 @@ button.improve-profile-chip {{
         self,
         run_id: int,
         source_text: str,
-        profile: ModelProfile,
-        payload_builder: Callable[[str, ModelProfile], dict[str, Any]],
-        prompt_text: str,
-        default_prompt: str,
-        request_title: str,
+        request: MultiDraftRequest,
         cancel_event: threading.Event,
     ) -> None:
         error = None
+        profile = request.profile
         try:
-            title = f"{request_title} - {profile.display_name()}"
+            title = f"{request.request_title} - {request.label}"
             if self._is_gemini_generate_content_url(profile.api_url):
                 if cancel_event.is_set():
                     return
-                prompt = _expand_shared_prompt_parts(prompt_text or default_prompt)
+                prompt = _expand_shared_prompt_parts(request.prompt_text or request.default_prompt)
                 combined = f"{prompt}\n\n{source_text}" if prompt else source_text
                 output = self._call_gemini_generate_content(
                     profile.api_url,
@@ -6083,9 +6149,9 @@ button.improve-profile-chip {{
                     request_title=title,
                 )
                 if not cancel_event.is_set():
-                    GLib.idle_add(self._append_multi_draft_choice_text, run_id, profile.key, output)
+                    GLib.idle_add(self._append_multi_draft_choice_text, run_id, request.key, output)
             else:
-                payload = payload_builder(source_text, profile)
+                payload = request.payload_builder(source_text, profile)
                 for chunk in self._stream_custom(
                     payload,
                     profile.api_url,
@@ -6094,11 +6160,11 @@ button.improve-profile-chip {{
                 ):
                     if cancel_event.is_set():
                         return
-                    GLib.idle_add(self._append_multi_draft_choice_text, run_id, profile.key, chunk)
+                    GLib.idle_add(self._append_multi_draft_choice_text, run_id, request.key, chunk)
         except Exception as exc:  # noqa: BLE001
             error = str(exc)
         if not cancel_event.is_set():
-            GLib.idle_add(self._finish_multi_draft_choice, run_id, profile.key, error)
+            GLib.idle_add(self._finish_multi_draft_choice, run_id, request.key, error)
 
     def _cancel_multi_draft_run(self) -> None:
         cancel_event = self._multi_draft_cancel_event
@@ -6162,7 +6228,7 @@ button.improve-profile-chip {{
             self._capture_improve1_range_end()
             for insert_button in self._multi_draft_insert_buttons:
                 insert_button.set_sensitive(False)
-            self._status_label.set_label(f"Inserted {choice.profile.display_name()} draft.")
+            self._status_label.set_label(f"Inserted {choice.label} draft.")
             self._close_multi_draft_window_after_insert()
             return
         if self._multi_draft_insert_mode == "replace-generated":
@@ -6180,7 +6246,7 @@ button.improve-profile-chip {{
             self._capture_improve1_range_end()
             for insert_button in self._multi_draft_insert_buttons:
                 insert_button.set_sensitive(False)
-            self._status_label.set_label(f"Inserted {choice.profile.display_name()} draft.")
+            self._status_label.set_label(f"Inserted {choice.label} draft.")
             self._close_multi_draft_window_after_insert()
             return
         if not self._prepare_editor_insertion(doc):
@@ -6195,7 +6261,7 @@ button.improve-profile-chip {{
             )
             self._ensure_single_trailing_space(self._editor_insert_doc, self._editor_insert_cursor)
         self._capture_spellingstyle_range_end()
-        self._status_label.set_label(f"Inserted {choice.profile.display_name()} draft.")
+        self._status_label.set_label(f"Inserted {choice.label} draft.")
         self._close_multi_draft_window_after_insert()
 
     def _finish_text_draft_multi_choice_insert(self, choice: MultiDraftChoice) -> None:
@@ -6205,7 +6271,7 @@ button.improve-profile-chip {{
         self._text_draft_temp_dirty = True
         for insert_button in self._multi_draft_insert_buttons:
             insert_button.set_sensitive(False)
-        self._status_label.set_label(f"Inserted {choice.profile.display_name()} draft.")
+        self._status_label.set_label(f"Inserted {choice.label} draft.")
         self._close_multi_draft_window_after_insert()
 
     def _close_multi_draft_window_after_insert(self) -> None:
@@ -12951,10 +13017,16 @@ class SettingsWindow(Adw.ApplicationWindow):
             profile_keys = (key,)
             if key == "improve-generated":
                 caption_text = (
-                    "Choose the default profiles used by Improve Generated and Improve Selected. "
-                    "Both commands share the Improve prompt below."
+                    "Choose the default profiles used by Improve Generated, Improve Selected, and the Choices commands. "
+                    "Generated Choices and Selected Choices use the two Choices profiles with the Improve prompt below "
+                    "and the Rephrase prompt."
                 )
-                profile_keys = ("improve-generated", "improve-selected")
+                profile_keys = (
+                    "improve-generated",
+                    "improve-selected",
+                    "choices-profile-1",
+                    "choices-profile-2",
+                )
 
             caption = Gtk.Label(label=caption_text, xalign=0)
             caption.add_css_class("caption")
