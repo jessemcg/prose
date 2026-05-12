@@ -1262,11 +1262,18 @@ EDITOR_QUICK_ACTIONS = (
         supports_profiles=True,
     ),
     QuickActionDefinition(
-        key="rephrase-selected-choices",
-        label="Rephrase Selected Choices",
-        title="Rephrase Selected Choices",
-        action_name="rephrase-selected-choices",
-        description="Compare rephrased versions of selected Writer text from all configured model profiles.",
+        key="improve-generated-choices",
+        label="Improve Generated Choices",
+        title="Improve Generated Choices",
+        action_name="improve-generated-choices",
+        description="Compare improved versions of the latest SpellingStyle output from all configured model profiles.",
+    ),
+    QuickActionDefinition(
+        key="improve-selected-choices",
+        label="Improve Selected Choices",
+        title="Improve Selected Choices",
+        action_name="improve-selected-choices",
+        description="Compare improved versions of selected Writer text from all configured model profiles.",
     ),
     QuickActionDefinition(
         key="improve-selected",
@@ -1405,7 +1412,8 @@ EDITOR_SINGLE_DRAFT_ACTION_KEYS = frozenset(
     }
 )
 EDITOR_DRAFT_CHOICE_ACTION_KEYS = (
-    "rephrase-selected-choices",
+    "improve-generated-choices",
+    "improve-selected-choices",
     "intro-choices",
     "intro-reply-choices",
     "conclusion-choices",
@@ -1469,6 +1477,13 @@ TEXT_DRAFT_QUICK_ACTIONS = (
         supports_profiles=True,
     ),
     QuickActionDefinition(
+        key="text-draft-improve-generated-choices",
+        label="Improve Generated Choices",
+        title="Improve Generated Choices",
+        action_name="text-draft-improve-generated-choices",
+        description="Compare improved versions of the latest Text Draft Original Output from all configured model profiles.",
+    ),
+    QuickActionDefinition(
         key="text-draft-rephrase-generated",
         label="Rephrase Generated",
         title="Rephrase Generated",
@@ -1483,6 +1498,13 @@ TEXT_DRAFT_QUICK_ACTIONS = (
         action_name="text-draft-improve-selected",
         description="Rewrite selected text in the Text Draft buffer using the selected model profile.",
         supports_profiles=True,
+    ),
+    QuickActionDefinition(
+        key="text-draft-improve-selected-choices",
+        label="Improve Selected Choices",
+        title="Improve Selected Choices",
+        action_name="text-draft-improve-selected-choices",
+        description="Compare improved versions of selected Text Draft text from all configured model profiles.",
     ),
     QuickActionDefinition(
         key="text-draft-keep-original",
@@ -2555,6 +2577,7 @@ class ProseWindow(Adw.ApplicationWindow):
         self._multi_draft_lock = threading.Lock()
         self._multi_draft_run_id = 0
         self._multi_draft_remaining = 0
+        self._multi_draft_cancel_event: threading.Event | None = None
         self._multi_draft_insert_buttons: list[Gtk.Button] = []
         self._multi_draft_insert_mode = "editor"
         self._multi_draft_replace_doc: XTextDocument | None = None  # type: ignore[type-arg]
@@ -3866,6 +3889,7 @@ button.improve-profile-chip {{
         _add_string_action("improve-generated", lambda nickname: self._on_improve_clicked(None, nickname))
         _add_string_action("rephrase-generated", lambda nickname: self._on_rephrase_generated_clicked(None, nickname))
         _add_string_action("text-draft-improve-generated", lambda nickname: self._on_text_draft_improve_clicked(None, nickname))
+        _add_action("text-draft-improve-generated-choices", lambda: self._on_text_draft_improve_generated_choices_clicked(None))
         _add_string_action(
             "text-draft-rephrase-generated",
             lambda nickname: self._on_text_draft_rephrase_generated_clicked(None, nickname),
@@ -3890,6 +3914,7 @@ button.improve-profile-chip {{
             "text-draft-improve-selected",
             lambda nickname: self._on_text_draft_improve_selected_clicked(None, nickname),
         )
+        _add_action("text-draft-improve-selected-choices", lambda: self._on_text_draft_improve_selected_choices_clicked(None))
         _add_action("keep-original", lambda: self._on_keep_original_clicked(None))
         _add_action("text-draft-keep-original", lambda: self._on_text_draft_keep_original_clicked(None))
         _add_action("text-draft-wrap-quotes", lambda: self._on_text_draft_wrap_quotes_clicked(None))
@@ -3902,7 +3927,8 @@ button.improve-profile-chip {{
         _add_string_action("transform-topic-sentence", lambda nickname: self._on_topic_sentence_clicked(None, nickname))
         _add_string_action("transform-introduction", lambda nickname: self._on_introduction_clicked(None, nickname))
         _add_action("transform-introduction-choices", lambda: self._on_introduction_choices_clicked(None))
-        _add_action("rephrase-selected-choices", lambda: self._on_rephrase_selected_choices_clicked(None))
+        _add_action("improve-generated-choices", lambda: self._on_improve_generated_choices_clicked(None))
+        _add_action("improve-selected-choices", lambda: self._on_improve_selected_choices_clicked(None))
         _add_string_action(
             "transform-introduction-reply",
             lambda nickname: self._on_introduction_reply_clicked(None, nickname),
@@ -4731,6 +4757,29 @@ button.improve-profile-chip {{
         thread = threading.Thread(target=self._run_text_draft_improve, args=(source_text, profile), daemon=True)
         thread.start()
 
+    def _on_text_draft_improve_generated_choices_clicked(self, _button: Gtk.Button | None) -> None:
+        if self._busy:
+            return
+        source_text = self._get_text_draft_original_output_text().strip()
+        if not source_text:
+            self._show_toast("Original Output is empty.")
+            return
+        if self._text_draft_buffer is None or self._text_draft_insert_start_mark is None or self._text_draft_insert_end_mark is None:
+            self._show_toast("Unable to replace the last generated draft output.")
+            return
+        self._start_multi_draft_choices_for_text(
+            title="Text Draft Improve Generated Choices",
+            source_text=source_text,
+            payload_builder=self._compose_improve_payload,
+            prompt_text=self._improve1_settings.prompt,
+            default_prompt=DEFAULT_IMPROVE_PROMPT,
+            request_title="Text Draft Improve Generated Choice",
+        )
+        self._multi_draft_insert_mode = "text-draft-replace-generated"
+        self._multi_draft_replace_doc = None
+        self._multi_draft_replace_start = None
+        self._multi_draft_replace_end = None
+
     def _on_text_draft_rephrase_generated_clicked(
         self,
         _button: Gtk.Button | None,
@@ -4787,6 +4836,31 @@ button.improve-profile-chip {{
         self._status_label.set_label(f"Improving Draft selection with {profile.display_name()}…")
         thread = threading.Thread(target=self._run_text_draft_improve_selected, args=(source_text, profile), daemon=True)
         thread.start()
+
+    def _on_text_draft_improve_selected_choices_clicked(self, _button: Gtk.Button | None) -> None:
+        if self._busy:
+            return
+        source_text = self._get_text_draft_selected_text().strip()
+        if not source_text:
+            self._show_toast("Select text in the Draft box first.")
+            return
+        offsets = self._get_text_draft_selection_offsets()
+        if offsets is None:
+            self._show_toast("Unable to remember the Draft selection.")
+            return
+        self._set_text_draft_original_output_text(source_text)
+        self._start_multi_draft_choices_for_text(
+            title="Text Draft Improve Selected Choices",
+            source_text=source_text,
+            payload_builder=self._compose_improve_payload,
+            prompt_text=self._improve1_settings.prompt,
+            default_prompt=DEFAULT_IMPROVE_PROMPT,
+            request_title="Text Draft Improve Selected Choice",
+        )
+        self._multi_draft_insert_mode = "text-draft-replace-selection"
+        self._multi_draft_replace_doc = None
+        self._multi_draft_replace_start = offsets[0]
+        self._multi_draft_replace_end = offsets[1]
 
     def _on_text_draft_keep_original_clicked(self, _button: Gtk.Button | None) -> None:
         if self._busy:
@@ -5628,7 +5702,38 @@ button.improve-profile-chip {{
             request_title="Conclusion No Issues Choice",
         )
 
-    def _on_rephrase_selected_choices_clicked(self, _button: Gtk.Button | None) -> None:
+    def _on_improve_generated_choices_clicked(self, _button: Gtk.Button | None) -> None:
+        if self._busy:
+            return
+        source_text = self._get_spelling_output_text().strip()
+        if not source_text:
+            self._show_toast("SpellingStyle output is empty.")
+            return
+        desktop = self._get_desktop()
+        if not desktop:
+            self._show_toast("Unable to reach LibreOffice listener. Is the service running?")
+            return
+        doc = self._get_active_writer(desktop)
+        if not doc:
+            self._show_toast("Open a Writer document (File → Launch Writer).")
+            return
+        if not self._select_spellingstyle_range(doc):
+            self._show_toast("Unable to select the last SpellingStyle range.")
+            return
+        self._start_multi_draft_choices_for_text(
+            title="Improve Generated Choices",
+            source_text=source_text,
+            payload_builder=self._compose_improve_payload,
+            prompt_text=self._improve1_settings.prompt,
+            default_prompt=DEFAULT_IMPROVE_PROMPT,
+            request_title="Improve Generated Choice",
+        )
+        self._multi_draft_insert_mode = "replace-generated"
+        self._multi_draft_replace_doc = None
+        self._multi_draft_replace_start = None
+        self._multi_draft_replace_end = None
+
+    def _on_improve_selected_choices_clicked(self, _button: Gtk.Button | None) -> None:
         if self._busy:
             return
         desktop = self._get_desktop()
@@ -5651,12 +5756,12 @@ button.improve-profile-chip {{
             self._show_toast("Unable to remember the selected text range.")
             return
         self._start_multi_draft_choices_for_text(
-            title="Rephrase Selected Choices",
+            title="Improve Selected Choices",
             source_text=source_text,
-            payload_builder=self._compose_rephrase_generated_payload,
-            prompt_text=self._improve2_settings.prompt,
-            default_prompt=DEFAULT_IMPROVE2_PROMPT,
-            request_title="Rephrase Selected Choice",
+            payload_builder=self._compose_improve_payload,
+            prompt_text=self._improve1_settings.prompt,
+            default_prompt=DEFAULT_IMPROVE_PROMPT,
+            request_title="Improve Selected Choice",
         )
         self._multi_draft_insert_mode = "replace-selection"
         self._multi_draft_replace_doc = doc
@@ -5744,11 +5849,13 @@ button.improve-profile-chip {{
         default_prompt: str,
         request_title: str,
     ) -> None:
-        self._multi_draft_run_id += 1
-        run_id = self._multi_draft_run_id
+        self._cancel_multi_draft_run()
         self._clear_pending_regenerate_context()
         self._show_multi_draft_choices(title, self._model_profiles)
-        self._set_spelling_output_text(f"{title} opened in a separate review window.")
+        self._multi_draft_run_id += 1
+        run_id = self._multi_draft_run_id
+        cancel_event = threading.Event()
+        self._multi_draft_cancel_event = cancel_event
         configured_profiles = [profile for profile in self._model_profiles if profile.is_configured()]
         for profile in self._model_profiles:
             if not profile.is_configured():
@@ -5773,6 +5880,7 @@ button.improve-profile-chip {{
                     prompt_text,
                     default_prompt,
                     request_title,
+                    cancel_event,
                 ),
                 daemon=True,
             )
@@ -5874,6 +5982,7 @@ button.improve-profile-chip {{
 
     def _on_multi_draft_window_closed(self, window: Adw.ApplicationWindow, *_args: object) -> bool:
         if self._multi_draft_window is window:
+            self._cancel_multi_draft_run()
             self._multi_draft_window = None
             self._multi_draft_grid = None
             self._multi_draft_insert_mode = "editor"
@@ -5947,11 +6056,14 @@ button.improve-profile-chip {{
         prompt_text: str,
         default_prompt: str,
         request_title: str,
+        cancel_event: threading.Event,
     ) -> None:
         error = None
         try:
             title = f"{request_title} - {profile.display_name()}"
             if self._is_gemini_generate_content_url(profile.api_url):
+                if cancel_event.is_set():
+                    return
                 prompt = _expand_shared_prompt_parts(prompt_text or default_prompt)
                 combined = f"{prompt}\n\n{source_text}" if prompt else source_text
                 output = self._call_gemini_generate_content(
@@ -5960,7 +6072,8 @@ button.improve-profile-chip {{
                     combined,
                     request_title=title,
                 )
-                GLib.idle_add(self._append_multi_draft_choice_text, run_id, profile.key, output)
+                if not cancel_event.is_set():
+                    GLib.idle_add(self._append_multi_draft_choice_text, run_id, profile.key, output)
             else:
                 payload = payload_builder(source_text, profile)
                 for chunk in self._stream_custom(
@@ -5969,14 +6082,43 @@ button.improve-profile-chip {{
                     profile.api_key,
                     request_title=title,
                 ):
+                    if cancel_event.is_set():
+                        return
                     GLib.idle_add(self._append_multi_draft_choice_text, run_id, profile.key, chunk)
         except Exception as exc:  # noqa: BLE001
             error = str(exc)
-        GLib.idle_add(self._finish_multi_draft_choice, run_id, profile.key, error)
+        if not cancel_event.is_set():
+            GLib.idle_add(self._finish_multi_draft_choice, run_id, profile.key, error)
+
+    def _cancel_multi_draft_run(self) -> None:
+        cancel_event = self._multi_draft_cancel_event
+        if cancel_event is not None:
+            cancel_event.set()
+            self._multi_draft_cancel_event = None
+        self._multi_draft_run_id += 1
+        with self._multi_draft_lock:
+            self._multi_draft_remaining = 0
+        self._set_busy(False)
+        for insert_button in self._multi_draft_insert_buttons:
+            insert_button.set_sensitive(False)
 
     def _on_multi_draft_insert_clicked(self, _button: Gtk.Button, profile_key: str) -> None:
         choice = self._multi_draft_choices.get(profile_key)
         if choice is None or not choice.text.strip():
+            return
+        if self._multi_draft_insert_mode == "text-draft-replace-generated":
+            if not self._prepare_text_draft_generated_replace():
+                self._show_toast("Unable to replace the last generated draft output.")
+                return
+            self._append_text_draft_inserted_text(choice.text)
+            self._finish_text_draft_multi_choice_insert(choice)
+            return
+        if self._multi_draft_insert_mode == "text-draft-replace-selection":
+            if not self._prepare_text_draft_saved_selection_replace():
+                self._show_toast("Unable to replace the selected Draft text.")
+                return
+            self._append_text_draft_inserted_text(choice.text)
+            self._finish_text_draft_multi_choice_insert(choice)
             return
         desktop = self._get_desktop()
         if not desktop:
@@ -5989,6 +6131,24 @@ button.improve-profile-chip {{
         if self._multi_draft_insert_mode == "replace-selection":
             if not self._prepare_multi_draft_selection_replacement(doc):
                 self._show_toast("Unable to replace the selected text.")
+                return
+            self._append_improve1_text(choice.text)
+            if self._improve_insert_doc and self._improve_insert_cursor:
+                self._flush_pending_newlines(
+                    self._improve_insert_doc,
+                    self._improve_insert_cursor,
+                    "_improve_pending_newlines",
+                )
+                self._ensure_single_trailing_space(self._improve_insert_doc, self._improve_insert_cursor)
+            self._capture_improve1_range_end()
+            for insert_button in self._multi_draft_insert_buttons:
+                insert_button.set_sensitive(False)
+            self._status_label.set_label(f"Inserted {choice.profile.display_name()} draft.")
+            self._close_multi_draft_window_after_insert()
+            return
+        if self._multi_draft_insert_mode == "replace-generated":
+            if not self._prepare_improve_insertion(doc):
+                self._show_toast("Unable to prepare Improve Generated insertion point.")
                 return
             self._append_improve1_text(choice.text)
             if self._improve_insert_doc and self._improve_insert_cursor:
@@ -6019,7 +6179,18 @@ button.improve-profile-chip {{
         self._status_label.set_label(f"Inserted {choice.profile.display_name()} draft.")
         self._close_multi_draft_window_after_insert()
 
+    def _finish_text_draft_multi_choice_insert(self, choice: MultiDraftChoice) -> None:
+        self._flush_text_draft_pending_newlines(is_original_output=False)
+        self._ensure_single_text_draft_trailing_space()
+        self._focus_text_draft_insert_end()
+        self._text_draft_temp_dirty = True
+        for insert_button in self._multi_draft_insert_buttons:
+            insert_button.set_sensitive(False)
+        self._status_label.set_label(f"Inserted {choice.profile.display_name()} draft.")
+        self._close_multi_draft_window_after_insert()
+
     def _close_multi_draft_window_after_insert(self) -> None:
+        self._cancel_multi_draft_run()
         window = self._multi_draft_window
         if window is not None:
             window.close()
@@ -8272,6 +8443,19 @@ button.improve-profile-chip {{
             start, end = selection
         return buffer.get_text(start, end, True)
 
+    def _get_text_draft_selection_offsets(self) -> tuple[int, int] | None:
+        buffer = self._text_draft_buffer
+        if buffer is None or not buffer.get_has_selection():
+            return None
+        selection = buffer.get_selection_bounds()
+        if len(selection) == 3:
+            has_selection, start_iter, end_iter = selection
+            if not has_selection:
+                return None
+        else:
+            start_iter, end_iter = selection
+        return (start_iter.get_offset(), end_iter.get_offset())
+
     def _prepare_text_draft_selection_replace(self) -> bool:
         buffer = self._text_draft_buffer
         if buffer is None or not buffer.get_has_selection():
@@ -8290,6 +8474,27 @@ button.improve-profile-chip {{
         self._text_draft_pending_newlines = 0
         self._text_draft_temp_dirty = True
         return True
+
+    def _prepare_text_draft_saved_selection_replace(self) -> bool:
+        buffer = self._text_draft_buffer
+        start_offset = self._multi_draft_replace_start
+        end_offset = self._multi_draft_replace_end
+        if buffer is None or not isinstance(start_offset, int) or not isinstance(end_offset, int):
+            return False
+        try:
+            char_count = buffer.get_char_count()
+            start_offset = max(0, min(start_offset, char_count))
+            end_offset = max(start_offset, min(end_offset, char_count))
+            start_iter = buffer.get_iter_at_offset(start_offset)
+            end_iter = buffer.get_iter_at_offset(end_offset)
+            buffer.delete(start_iter, end_iter)
+            insert_iter = buffer.get_iter_at_offset(start_offset)
+            self._set_text_draft_insert_marks(insert_iter)
+            self._text_draft_pending_newlines = 0
+            self._text_draft_temp_dirty = True
+            return True
+        except Exception:
+            return False
 
     def _append_text_draft_inserted_text(self, text: str) -> bool:
         if not text:
