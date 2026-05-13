@@ -1458,6 +1458,7 @@ def _editor_command_items() -> list[tuple[str, str, str | None, str, bool]]:
         ("Direct Input", "direct-input", None, "Insert the source file text into Writer.", False),
         ("Input RT", "input-rt", None, "Insert a formatted RT citation from the source file.", False),
         ("Input CT", "input-ct", None, "Insert a formatted CT citation from the source file.", False),
+        ("Speech Find", "speech-find", None, "Find the source file speech text in Writer.", False),
         (
             "Direct Input No Trailing Space",
             "direct-input-no-trailing-space",
@@ -3921,6 +3922,7 @@ button.improve-profile-chip {{
         _add_string_action("paste-clean-italics", self._on_paste_clean_italics_action)
         _add_action("input-rt", lambda: self._on_input_rt_clicked(None))
         _add_action("input-ct", lambda: self._on_input_ct_clicked(None))
+        _add_action("speech-find", lambda: self._on_speech_find_clicked(None))
         _add_action(
             "direct-input-no-trailing-space",
             lambda: self._on_direct_input_no_trailing_space_clicked(None),
@@ -4754,6 +4756,48 @@ button.improve-profile-chip {{
 
     def _on_direct_input_no_trailing_space_clicked(self, _button: Gtk.Button) -> None:
         self._run_direct_input(add_trailing_space=False)
+
+    def _on_speech_find_clicked(self, _button: Gtk.Button | None) -> None:
+        if self._busy:
+            return
+        source_text = self._read_editor_source_text()
+        if source_text is None:
+            return
+        query = self._normalize_speech_find_query(source_text)
+        if not query:
+            self._show_toast("Source file has no searchable speech text.")
+            return
+        desktop = self._get_desktop()
+        if not desktop:
+            self._show_toast("Unable to reach LibreOffice listener. Is the service running?")
+            return
+        doc = self._get_active_writer(desktop)
+        if not doc:
+            self._show_toast("Open a Writer document (File → Launch Writer).")
+            return
+        self._ensure_writer_frame_active(desktop, doc)
+        found = self._find_speech_query_range(doc, query)
+        if not found:
+            self._status_label.set_label(f'No match found for "{query}".')
+            self._show_toast("No matching text found in Writer.")
+            return
+        try:
+            doc.getCurrentController().select(found)
+        except Exception:
+            self._show_toast("Found text, but unable to select it in Writer.")
+            return
+        self._status_label.set_label(f'Found "{query}".')
+
+    def _normalize_speech_find_query(self, source_text: str) -> str:
+        normalized = (
+            source_text.replace("\u00a0", " ")
+            .replace("\u202f", " ")
+            .replace("\u200a", " ")
+            .replace("\u200b", "")
+            .replace("\u3000", " ")
+        )
+        words = re.findall(r"[^\W_]+", normalized.casefold(), flags=re.UNICODE)
+        return " ".join(words).strip()
 
     def _on_paste_clean_italics_action(self, source_path_raw: str) -> None:
         if self._busy:
@@ -7838,6 +7882,32 @@ button.improve-profile-chip {{
             search.SearchRegularExpression = True
             search.SearchCaseSensitive = False  # type: ignore[attr-defined]
             search.SearchWords = False  # type: ignore[attr-defined]
+            return doc.findFirst(search)
+        except Exception:
+            return None
+
+    def _find_speech_query_range(self, doc: XTextDocument, query: str):  # type: ignore[type-arg]
+        words = query.split()
+        if not words:
+            return None
+        separator = r"[[:space:][:punct:]“”‘’–—]+"
+        pattern = separator.join(re.escape(word) for word in words)
+        try:
+            search = doc.createSearchDescriptor()
+            search.SearchString = pattern
+            search.SearchRegularExpression = True
+            search.SearchCaseSensitive = False  # type: ignore[attr-defined]
+            search.SearchWords = False  # type: ignore[attr-defined]
+
+            controller = doc.getCurrentController()
+            view_cursor = controller.getViewCursor()
+            start_range = view_cursor.getEnd()
+            try:
+                found = doc.findNext(start_range, search)
+            except Exception:
+                found = None
+            if found:
+                return found
             return doc.findFirst(search)
         except Exception:
             return None
