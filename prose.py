@@ -1172,6 +1172,7 @@ class MultiDraftChoice:
     text_view: Gtk.TextView
     status_label: Gtk.Label
     insert_button: Gtk.Button
+    variant: str | None = None
     text: str = ""
     complete: bool = False
     failed: bool = False
@@ -1186,6 +1187,7 @@ class MultiDraftRequest:
     prompt_text: str
     default_prompt: str
     request_title: str
+    variant: str | None = None
 
 
 @dataclass
@@ -3625,6 +3627,30 @@ textview.spelling-output-view.view border {{
   background-color: alpha(@window_fg_color, 0.05);
   padding: 10px;
 }}
+.multi-draft-choice-improve {{
+  background-color: rgba(53, 132, 228, 0.08);
+}}
+.multi-draft-choice-rephrase {{
+  background-color: rgba(200, 136, 0, 0.08);
+}}
+.multi-draft-column-header {{
+  font-weight: 700;
+  color: @window_fg_color;
+}}
+.multi-draft-variant-badge {{
+  border-radius: 7px;
+  padding: 2px 7px;
+  font-size: 0.78rem;
+  font-weight: 700;
+}}
+.multi-draft-variant-badge-improve {{
+  background-color: rgba(53, 132, 228, 0.18);
+  color: @window_fg_color;
+}}
+.multi-draft-variant-badge-rephrase {{
+  background-color: rgba(200, 136, 0, 0.18);
+  color: @window_fg_color;
+}}
 .multi-draft-choice-output {{
   border-radius: {SPELLING_OUTPUT_CORNER_RADIUS_PX}px;
   background-color: alpha(@window_fg_color, 0.06);
@@ -3892,6 +3918,7 @@ button.improve-profile-chip {{
         _add_action("choose-source-file", lambda: self._on_choose_source_file(None))
         _add_action("editor-commands", lambda: self._on_open_editor_commands())
         _add_action("direct-input", lambda: self._on_direct_input_clicked(None))
+        _add_string_action("paste-clean-italics", self._on_paste_clean_italics_action)
         _add_action("input-rt", lambda: self._on_input_rt_clicked(None))
         _add_action("input-ct", lambda: self._on_input_ct_clicked(None))
         _add_action(
@@ -4518,6 +4545,7 @@ button.improve-profile-chip {{
         status_text: str,
         completed_text: str,
         add_trailing_space: bool,
+        apply_case_citation_italics: bool = False,
     ) -> None:
         if not source_text.strip():
             self._show_toast("Source file is empty.")
@@ -4544,6 +4572,8 @@ button.improve-profile-chip {{
                 self._editor_insert_cursor,
                 "_editor_pending_newlines",
             )
+            if apply_case_citation_italics:
+                self._apply_case_citation_italics_to_recent_editor_insert(source_text)
             if add_trailing_space:
                 self._ensure_single_trailing_space(self._editor_insert_doc, self._editor_insert_cursor)
             else:
@@ -4724,6 +4754,23 @@ button.improve-profile-chip {{
 
     def _on_direct_input_no_trailing_space_clicked(self, _button: Gtk.Button) -> None:
         self._run_direct_input(add_trailing_space=False)
+
+    def _on_paste_clean_italics_action(self, source_path_raw: str) -> None:
+        if self._busy:
+            return
+        source_path = Path(source_path_raw).expanduser()
+        try:
+            source_text = source_path.read_text(encoding="utf-8")
+        except OSError as exc:
+            self._show_toast(f"Unable to read paste text: {exc}")
+            return
+        self._insert_text_into_writer(
+            source_text,
+            status_text="Pasting cleaned text...",
+            completed_text="Cleaned text pasted.",
+            add_trailing_space=True,
+            apply_case_citation_italics=True,
+        )
 
     def _on_text_draft_spellingstyle_clicked(self, _button: Gtk.Button | None) -> None:
         if self._busy:
@@ -5833,21 +5880,23 @@ button.improve-profile-chip {{
                 [
                     MultiDraftRequest(
                         key=f"{profile.key}-improve",
-                        label=f"{profile.display_name()} Improve",
+                        label=profile.display_name(),
                         profile=profile,
                         payload_builder=self._compose_improve_payload,
                         prompt_text=self._improve1_settings.prompt,
                         default_prompt=DEFAULT_IMPROVE_PROMPT,
                         request_title=f"{request_title} Improve",
+                        variant="improve",
                     ),
                     MultiDraftRequest(
                         key=f"{profile.key}-rephrase",
-                        label=f"{profile.display_name()} Rephrase",
+                        label=profile.display_name(),
                         profile=profile,
                         payload_builder=self._compose_rephrase_generated_payload,
                         prompt_text=self._improve2_settings.prompt,
                         default_prompt=DEFAULT_IMPROVE2_PROMPT,
                         request_title=f"{request_title} Rephrase",
+                        variant="rephrase",
                     ),
                 ]
             )
@@ -5963,6 +6012,9 @@ button.improve-profile-chip {{
 
         self._multi_draft_choices = {}
         self._multi_draft_insert_buttons = []
+        paired_prompt_choices = bool(requests) and all(
+            request.variant in {"improve", "rephrase"} for request in requests
+        )
 
         window = Adw.ApplicationWindow(application=app, title=title, default_width=1280, default_height=900)
         window.set_transient_for(self)
@@ -5977,7 +6029,7 @@ button.improve-profile-chip {{
         grid.set_hexpand(True)
         grid.set_vexpand(True)
         grid.set_column_homogeneous(True)
-        grid.set_row_homogeneous(True)
+        grid.set_row_homogeneous(not paired_prompt_choices)
         grid.set_column_spacing(10)
         grid.set_row_spacing(10)
         grid.set_margin_top(12)
@@ -5990,15 +6042,34 @@ button.improve-profile-chip {{
         self._multi_draft_window = window
         self._multi_draft_grid = grid
 
+        if paired_prompt_choices:
+            improve_header = Gtk.Label(label="Improve Prompt", xalign=0)
+            improve_header.add_css_class("multi-draft-column-header")
+            improve_header.set_margin_start(10)
+            rephrase_header = Gtk.Label(label="Rephrase Prompt", xalign=0)
+            rephrase_header.add_css_class("multi-draft-column-header")
+            rephrase_header.set_margin_start(10)
+            grid.attach(improve_header, 0, 0, 1, 1)
+            grid.attach(rephrase_header, 1, 0, 1, 1)
+
         for index, request in enumerate(requests):
             profile = request.profile
             choice_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
             choice_box.set_hexpand(True)
             choice_box.set_vexpand(True)
             choice_box.add_css_class("multi-draft-choice")
+            if request.variant:
+                choice_box.add_css_class(f"multi-draft-choice-{request.variant}")
 
             header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
             header.set_hexpand(True)
+            if request.variant:
+                variant_label = request.variant.title()
+                badge = Gtk.Label(label=variant_label)
+                badge.add_css_class("multi-draft-variant-badge")
+                badge.add_css_class(f"multi-draft-variant-badge-{request.variant}")
+                header.append(badge)
+
             label = Gtk.Label(label=request.label, xalign=0)
             label.add_css_class("heading")
             label.set_tooltip_text(profile.display_name())
@@ -6038,7 +6109,8 @@ button.improve-profile-chip {{
             scroller.add_css_class("multi-draft-choice-output")
             choice_box.append(scroller)
 
-            grid.attach(choice_box, index % 2, index // 2, 1, 1)
+            row_offset = 1 if paired_prompt_choices else 0
+            grid.attach(choice_box, index % 2, index // 2 + row_offset, 1, 1)
             self._multi_draft_insert_buttons.append(insert_button)
             self._multi_draft_choices[request.key] = MultiDraftChoice(
                 key=request.key,
@@ -6048,6 +6120,7 @@ button.improve-profile-chip {{
                 text_view=text_view,
                 status_label=status_label,
                 insert_button=insert_button,
+                variant=request.variant,
             )
         window.present()
 
@@ -6183,6 +6256,11 @@ button.improve-profile-chip {{
         text = choice.buffer.get_text(start_iter, end_iter, True)
         return self._normalize_generated_output_text(text)
 
+    def _multi_draft_choice_display_label(self, choice: MultiDraftChoice) -> str:
+        if choice.variant:
+            return f"{choice.label} {choice.variant.title()}"
+        return choice.label
+
     def _on_multi_draft_insert_clicked(self, _button: Gtk.Button, profile_key: str) -> None:
         choice = self._multi_draft_choices.get(profile_key)
         if choice is None:
@@ -6228,7 +6306,7 @@ button.improve-profile-chip {{
             self._capture_improve1_range_end()
             for insert_button in self._multi_draft_insert_buttons:
                 insert_button.set_sensitive(False)
-            self._status_label.set_label(f"Inserted {choice.label} draft.")
+            self._status_label.set_label(f"Inserted {self._multi_draft_choice_display_label(choice)} draft.")
             self._close_multi_draft_window_after_insert()
             return
         if self._multi_draft_insert_mode == "replace-generated":
@@ -6246,7 +6324,7 @@ button.improve-profile-chip {{
             self._capture_improve1_range_end()
             for insert_button in self._multi_draft_insert_buttons:
                 insert_button.set_sensitive(False)
-            self._status_label.set_label(f"Inserted {choice.label} draft.")
+            self._status_label.set_label(f"Inserted {self._multi_draft_choice_display_label(choice)} draft.")
             self._close_multi_draft_window_after_insert()
             return
         if not self._prepare_editor_insertion(doc):
@@ -6261,7 +6339,7 @@ button.improve-profile-chip {{
             )
             self._ensure_single_trailing_space(self._editor_insert_doc, self._editor_insert_cursor)
         self._capture_spellingstyle_range_end()
-        self._status_label.set_label(f"Inserted {choice.label} draft.")
+        self._status_label.set_label(f"Inserted {self._multi_draft_choice_display_label(choice)} draft.")
         self._close_multi_draft_window_after_insert()
 
     def _finish_text_draft_multi_choice_insert(self, choice: MultiDraftChoice) -> None:
@@ -6271,7 +6349,7 @@ button.improve-profile-chip {{
         self._text_draft_temp_dirty = True
         for insert_button in self._multi_draft_insert_buttons:
             insert_button.set_sensitive(False)
-        self._status_label.set_label(f"Inserted {choice.label} draft.")
+        self._status_label.set_label(f"Inserted {self._multi_draft_choice_display_label(choice)} draft.")
         self._close_multi_draft_window_after_insert()
 
     def _close_multi_draft_window_after_insert(self) -> None:
@@ -7027,6 +7105,26 @@ button.improve-profile-chip {{
                         continue
             except Exception:
                 continue
+
+    def _apply_case_citation_italics_to_recent_editor_insert(self, inserted_text: str) -> None:
+        if not inserted_text or not self._editor_insert_doc or not self._editor_insert_cursor:
+            return
+        if self._last_insert_len <= 0:
+            return
+        try:
+            text = self._get_text_container(self._editor_insert_doc, self._editor_insert_cursor)
+            if not text:
+                return
+            inserted_range = text.createTextCursorByRange(self._editor_insert_cursor)
+            if not inserted_range.goLeft(self._last_insert_len, True):
+                return
+            self._apply_case_citation_italics_to_range(
+                self._editor_insert_doc,
+                inserted_range,
+                inserted_text,
+            )
+        except Exception:
+            return
 
     def _get_autotext_group(self, container, title: str):
         if hasattr(container, "hasByName") and container.hasByName(title):
