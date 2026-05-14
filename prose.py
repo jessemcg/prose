@@ -6404,6 +6404,10 @@ button.improve-profile-chip {{
                     "_improve_pending_newlines",
                 )
                 self._ensure_single_trailing_space(self._improve_insert_doc, self._improve_insert_cursor)
+                self._apply_case_citation_italics_to_recent_writer_insert(
+                    self._improve_insert_doc,
+                    self._improve_insert_cursor,
+                )
             self._capture_improve1_range_end()
             for insert_button in self._multi_draft_insert_buttons:
                 insert_button.set_sensitive(False)
@@ -6422,6 +6426,10 @@ button.improve-profile-chip {{
                     "_improve_pending_newlines",
                 )
                 self._ensure_single_trailing_space(self._improve_insert_doc, self._improve_insert_cursor)
+                self._apply_case_citation_italics_to_recent_writer_insert(
+                    self._improve_insert_doc,
+                    self._improve_insert_cursor,
+                )
             self._capture_improve1_range_end()
             for insert_button in self._multi_draft_insert_buttons:
                 insert_button.set_sensitive(False)
@@ -6439,6 +6447,10 @@ button.improve-profile-chip {{
                 "_editor_pending_newlines",
             )
             self._ensure_single_trailing_space(self._editor_insert_doc, self._editor_insert_cursor)
+            self._apply_case_citation_italics_to_recent_writer_insert(
+                self._editor_insert_doc,
+                self._editor_insert_cursor,
+            )
         self._capture_spellingstyle_range_end()
         self._status_label.set_label(f"Inserted {self._multi_draft_choice_display_label(choice)} draft.")
         self._close_multi_draft_window_after_insert()
@@ -7227,6 +7239,27 @@ button.improve-profile-chip {{
         except Exception:
             return
 
+    def _apply_case_citation_italics_to_recent_writer_insert(
+        self,
+        doc: XTextDocument,  # type: ignore[type-arg]
+        insert_cursor: Any,
+    ) -> None:
+        if not doc or not insert_cursor or self._last_insert_len <= 0:
+            return
+        try:
+            text = self._get_text_container(doc, insert_cursor)
+            if not text:
+                return
+            inserted_range = text.createTextCursorByRange(insert_cursor)
+            if not inserted_range.goLeft(self._last_insert_len, True):
+                return
+            inserted_text = str(inserted_range.getString() or "")
+            if not inserted_text.strip():
+                return
+            self._apply_case_citation_italics_to_range(doc, inserted_range, inserted_text)
+        except Exception:
+            return
+
     def _get_autotext_group(self, container, title: str):
         if hasattr(container, "hasByName") and container.hasByName(title):
             return container.getByName(title)
@@ -7679,6 +7712,11 @@ button.improve-profile-chip {{
             if not text:
                 self._status_label.set_label("Unable to replace citations.")
                 return False
+            self._apply_case_citation_italics_to_range(
+                self._combine_cites_doc,
+                self._combine_cites_cursor,
+                combined_text,
+            )
             insert_cursor = text.createTextCursorByRange(self._combine_cites_cursor.getEnd())
             previous_insert_len = self._last_insert_len
             self._last_insert_len = len(combined_text)
@@ -10980,6 +11018,10 @@ button.improve-profile-chip {{
                 "_editor_pending_newlines",
             )
             self._ensure_single_trailing_space(self._editor_insert_doc, self._editor_insert_cursor)
+            self._apply_case_citation_italics_to_recent_writer_insert(
+                self._editor_insert_doc,
+                self._editor_insert_cursor,
+            )
         self._trim_spelling_output_edges()
         self._capture_spellingstyle_range_end()
         return False
@@ -11005,6 +11047,10 @@ button.improve-profile-chip {{
                 "_improve_pending_newlines",
             )
             self._ensure_single_trailing_space(self._improve_insert_doc, self._improve_insert_cursor)
+            self._apply_case_citation_italics_to_recent_writer_insert(
+                self._improve_insert_doc,
+                self._improve_insert_cursor,
+            )
         self._commit_pending_regenerate_context()
         self._capture_improve1_range_end()
         return False
@@ -11029,6 +11075,10 @@ button.improve-profile-chip {{
                 "_improve_pending_newlines",
             )
             self._ensure_single_trailing_space(self._improve_insert_doc, self._improve_insert_cursor)
+            self._apply_case_citation_italics_to_recent_writer_insert(
+                self._improve_insert_doc,
+                self._improve_insert_cursor,
+            )
         self._commit_pending_regenerate_context()
         self._capture_improve1_range_end()
         return False
@@ -11043,6 +11093,10 @@ button.improve-profile-chip {{
                 "_improve_pending_newlines",
             )
             self._ensure_single_trailing_space(self._improve_insert_doc, self._improve_insert_cursor)
+            self._apply_case_citation_italics_to_recent_writer_insert(
+                self._improve_insert_doc,
+                self._improve_insert_cursor,
+            )
         self._trim_spelling_output_edges()
         self._commit_pending_regenerate_context()
         self._capture_improve1_range_end()
@@ -11058,6 +11112,10 @@ button.improve-profile-chip {{
                 "_editor_pending_newlines",
             )
             self._ensure_single_trailing_space(self._editor_insert_doc, self._editor_insert_cursor)
+            self._apply_case_citation_italics_to_recent_writer_insert(
+                self._editor_insert_doc,
+                self._editor_insert_cursor,
+            )
         self._trim_spelling_output_edges()
         self._commit_pending_regenerate_context()
         self._capture_spellingstyle_range_end()
@@ -11073,6 +11131,10 @@ button.improve-profile-chip {{
                 "_editor_pending_newlines",
             )
             self._ensure_single_trailing_space(self._editor_insert_doc, self._editor_insert_cursor)
+            self._apply_case_citation_italics_to_recent_writer_insert(
+                self._editor_insert_doc,
+                self._editor_insert_cursor,
+            )
         self._trim_spelling_output_edges()
         self._commit_pending_regenerate_context()
         self._capture_spellingstyle_range_end()
@@ -11088,6 +11150,10 @@ button.improve-profile-chip {{
                 "_editor_pending_newlines",
             )
             self._ensure_single_trailing_space(self._editor_insert_doc, self._editor_insert_cursor)
+            self._apply_case_citation_italics_to_recent_writer_insert(
+                self._editor_insert_doc,
+                self._editor_insert_cursor,
+            )
         self._trim_spelling_output_edges()
         self._commit_pending_regenerate_context()
         self._capture_spellingstyle_range_end()
@@ -11103,6 +11169,10 @@ button.improve-profile-chip {{
                 "_editor_pending_newlines",
             )
             self._ensure_single_trailing_space(self._editor_insert_doc, self._editor_insert_cursor)
+            self._apply_case_citation_italics_to_recent_writer_insert(
+                self._editor_insert_doc,
+                self._editor_insert_cursor,
+            )
         self._trim_spelling_output_edges()
         self._commit_pending_regenerate_context()
         self._capture_spellingstyle_range_end()
@@ -11118,6 +11188,10 @@ button.improve-profile-chip {{
                 "_editor_pending_newlines",
             )
             self._ensure_single_trailing_space(self._editor_insert_doc, self._editor_insert_cursor)
+            self._apply_case_citation_italics_to_recent_writer_insert(
+                self._editor_insert_doc,
+                self._editor_insert_cursor,
+            )
         self._trim_spelling_output_edges()
         self._commit_pending_regenerate_context()
         self._capture_spellingstyle_range_end()
