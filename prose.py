@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import difflib
 import json
 import importlib
 import os
@@ -1173,6 +1174,7 @@ class MultiDraftChoice:
     status_label: Gtk.Label
     insert_button: Gtk.Button
     variant: str | None = None
+    source_text: str = ""
     text: str = ""
     complete: bool = False
     failed: bool = False
@@ -3569,6 +3571,19 @@ textview.spelling-output-view.view border {{
 .spelling-output-view border,
 .spelling-output-view text {{
   background-image: none;
+}}
+.proof-suggestion-replacement {{
+  background-color: transparent;
+  background-image: none;
+  box-shadow: none;
+  color: @window_fg_color;
+  caret-color: @window_fg_color;
+}}
+.proof-suggestion-replacement text,
+.proof-suggestion-replacement border {{
+  background-color: transparent;
+  background-image: none;
+  box-shadow: none;
 }}
 .thesaurus-results,
 .reference-output-box {{
@@ -6015,7 +6030,7 @@ button.improve-profile-chip {{
             self._status_label.set_label(f"{title}: choose two Choices profiles in Settings.")
             self._show_toast("Choose Choices Profile 1 and Choices Profile 2 in Settings first.")
             return
-        self._show_multi_draft_choices(title, requests)
+        self._show_multi_draft_choices(title, requests, source_text)
         self._multi_draft_run_id += 1
         run_id = self._multi_draft_run_id
         cancel_event = threading.Event()
@@ -6046,7 +6061,12 @@ button.improve-profile-chip {{
             )
             thread.start()
 
-    def _show_multi_draft_choices(self, title: str, requests: list[MultiDraftRequest]) -> None:
+    def _show_multi_draft_choices(
+        self,
+        title: str,
+        requests: list[MultiDraftRequest],
+        source_text: str,
+    ) -> None:
         if self._multi_draft_window is not None:
             self._multi_draft_window.close()
             self._multi_draft_window = None
@@ -6165,6 +6185,7 @@ button.improve-profile-chip {{
                 status_label=status_label,
                 insert_button=insert_button,
                 variant=request.variant,
+                source_text=source_text,
             )
         window.present()
 
@@ -6206,6 +6227,42 @@ button.improve-profile-chip {{
         choice.status_label.set_label("Writing…")
         return False
 
+    def _changed_text_word_spans(self, text: str) -> list[tuple[str, int, int]]:
+        return [
+            (match.group(0).casefold(), match.start(), match.end())
+            for match in re.finditer(r"[^\W_]+(?:['’][^\W_]+)?", text, flags=re.UNICODE)
+        ]
+
+    def _changed_text_word_ranges(self, source_text: str, output_text: str) -> list[tuple[int, int]]:
+        source_words = self._changed_text_word_spans(source_text)
+        output_words = self._changed_text_word_spans(output_text)
+        if not source_words or not output_words:
+            return []
+        matcher = difflib.SequenceMatcher(
+            None,
+            [word for word, _start, _end in source_words],
+            [word for word, _start, _end in output_words],
+            autojunk=False,
+        )
+        ranges: list[tuple[int, int]] = []
+        for tag, _source_start, _source_end, output_start, output_end in matcher.get_opcodes():
+            if tag == "equal" or output_start == output_end:
+                continue
+            ranges.append((output_words[output_start][1], output_words[output_end - 1][2]))
+        return ranges
+
+    def _set_multi_draft_choice_display_text(self, choice: MultiDraftChoice, text: str) -> None:
+        choice.buffer.set_text(text)
+        tag = choice.buffer.create_tag(None, weight=Pango.Weight.BOLD)
+        if tag is None:
+            return
+        for start_offset, end_offset in self._changed_text_word_ranges(choice.source_text, text):
+            if start_offset >= end_offset:
+                continue
+            start_iter = choice.buffer.get_iter_at_offset(start_offset)
+            end_iter = choice.buffer.get_iter_at_offset(end_offset)
+            choice.buffer.apply_tag(tag, start_iter, end_iter)
+
     def _finish_multi_draft_choice(self, run_id: int, profile_key: str, error: str | None = None) -> bool:
         if run_id != self._multi_draft_run_id:
             return False
@@ -6221,7 +6278,7 @@ button.improve-profile-chip {{
                 choice.insert_button.set_sensitive(False)
             else:
                 choice.text = self._normalize_generated_output_text(choice.text)
-                choice.buffer.set_text(choice.text)
+                self._set_multi_draft_choice_display_text(choice, choice.text)
                 if choice.text:
                     choice.status_label.set_label("Ready")
                     choice.text_view.set_editable(True)
@@ -11105,23 +11162,15 @@ button.improve-profile-chip {{
         reason.add_css_class("dim-label")
         content.append(reason)
 
-        snippet_text = GLib.markup_escape_text(suggestion.snippet)
         snippet = Gtk.Label(
-            label=f"<b>Replace:</b> {snippet_text}",
-            use_markup=True,
+            label=f"Replace: {suggestion.snippet}",
             wrap=True,
             xalign=0,
         )
         snippet.add_css_class("monospace")
         content.append(snippet)
 
-        replacement_text = GLib.markup_escape_text(suggestion.replacement)
-        replacement = Gtk.Label(
-            label=f"<b>With:</b> {replacement_text}",
-            use_markup=True,
-            wrap=True,
-            xalign=0,
-        )
+        replacement = self._build_suggestion_replacement_view(suggestion)
         replacement.add_css_class("monospace")
         content.append(replacement)
 
@@ -11153,6 +11202,39 @@ button.improve-profile-chip {{
         card.append(content)
         card.add_css_class("card")
         return card
+
+    def _build_suggestion_replacement_view(self, suggestion: Suggestion) -> Gtk.TextView:
+        prefix = "With: "
+        text = f"{prefix}{suggestion.replacement}"
+        buffer = Gtk.TextBuffer()
+        buffer.set_text(text)
+
+        changed_tag = buffer.create_tag(None, weight=Pango.Weight.BOLD)
+        if changed_tag is not None:
+            for start_offset, end_offset in self._changed_text_word_ranges(
+                suggestion.snippet,
+                suggestion.replacement,
+            ):
+                if start_offset >= end_offset:
+                    continue
+                buffer.apply_tag(
+                    changed_tag,
+                    buffer.get_iter_at_offset(len(prefix) + start_offset),
+                    buffer.get_iter_at_offset(len(prefix) + end_offset),
+                )
+
+        replacement = Gtk.TextView.new_with_buffer(buffer)
+        replacement.set_monospace(True)
+        replacement.set_editable(False)
+        replacement.set_cursor_visible(False)
+        replacement.set_wrap_mode(Gtk.WrapMode.WORD_CHAR)
+        replacement.set_hexpand(True)
+        replacement.set_left_margin(0)
+        replacement.set_right_margin(0)
+        replacement.set_top_margin(0)
+        replacement.set_bottom_margin(0)
+        replacement.add_css_class("proof-suggestion-replacement")
+        return replacement
 
     # Suggestion actions --------------------------------------------------
     def _on_accept_clicked(self, _button: Gtk.Button, idx: int) -> None:
