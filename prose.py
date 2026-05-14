@@ -1176,6 +1176,7 @@ class MultiDraftChoice:
     variant: str | None = None
     source_text: str = ""
     text: str = ""
+    deletion_marker_tag: Gtk.TextTag | None = None
     complete: bool = False
     failed: bool = False
 
@@ -6251,17 +6252,93 @@ button.improve-profile-chip {{
             ranges.append((output_words[output_start][1], output_words[output_end - 1][2]))
         return ranges
 
+    def _changed_text_display_parts(
+        self,
+        source_text: str,
+        output_text: str,
+    ) -> tuple[str, list[tuple[int, int]], list[tuple[int, int]]]:
+        source_words = self._changed_text_word_spans(source_text)
+        output_words = self._changed_text_word_spans(output_text)
+        if not source_words or not output_words:
+            return output_text, [], []
+
+        matcher = difflib.SequenceMatcher(
+            None,
+            [word for word, _start, _end in source_words],
+            [word for word, _start, _end in output_words],
+            autojunk=False,
+        )
+        display_parts: list[str] = []
+        changed_ranges: list[tuple[int, int]] = []
+        deletion_marker_ranges: list[tuple[int, int]] = []
+        last_output_offset = 0
+
+        for tag, source_start, source_end, output_start, output_end in matcher.get_opcodes():
+            output_offset = output_words[output_start][1] if output_start < len(output_words) else len(output_text)
+            if output_offset > last_output_offset:
+                display_parts.append(output_text[last_output_offset:output_offset])
+                last_output_offset = output_offset
+
+            display_offset = sum(len(part) for part in display_parts)
+            if tag != "equal" and output_start < output_end:
+                changed_start = display_offset
+                changed_end = display_offset + output_words[output_end - 1][2] - output_offset
+                changed_ranges.append((changed_start, changed_end))
+
+            if tag == "delete":
+                deleted_words = [
+                    source_text[start:end]
+                    for _word, start, end in source_words[source_start:source_end]
+                ]
+                marker = f"[removed: {' '.join(deleted_words)}]"
+                if display_parts and not display_parts[-1].endswith((" ", "\n", "\t")):
+                    marker = f" {marker}"
+                if output_offset < len(output_text) and not output_text[output_offset].isspace():
+                    marker = f"{marker} "
+                marker_start = display_offset
+                display_parts.append(marker)
+                deletion_marker_ranges.append((marker_start, marker_start + len(marker)))
+
+        if last_output_offset < len(output_text):
+            display_parts.append(output_text[last_output_offset:])
+
+        return "".join(display_parts), changed_ranges, deletion_marker_ranges
+
     def _set_multi_draft_choice_display_text(self, choice: MultiDraftChoice, text: str) -> None:
-        choice.buffer.set_text(text)
-        tag = choice.buffer.create_tag(None, weight=Pango.Weight.BOLD)
-        if tag is None:
+        if choice.variant not in {"improve", "rephrase"}:
+            choice.buffer.set_text(text)
             return
-        for start_offset, end_offset in self._changed_text_word_ranges(choice.source_text, text):
+
+        display_text, changed_ranges, deletion_marker_ranges = self._changed_text_display_parts(
+            choice.source_text,
+            text,
+        )
+        choice.buffer.set_text(display_text)
+
+        changed_tag = choice.buffer.create_tag(None, weight=Pango.Weight.BOLD)
+        deletion_marker_tag = choice.buffer.create_tag(
+            None,
+            weight=Pango.Weight.BOLD,
+            style=Pango.Style.ITALIC,
+        )
+        choice.deletion_marker_tag = deletion_marker_tag
+
+        if changed_tag is not None:
+            for start_offset, end_offset in changed_ranges:
+                if start_offset >= end_offset:
+                    continue
+                start_iter = choice.buffer.get_iter_at_offset(start_offset)
+                end_iter = choice.buffer.get_iter_at_offset(end_offset)
+                choice.buffer.apply_tag(changed_tag, start_iter, end_iter)
+
+        if deletion_marker_tag is None:
+            return
+        for start_offset, end_offset in deletion_marker_ranges:
             if start_offset >= end_offset:
                 continue
             start_iter = choice.buffer.get_iter_at_offset(start_offset)
             end_iter = choice.buffer.get_iter_at_offset(end_offset)
-            choice.buffer.apply_tag(tag, start_iter, end_iter)
+            choice.buffer.apply_tag(deletion_marker_tag, start_iter, end_iter)
 
     def _finish_multi_draft_choice(self, run_id: int, profile_key: str, error: str | None = None) -> bool:
         if run_id != self._multi_draft_run_id:
@@ -6353,8 +6430,23 @@ button.improve-profile-chip {{
             insert_button.set_sensitive(False)
 
     def _get_multi_draft_choice_text(self, choice: MultiDraftChoice) -> str:
-        start_iter, end_iter = choice.buffer.get_bounds()
-        text = choice.buffer.get_text(start_iter, end_iter, True)
+        tag = choice.deletion_marker_tag
+        if tag is None:
+            start_iter, end_iter = choice.buffer.get_bounds()
+            text = choice.buffer.get_text(start_iter, end_iter, True)
+            return self._normalize_generated_output_text(text)
+
+        pieces: list[str] = []
+        cursor = choice.buffer.get_start_iter()
+        end_iter = choice.buffer.get_end_iter()
+        while cursor.compare(end_iter) < 0:
+            next_iter = cursor.copy()
+            if not next_iter.forward_to_tag_toggle(tag):
+                next_iter = end_iter.copy()
+            if not cursor.has_tag(tag):
+                pieces.append(choice.buffer.get_text(cursor, next_iter, True))
+            cursor = next_iter
+        text = "".join(pieces)
         return self._normalize_generated_output_text(text)
 
     def _multi_draft_choice_display_label(self, choice: MultiDraftChoice) -> str:
