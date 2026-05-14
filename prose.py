@@ -3577,7 +3577,7 @@ textview.spelling-output-view.view border {{
   background-color: transparent;
   background-image: none;
   box-shadow: none;
-  color: @window_fg_color;
+  color: alpha(@window_fg_color, 0.82);
   caret-color: @window_fg_color;
 }}
 .proof-suggestion-replacement text,
@@ -3585,6 +3585,26 @@ textview.spelling-output-view.view border {{
   background-color: transparent;
   background-image: none;
   box-shadow: none;
+}}
+.proof-suggestion-diff-row {{
+  background-color: transparent;
+}}
+.proof-suggestion-diff-marker {{
+  border-radius: 7px;
+  font-weight: 700;
+  min-width: 20px;
+  padding: 1px 4px;
+}}
+.proof-suggestion-diff-marker-minus {{
+  background-color: alpha(@error_color, 0.12);
+  color: @error_color;
+}}
+.proof-suggestion-diff-marker-plus {{
+  background-color: alpha(@success_color, 0.14);
+  color: @success_color;
+}}
+.proof-suggestion-original-text {{
+  color: alpha(@window_fg_color, 0.72);
 }}
 .thesaurus-results,
 .reference-output-box {{
@@ -6234,23 +6254,94 @@ button.improve-profile-chip {{
             for match in re.finditer(r"[^\W_]+(?:['’][^\W_]+)?", text, flags=re.UNICODE)
         ]
 
+    def _changed_text_unit_boundary(self, char: str) -> bool:
+        return char.isspace() or char in ',;:.!?()[]{}<>"“”'
+
+    def _changed_text_connector_punctuation(self, text: str) -> bool:
+        return any(char in "-‐‑‒–—―/" for char in text)
+
+    def _merge_changed_text_ranges(self, ranges: list[tuple[int, int]]) -> list[tuple[int, int]]:
+        if not ranges:
+            return []
+        merged: list[tuple[int, int]] = []
+        for start, end in sorted(ranges):
+            if start >= end:
+                continue
+            if not merged or start > merged[-1][1]:
+                merged.append((start, end))
+                continue
+            previous_start, previous_end = merged[-1]
+            merged[-1] = (previous_start, max(previous_end, end))
+        return merged
+
+    def _expand_changed_text_punctuation_range(
+        self,
+        text: str,
+        start_offset: int,
+        end_offset: int,
+    ) -> tuple[int, int]:
+        text_len = len(text)
+        start = max(0, min(start_offset, text_len))
+        end = max(start, min(end_offset, text_len))
+        changed_text = text[start:end]
+
+        if not changed_text:
+            if start < text_len:
+                end = start + 1
+            elif start > 0:
+                start -= 1
+                end = start + 1
+            else:
+                return (0, 0)
+
+        should_expand = self._changed_text_connector_punctuation(changed_text)
+        if not should_expand:
+            return (start, end)
+
+        while start > 0 and not self._changed_text_unit_boundary(text[start - 1]):
+            start -= 1
+        while end < text_len and not self._changed_text_unit_boundary(text[end]):
+            end += 1
+        return (start, end)
+
+    def _changed_text_punctuation_ranges(self, source_text: str, output_text: str) -> list[tuple[int, int]]:
+        if source_text == output_text:
+            return []
+        if re.sub(r"\s+", " ", source_text).strip() == re.sub(r"\s+", " ", output_text).strip():
+            return []
+
+        matcher = difflib.SequenceMatcher(None, source_text, output_text, autojunk=False)
+        ranges: list[tuple[int, int]] = []
+        for tag, _source_start, _source_end, output_start, output_end in matcher.get_opcodes():
+            if tag == "equal":
+                continue
+            ranges.append(
+                self._expand_changed_text_punctuation_range(
+                    output_text,
+                    output_start,
+                    output_end,
+                )
+            )
+        return self._merge_changed_text_ranges(ranges)
+
     def _changed_text_word_ranges(self, source_text: str, output_text: str) -> list[tuple[int, int]]:
         source_words = self._changed_text_word_spans(source_text)
         output_words = self._changed_text_word_spans(output_text)
-        if not source_words or not output_words:
-            return []
-        matcher = difflib.SequenceMatcher(
-            None,
-            [word for word, _start, _end in source_words],
-            [word for word, _start, _end in output_words],
-            autojunk=False,
-        )
         ranges: list[tuple[int, int]] = []
-        for tag, _source_start, _source_end, output_start, output_end in matcher.get_opcodes():
-            if tag == "equal" or output_start == output_end:
-                continue
-            ranges.append((output_words[output_start][1], output_words[output_end - 1][2]))
-        return ranges
+        if source_words and output_words:
+            matcher = difflib.SequenceMatcher(
+                None,
+                [word for word, _start, _end in source_words],
+                [word for word, _start, _end in output_words],
+                autojunk=False,
+            )
+            for tag, _source_start, _source_end, output_start, output_end in matcher.get_opcodes():
+                if tag == "equal" or output_start == output_end:
+                    continue
+                ranges.append((output_words[output_start][1], output_words[output_end - 1][2]))
+        if ranges or source_text == output_text:
+            return ranges
+        return self._changed_text_punctuation_ranges(source_text, output_text)
 
     def _changed_text_display_parts(
         self,
@@ -11328,16 +11419,10 @@ button.improve-profile-chip {{
         reason.add_css_class("dim-label")
         content.append(reason)
 
-        snippet = Gtk.Label(
-            label=f"Replace: {suggestion.snippet}",
-            wrap=True,
-            xalign=0,
-        )
-        snippet.add_css_class("monospace")
+        snippet = self._build_suggestion_original_view(suggestion)
         content.append(snippet)
 
         replacement = self._build_suggestion_replacement_view(suggestion)
-        replacement.add_css_class("monospace")
         content.append(replacement)
 
         btn_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
@@ -11369,38 +11454,75 @@ button.improve-profile-chip {{
         card.add_css_class("card")
         return card
 
-    def _build_suggestion_replacement_view(self, suggestion: Suggestion) -> Gtk.TextView:
-        prefix = "With: "
-        text = f"{prefix}{suggestion.replacement}"
-        buffer = Gtk.TextBuffer()
-        buffer.set_text(text)
+    def _build_suggestion_diff_row(
+        self,
+        marker_text: str,
+        marker_css_class: str,
+        child: Gtk.Widget,
+        tooltip: str,
+    ) -> Gtk.Box:
+        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        row.add_css_class("proof-suggestion-diff-row")
+        row.set_hexpand(True)
 
-        changed_tag = buffer.create_tag(None, weight=Pango.Weight.BOLD)
-        if changed_tag is not None:
-            for start_offset, end_offset in self._changed_text_word_ranges(
-                suggestion.snippet,
-                suggestion.replacement,
-            ):
-                if start_offset >= end_offset:
-                    continue
-                buffer.apply_tag(
-                    changed_tag,
-                    buffer.get_iter_at_offset(len(prefix) + start_offset),
-                    buffer.get_iter_at_offset(len(prefix) + end_offset),
-                )
+        marker = Gtk.Label(label=marker_text, xalign=0.5)
+        marker.add_css_class("monospace")
+        marker.add_css_class("proof-suggestion-diff-marker")
+        marker.add_css_class(marker_css_class)
+        marker.set_size_request(24, -1)
+        marker.set_tooltip_text(tooltip)
+        marker.set_valign(Gtk.Align.START)
 
-        replacement = Gtk.TextView.new_with_buffer(buffer)
-        replacement.set_monospace(True)
-        replacement.set_editable(False)
-        replacement.set_cursor_visible(False)
-        replacement.set_wrap_mode(Gtk.WrapMode.WORD_CHAR)
-        replacement.set_hexpand(True)
-        replacement.set_left_margin(0)
-        replacement.set_right_margin(0)
-        replacement.set_top_margin(0)
-        replacement.set_bottom_margin(0)
+        child.set_hexpand(True)
+        child.set_valign(Gtk.Align.START)
+        row.append(marker)
+        row.append(child)
+        return row
+
+    def _build_suggestion_original_view(self, suggestion: Suggestion) -> Gtk.Box:
+        snippet = Gtk.Label(
+            label=suggestion.snippet,
+            wrap=True,
+            xalign=0,
+        )
+        snippet.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
+        snippet.add_css_class("monospace")
+        snippet.add_css_class("proof-suggestion-original-text")
+        return self._build_suggestion_diff_row(
+            "-",
+            "proof-suggestion-diff-marker-minus",
+            snippet,
+            "Original text",
+        )
+
+    def _build_suggestion_replacement_view(self, suggestion: Suggestion) -> Gtk.Box:
+        replacement = Gtk.Label(label=suggestion.replacement, wrap=True, xalign=0)
+        replacement.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
         replacement.add_css_class("proof-suggestion-replacement")
-        return replacement
+        replacement.add_css_class("monospace")
+        attributes = Pango.AttrList()
+        for start_offset, end_offset in self._changed_text_word_ranges(
+            suggestion.snippet,
+            suggestion.replacement,
+        ):
+            if start_offset >= end_offset:
+                continue
+            byte_start = len(suggestion.replacement[:start_offset].encode("utf-8"))
+            byte_end = len(suggestion.replacement[:end_offset].encode("utf-8"))
+            for attr in (
+                Pango.attr_weight_new(Pango.Weight.BOLD),
+                Pango.attr_foreground_new(38 * 257, 162 * 257, 105 * 257),
+            ):
+                attr.start_index = byte_start
+                attr.end_index = byte_end
+                attributes.insert(attr)
+        replacement.set_attributes(attributes)
+        return self._build_suggestion_diff_row(
+            "+",
+            "proof-suggestion-diff-marker-plus",
+            replacement,
+            "Suggested replacement",
+        )
 
     # Suggestion actions --------------------------------------------------
     def _on_accept_clicked(self, _button: Gtk.Button, idx: int) -> None:
