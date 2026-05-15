@@ -376,6 +376,13 @@ DEFAULT_CT_PREFIX = "2"
 MAX_WORD_SUBSTITUTIONS = 3
 MAX_PINNED_EDITOR_ACTIONS = 5
 TEXT_DRAFT_TEMP_FLUSH_DELAY_MS = 200
+STACKED_CHOICES_MIN_HEIGHT = 620
+STACKED_CHOICES_MAX_HEIGHT = 900
+STACKED_CHOICES_COMPACT_SOURCE_CHARS = 700
+STACKED_CHOICES_FULL_SOURCE_CHARS = 2600
+STACKED_CHOICES_COMPACT_SOURCE_LINES = 8
+STACKED_CHOICES_FULL_SOURCE_LINES = 28
+STACKED_CHOICES_ESTIMATED_CHARS_PER_LINE = 92
 UNSET_PROFILE_LABEL = "Choose a profile..."
 MODEL_PROFILE_IDS = ("profile1", "profile2", "profile3", "profile4")
 DEFAULT_MODEL_PROFILE_NICKNAMES = {
@@ -6169,6 +6176,44 @@ button.improve-profile-chip {{
         }
         return labels.get(variant, variant.replace("-", " ").title())
 
+    def _stacked_choice_default_height(self, source_text: str) -> int:
+        text = (source_text or "").strip()
+        if not text:
+            return STACKED_CHOICES_MIN_HEIGHT
+
+        estimated_lines = sum(
+            max(
+                1,
+                (len(line) + STACKED_CHOICES_ESTIMATED_CHARS_PER_LINE - 1)
+                // STACKED_CHOICES_ESTIMATED_CHARS_PER_LINE,
+            )
+            for line in text.splitlines()
+        )
+
+        def scaled_height(value: int, compact_value: int, full_value: int) -> int:
+            if value <= compact_value:
+                return STACKED_CHOICES_MIN_HEIGHT
+            if value >= full_value:
+                return STACKED_CHOICES_MAX_HEIGHT
+            height_span = STACKED_CHOICES_MAX_HEIGHT - STACKED_CHOICES_MIN_HEIGHT
+            value_span = full_value - compact_value
+            return STACKED_CHOICES_MIN_HEIGHT + round(
+                (value - compact_value) * height_span / value_span
+            )
+
+        return max(
+            scaled_height(
+                len(text),
+                STACKED_CHOICES_COMPACT_SOURCE_CHARS,
+                STACKED_CHOICES_FULL_SOURCE_CHARS,
+            ),
+            scaled_height(
+                estimated_lines,
+                STACKED_CHOICES_COMPACT_SOURCE_LINES,
+                STACKED_CHOICES_FULL_SOURCE_LINES,
+            ),
+        )
+
     def _show_multi_draft_choices(
         self,
         title: str,
@@ -6193,7 +6238,17 @@ button.improve-profile-chip {{
         )
 
         window_width = 980 if stacked_prompt_choices else 1280
-        window = Adw.ApplicationWindow(application=app, title=title, default_width=window_width, default_height=900)
+        window_height = (
+            self._stacked_choice_default_height(source_text)
+            if stacked_prompt_choices
+            else STACKED_CHOICES_MAX_HEIGHT
+        )
+        window = Adw.ApplicationWindow(
+            application=app,
+            title=title,
+            default_width=window_width,
+            default_height=window_height,
+        )
         window.set_transient_for(self)
         window.connect("close-request", self._on_multi_draft_window_closed)
 
