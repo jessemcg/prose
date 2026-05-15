@@ -152,7 +152,9 @@ CONFIG_KEY_EDITOR_PINNED_ACTIONS = "editor_pinned_actions"
 CONFIG_KEY_TEXT_DRAFT_PINNED_ACTIONS = "text_draft_pinned_actions"
 CONFIG_KEY_SHARED_STYLE_RULES = "shared_style_rules"
 CONFIG_KEY_TEXT_DRAFT_EXTERNAL_ACTION = "text_draft_external_action"
+CONFIG_KEY_TEXT_DRAFT_EXTERNAL_ACTIONS = "text_draft_external_actions"
 TEXT_DRAFT_EXTERNAL_ACTION_DRAFT_FILE_TOKEN = "{draft_file}"
+DEFAULT_TEXT_DRAFT_EXTERNAL_ACTION_ICON = "utilities-terminal-symbolic"
 
 DEFAULT_SHARED_STYLE_RULES = """## STYLE RULES
 
@@ -1210,9 +1212,24 @@ class TextDraftExternalAction:
     command: list[str]
     cwd: Path | None
     env: dict[str, str]
+    icon_name: str = DEFAULT_TEXT_DRAFT_EXTERNAL_ACTION_ICON
+    tooltip: str = ""
+    success_message: str = ""
 
     def is_configured(self) -> bool:
         return self.enabled and bool(self.command)
+
+
+@dataclass
+class TextDraftExternalActionEditorWidgets:
+    enabled_row: Adw.SwitchRow
+    label_row: Adw.EntryRow
+    icon_row: Adw.EntryRow
+    tooltip_row: Adw.EntryRow
+    success_message_row: Adw.EntryRow
+    command_row: Adw.EntryRow
+    cwd_row: Adw.EntryRow
+    env: dict[str, str]
 
 
 @dataclass
@@ -2309,13 +2326,17 @@ def save_text_draft_template_dir(path: Path | None) -> None:
     _write_config(data)
 
 
-def load_text_draft_external_action() -> TextDraftExternalAction:
-    raw = _read_config().get(CONFIG_KEY_TEXT_DRAFT_EXTERNAL_ACTION)
+def _parse_text_draft_external_action(raw: Any) -> TextDraftExternalAction | None:
     if not isinstance(raw, dict):
-        return TextDraftExternalAction(enabled=False, label="", command=[], cwd=None, env={})
+        return None
 
     enabled = _coerce_bool_config(raw.get("enabled"), False)
     label = str(raw.get("label") or "External").strip() or "External"
+    icon_name = str(raw.get("icon_name") or DEFAULT_TEXT_DRAFT_EXTERNAL_ACTION_ICON).strip()
+    if not icon_name:
+        icon_name = DEFAULT_TEXT_DRAFT_EXTERNAL_ACTION_ICON
+    tooltip = str(raw.get("tooltip") or "").strip()
+    success_message = str(raw.get("success_message") or "").strip()
 
     command: list[str] = []
     raw_command = raw.get("command")
@@ -2343,27 +2364,87 @@ def load_text_draft_external_action() -> TextDraftExternalAction:
         command=command,
         cwd=cwd,
         env=env,
+        icon_name=icon_name,
+        tooltip=tooltip,
+        success_message=success_message,
     )
 
 
-def save_text_draft_external_action(action: TextDraftExternalAction) -> None:
-    data = _read_config()
+def load_text_draft_external_actions() -> list[TextDraftExternalAction]:
+    raw = _read_config()
+    raw_actions = raw.get(CONFIG_KEY_TEXT_DRAFT_EXTERNAL_ACTIONS)
+    if isinstance(raw_actions, list):
+        actions = [
+            action
+            for action in (_parse_text_draft_external_action(item) for item in raw_actions)
+            if action is not None
+        ]
+        return actions
+
+    legacy_action = _parse_text_draft_external_action(raw.get(CONFIG_KEY_TEXT_DRAFT_EXTERNAL_ACTION))
+    return [legacy_action] if legacy_action is not None else []
+
+
+def _text_draft_external_action_has_payload(action: TextDraftExternalAction) -> bool:
     label = action.label.strip()
     has_custom_label = bool(label and label != "External")
-    if not action.is_configured() and not has_custom_label and action.cwd is None and not action.env:
-        data.pop(CONFIG_KEY_TEXT_DRAFT_EXTERNAL_ACTION, None)
+    icon_name = action.icon_name.strip()
+    has_custom_icon = bool(icon_name and icon_name != DEFAULT_TEXT_DRAFT_EXTERNAL_ACTION_ICON)
+    return (
+        bool(action.command)
+        or has_custom_label
+        or action.cwd is not None
+        or bool(action.env)
+        or has_custom_icon
+        or bool(action.tooltip.strip())
+        or bool(action.success_message.strip())
+    )
+
+
+def _text_draft_external_action_payload(action: TextDraftExternalAction) -> dict[str, Any]:
+    label = action.label.strip()
+    icon_name = action.icon_name.strip() or DEFAULT_TEXT_DRAFT_EXTERNAL_ACTION_ICON
+    payload: dict[str, Any] = {
+        "enabled": bool(action.enabled),
+        "label": label or "External",
+        "command": [str(part) for part in action.command if str(part)],
+        "icon_name": icon_name,
+    }
+    if action.cwd is not None:
+        payload["cwd"] = str(action.cwd.expanduser().resolve(strict=False))
+    if action.env:
+        payload["env"] = dict(action.env)
+    if action.tooltip.strip():
+        payload["tooltip"] = action.tooltip.strip()
+    if action.success_message.strip():
+        payload["success_message"] = action.success_message.strip()
+    return payload
+
+
+def save_text_draft_external_actions(actions: list[TextDraftExternalAction]) -> None:
+    data = _read_config()
+    payload = [
+        _text_draft_external_action_payload(action)
+        for action in actions
+        if _text_draft_external_action_has_payload(action)
+    ]
+    data.pop(CONFIG_KEY_TEXT_DRAFT_EXTERNAL_ACTION, None)
+    if payload:
+        data[CONFIG_KEY_TEXT_DRAFT_EXTERNAL_ACTIONS] = payload
     else:
-        payload: dict[str, Any] = {
-            "enabled": bool(action.enabled),
-            "label": label or "External",
-            "command": [str(part) for part in action.command if str(part)],
-        }
-        if action.cwd is not None:
-            payload["cwd"] = str(action.cwd.expanduser().resolve(strict=False))
-        if action.env:
-            payload["env"] = dict(action.env)
-        data[CONFIG_KEY_TEXT_DRAFT_EXTERNAL_ACTION] = payload
+        data.pop(CONFIG_KEY_TEXT_DRAFT_EXTERNAL_ACTIONS, None)
     _write_config(data)
+
+
+def load_text_draft_external_action() -> TextDraftExternalAction:
+    actions = load_text_draft_external_actions()
+    if actions:
+        return actions[0]
+    return TextDraftExternalAction(enabled=False, label="", command=[], cwd=None, env={})
+
+
+def save_text_draft_external_action(action: TextDraftExternalAction) -> None:
+    save_text_draft_external_actions([action])
 
 
 def load_last_odt_file() -> Path | None:
@@ -2571,7 +2652,7 @@ class ProseWindow(Adw.ApplicationWindow):
         self._prefix_settings = load_prefix_settings()
         self._editor_source_file = load_editor_source_file()
         self._text_draft_template_dir = load_text_draft_template_dir()
-        self._text_draft_external_action = load_text_draft_external_action()
+        self._text_draft_external_actions = load_text_draft_external_actions()
         self._last_odt_path = load_last_odt_file()
         self._concordance_file_path = load_concordance_file_path()
         self._editor_pinned_action_ids = load_editor_pinned_actions()
@@ -2645,7 +2726,7 @@ class ProseWindow(Adw.ApplicationWindow):
         self._text_draft_template_email_buttons: list[Gtk.Button] = []
         self._text_draft_template_emails: list[tuple[str, str]] = []
         self._text_draft_external_action_box: Gtk.Box | None = None
-        self._text_draft_external_action_button: Gtk.Button | None = None
+        self._text_draft_external_action_buttons: list[Gtk.Button] = []
         self._text_draft_temp_path: Path | None = None
         self._text_draft_temp_flush_source_id = 0
         self._text_draft_temp_dirty = False
@@ -3037,7 +3118,7 @@ class ProseWindow(Adw.ApplicationWindow):
         external_action_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
         draft_header_row.append(external_action_box)
         self._text_draft_external_action_box = external_action_box
-        self._rebuild_text_draft_external_action_button()
+        self._rebuild_text_draft_external_action_buttons()
 
         copy_draft_btn = Gtk.Button(label="Copy", icon_name="edit-copy-symbolic")
         copy_draft_btn.add_css_class("flat")
@@ -3507,24 +3588,31 @@ class ProseWindow(Adw.ApplicationWindow):
         for widget in self._text_draft_action_buttons:
             widget.set_sensitive(not self._busy)
 
-    def _rebuild_text_draft_external_action_button(self) -> None:
+    def _rebuild_text_draft_external_action_buttons(self) -> None:
         box = self._text_draft_external_action_box
         if box is None:
             return
         self._clear_box(box)
-        self._text_draft_external_action_button = None
-        external_action = self._text_draft_external_action
-        if not external_action.is_configured():
-            return
-        button = Gtk.Button(label=external_action.label, icon_name="utilities-terminal-symbolic")
-        button.add_css_class("flat")
-        button.add_css_class("transform-pill")
-        button.add_css_class("transform-pill-compact")
-        button.set_tooltip_text("Run the configured external Draft action.")
-        button.set_sensitive(not self._busy)
-        button.connect("clicked", self._on_text_draft_external_action_clicked)
-        box.append(button)
-        self._text_draft_external_action_button = button
+        self._text_draft_external_action_buttons = []
+        for external_action in self._text_draft_external_actions:
+            if not external_action.is_configured():
+                continue
+            button = Gtk.Button(label=external_action.label, icon_name=external_action.icon_name)
+            button.add_css_class("flat")
+            button.add_css_class("transform-pill")
+            button.add_css_class("transform-pill-compact")
+            tooltip = external_action.tooltip.strip() or f"Run {external_action.label} with the current Draft text."
+            button.set_tooltip_text(tooltip)
+            button.set_sensitive(not self._busy)
+            button.connect(
+                "clicked",
+                lambda clicked_button, action=external_action: self._on_text_draft_external_action_clicked(
+                    clicked_button,
+                    action,
+                ),
+            )
+            box.append(button)
+            self._text_draft_external_action_buttons.append(button)
 
     def _ensure_css(self) -> None:
         if self._css_provider is not None:
@@ -4207,7 +4295,7 @@ button.improve-profile-chip {{
             self._editor_pinned_action_ids,
             self._text_draft_pinned_action_ids,
             self._text_draft_template_dir,
-            self._text_draft_external_action,
+            self._text_draft_external_actions,
             self._libreoffice_python_path,
             self._concordance_file_path,
             self._editor_source_file,
@@ -4252,7 +4340,7 @@ button.improve-profile-chip {{
         editor_pinned_action_ids: list[str],
         text_draft_pinned_action_ids: list[str],
         text_draft_template_dir: Path | None,
-        text_draft_external_action: TextDraftExternalAction,
+        text_draft_external_actions: list[TextDraftExternalAction],
         libreoffice_python_path: Path | None,
         concordance_file_path: Path | None,
     ) -> None:
@@ -4283,7 +4371,7 @@ button.improve-profile-chip {{
         self._text_draft_template_dir = (
             text_draft_template_dir.expanduser().resolve(strict=False) if text_draft_template_dir else None
         )
-        self._text_draft_external_action = text_draft_external_action
+        self._text_draft_external_actions = text_draft_external_actions
         self._libreoffice_python_path = libreoffice_python_path.expanduser().resolve(strict=False) if libreoffice_python_path else None
         self._concordance_file_path = (
             concordance_file_path.expanduser().resolve(strict=False) if concordance_file_path else None
@@ -4312,12 +4400,12 @@ button.improve-profile-chip {{
         save_editor_pinned_actions(self._editor_pinned_action_ids)
         save_text_draft_pinned_actions(self._text_draft_pinned_action_ids)
         save_text_draft_template_dir(self._text_draft_template_dir)
-        save_text_draft_external_action(self._text_draft_external_action)
+        save_text_draft_external_actions(self._text_draft_external_actions)
         save_libreoffice_python_path(self._libreoffice_python_path)
         save_concordance_file_path(self._concordance_file_path)
         self._rebuild_transform_action_buttons()
         self._rebuild_text_draft_action_buttons()
-        self._rebuild_text_draft_external_action_button()
+        self._rebuild_text_draft_external_action_buttons()
         self._rebuild_regenerate_profile_chips()
         self._refresh_text_draft_templates()
         _import_uno_from_candidates(self._libreoffice_python_path, force_retry=True)
@@ -5085,9 +5173,14 @@ button.improve-profile-chip {{
         expanded = value.replace(TEXT_DRAFT_EXTERNAL_ACTION_DRAFT_FILE_TOKEN, str(draft_path))
         return os.path.expandvars(os.path.expanduser(expanded))
 
-    def _on_text_draft_external_action_clicked(self, _button: Gtk.Button | None) -> None:
-        action = self._text_draft_external_action
-        if not action.is_configured():
+    def _on_text_draft_external_action_clicked(
+        self,
+        _button: Gtk.Button | None,
+        action: TextDraftExternalAction | None = None,
+    ) -> None:
+        if action is None:
+            action = next((item for item in self._text_draft_external_actions if item.is_configured()), None)
+        if action is None or not action.is_configured():
             self._show_toast("No Text Draft external action is configured.")
             return
         if self._busy:
@@ -5119,8 +5212,9 @@ button.improve-profile-chip {{
             self._status_label.set_label(f"Unable to launch {action.label}: {exc}")
             self._show_toast(f"Unable to launch {action.label}.")
             return
-        self._status_label.set_label(f"Launched {action.label} with Draft text.")
-        self._show_toast(f"Launched {action.label}.")
+        success_message = action.success_message.strip() or f"Launched {action.label}."
+        self._status_label.set_label(success_message)
+        self._show_toast(success_message)
 
     def _prepare_text_draft_regenerate_output_state(self, context: RegenerateContext) -> None:
         if context.action_key in REGENERATE_SOURCE_BUFFER_ACTION_KEYS:
@@ -9387,8 +9481,9 @@ button.improve-profile-chip {{
         if hasattr(self, "_text_draft_action_buttons"):
             for button in self._text_draft_action_buttons:
                 button.set_sensitive(not busy)
-        if hasattr(self, "_text_draft_external_action_button") and self._text_draft_external_action_button is not None:
-            self._text_draft_external_action_button.set_sensitive(not busy)
+        if hasattr(self, "_text_draft_external_action_buttons"):
+            for button in self._text_draft_external_action_buttons:
+                button.set_sensitive(not busy)
         if hasattr(self, "_update_text_draft_template_controls"):
             self._update_text_draft_template_controls()
 
@@ -12057,7 +12152,7 @@ class SettingsWindow(Adw.ApplicationWindow):
         editor_pinned_action_ids: list[str],
         text_draft_pinned_action_ids: list[str],
         text_draft_template_dir: Path | None,
-        text_draft_external_action: TextDraftExternalAction,
+        text_draft_external_actions: list[TextDraftExternalAction],
         libreoffice_python_path: Path | None,
         concordance_file_path: Path | None,
         editor_source_file: Path | None,
@@ -12089,7 +12184,7 @@ class SettingsWindow(Adw.ApplicationWindow):
                 list[str],
                 list[str],
                 Path | None,
-                TextDraftExternalAction,
+                list[TextDraftExternalAction],
                 Path | None,
                 Path | None,
             ],
@@ -12137,7 +12232,7 @@ class SettingsWindow(Adw.ApplicationWindow):
         self._text_draft_template_dir = (
             text_draft_template_dir.expanduser().resolve(strict=False) if text_draft_template_dir else None
         )
-        self._text_draft_external_action = text_draft_external_action
+        self._text_draft_external_actions = list(text_draft_external_actions)
         self._libreoffice_python_path = libreoffice_python_path
         self._concordance_file_path = concordance_file_path
         self._editor_source_file = editor_source_file
@@ -12150,7 +12245,8 @@ class SettingsWindow(Adw.ApplicationWindow):
         self._prompt_row_keys: dict[Gtk.ListBoxRow, str] = {}
         self._source_row_guard = False
         self._text_draft_template_dir_row_guard = False
-        self._text_draft_external_action_cwd_row_guard = False
+        self._text_draft_external_actions_box: Gtk.Box | None = None
+        self._text_draft_external_action_widgets: list[TextDraftExternalActionEditorWidgets] = []
         self._libreoffice_path_row_guard = False
         self._concordance_path_row_guard = False
         self._proof_suggestions_json_path_row_guard = False
@@ -12507,45 +12603,162 @@ class SettingsWindow(Adw.ApplicationWindow):
         title_label.add_css_class("title-3")
         page_box.append(title_label)
 
-        external_group = Adw.PreferencesGroup(title="External Action")
-        external_group.add_css_class("list-stack")
-        external_group.set_hexpand(True)
-        page_box.append(external_group)
+        actions_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+        actions_box.set_hexpand(True)
+        page_box.append(actions_box)
+        self._text_draft_external_actions_box = actions_box
+        self._rebuild_text_draft_external_action_editor_rows()
 
-        external_enable_row = Adw.SwitchRow(
-            title="Enable external Draft action",
-            subtitle="Show a Text Draft button that launches a configured local command.",
-        )
-        external_enable_row.set_active(self._text_draft_external_action.enabled)
-        external_group.add(external_enable_row)
-        self._text_draft_external_action_enabled_row = external_enable_row
-
-        external_label_row = Adw.EntryRow(title="Button label")
-        external_label_row.set_text(self._text_draft_external_action.label or "External")
-        external_group.add(external_label_row)
-        self._text_draft_external_action_label_row = external_label_row
-
-        external_command_row = Adw.EntryRow(title="Command")
-        external_command_row.set_text(shlex.join(self._text_draft_external_action.command))
-        external_command_row.set_show_apply_button(False)
-        external_command_row.set_tooltip_text(
-            f"Use {TEXT_DRAFT_EXTERNAL_ACTION_DRAFT_FILE_TOKEN} where the Draft temp-file path should go."
-        )
-        external_group.add(external_command_row)
-        self._text_draft_external_action_command_row = external_command_row
-
-        external_cwd_row, external_cwd_entry = self._build_path_setting_row(
-            title="Working directory",
-            value=str(self._text_draft_external_action.cwd or ""),
-            info_text="Optional. The external command starts in this directory.",
-            on_changed=self._on_text_draft_external_action_cwd_row_changed,
-            on_choose=self._on_choose_text_draft_external_action_cwd,
-            on_clear=self._on_clear_text_draft_external_action_cwd,
-        )
-        external_group.add(external_cwd_row)
-        self._text_draft_external_action_cwd_row = external_cwd_entry
+        add_button = Gtk.Button(label="Add Action", icon_name="list-add-symbolic")
+        add_button.add_css_class("flat")
+        add_button.add_css_class("suggested-action")
+        add_button.set_halign(Gtk.Align.START)
+        add_button.connect("clicked", self._on_add_text_draft_external_action_clicked)
+        page_box.append(add_button)
 
         return page_box
+
+    def _clear_settings_box(self, box: Gtk.Box) -> None:
+        child = box.get_first_child()
+        while child is not None:
+            next_child = child.get_next_sibling()
+            box.remove(child)
+            child = next_child
+
+    def _rebuild_text_draft_external_action_editor_rows(self) -> None:
+        box = self._text_draft_external_actions_box
+        if box is None:
+            return
+        self._clear_settings_box(box)
+        self._text_draft_external_action_widgets = []
+        if not self._text_draft_external_actions:
+            empty_label = Gtk.Label(label="No external Text Draft actions are configured.", xalign=0)
+            empty_label.add_css_class("dim-label")
+            box.append(empty_label)
+            return
+
+        for index, action in enumerate(self._text_draft_external_actions):
+            group = Adw.PreferencesGroup(title=f"Action {index + 1}")
+            group.add_css_class("list-stack")
+            group.set_hexpand(True)
+            box.append(group)
+
+            enabled_row = Adw.SwitchRow(
+                title="Enable action",
+                subtitle="Show this action as a Text Draft button.",
+            )
+            enabled_row.set_active(action.enabled)
+            group.add(enabled_row)
+
+            label_row = Adw.EntryRow(title="Button label")
+            label_row.set_text(action.label or "External")
+            group.add(label_row)
+
+            icon_row = Adw.EntryRow(title="Icon name")
+            icon_row.set_text(action.icon_name or DEFAULT_TEXT_DRAFT_EXTERNAL_ACTION_ICON)
+            group.add(icon_row)
+
+            tooltip_row = Adw.EntryRow(title="Tooltip")
+            tooltip_row.set_text(action.tooltip)
+            group.add(tooltip_row)
+
+            success_message_row = Adw.EntryRow(title="Success message")
+            success_message_row.set_text(action.success_message)
+            group.add(success_message_row)
+
+            command_row = Adw.EntryRow(title="Command")
+            command_row.set_text(shlex.join(action.command))
+            command_row.set_show_apply_button(False)
+            command_row.set_tooltip_text(
+                f"Use {TEXT_DRAFT_EXTERNAL_ACTION_DRAFT_FILE_TOKEN} where the Draft temp-file path should go."
+            )
+            group.add(command_row)
+
+            cwd_row = Adw.EntryRow(title="Working directory")
+            cwd_row.set_text(str(action.cwd or ""))
+            cwd_row.set_show_apply_button(False)
+            group.add(cwd_row)
+
+            remove_row = Adw.ActionRow(title="Remove action")
+            remove_button = Gtk.Button(icon_name="user-trash-symbolic")
+            remove_button.add_css_class("flat")
+            remove_button.add_css_class("destructive-action")
+            remove_button.set_tooltip_text("Remove this external Text Draft action.")
+            remove_button.connect(
+                "clicked",
+                lambda _button, action_index=index: self._on_remove_text_draft_external_action_clicked(
+                    action_index,
+                ),
+            )
+            remove_row.add_suffix(remove_button)
+            group.add(remove_row)
+
+            self._text_draft_external_action_widgets.append(
+                TextDraftExternalActionEditorWidgets(
+                    enabled_row=enabled_row,
+                    label_row=label_row,
+                    icon_row=icon_row,
+                    tooltip_row=tooltip_row,
+                    success_message_row=success_message_row,
+                    command_row=command_row,
+                    cwd_row=cwd_row,
+                    env=dict(action.env),
+                )
+            )
+
+    def _collect_text_draft_external_actions_from_settings(self) -> list[TextDraftExternalAction] | None:
+        actions: list[TextDraftExternalAction] = []
+        for index, widgets in enumerate(self._text_draft_external_action_widgets):
+            command: list[str] = []
+            command_text = widgets.command_row.get_text().strip()
+            if command_text:
+                try:
+                    command = shlex.split(command_text)
+                except ValueError as exc:
+                    self._parent_window._show_toast(f"External action {index + 1} command is invalid: {exc}")
+                    return None
+            cwd_text = widgets.cwd_row.get_text().strip()
+            actions.append(
+                TextDraftExternalAction(
+                    enabled=widgets.enabled_row.get_active(),
+                    label=widgets.label_row.get_text().strip() or "External",
+                    command=command,
+                    cwd=Path(cwd_text).expanduser().resolve(strict=False) if cwd_text else None,
+                    env=dict(widgets.env),
+                    icon_name=widgets.icon_row.get_text().strip() or DEFAULT_TEXT_DRAFT_EXTERNAL_ACTION_ICON,
+                    tooltip=widgets.tooltip_row.get_text().strip(),
+                    success_message=widgets.success_message_row.get_text().strip(),
+                )
+            )
+        return actions
+
+    def _on_add_text_draft_external_action_clicked(self, _button: Gtk.Button) -> None:
+        actions = self._collect_text_draft_external_actions_from_settings()
+        if actions is None:
+            return
+        actions.append(
+            TextDraftExternalAction(
+                enabled=True,
+                label="External",
+                command=[],
+                cwd=None,
+                env={},
+                icon_name=DEFAULT_TEXT_DRAFT_EXTERNAL_ACTION_ICON,
+                tooltip="",
+                success_message="",
+            )
+        )
+        self._text_draft_external_actions = actions
+        self._rebuild_text_draft_external_action_editor_rows()
+
+    def _on_remove_text_draft_external_action_clicked(self, index: int) -> None:
+        actions = self._collect_text_draft_external_actions_from_settings()
+        if actions is None:
+            return
+        if 0 <= index < len(actions):
+            actions.pop(index)
+        self._text_draft_external_actions = actions
+        self._rebuild_text_draft_external_action_editor_rows()
 
     def _profile_dropdown_model(self, include_unset: bool = False) -> Gtk.StringList:
         labels = [profile.display_name() for profile in self._model_profiles]
@@ -13060,49 +13273,6 @@ class SettingsWindow(Adw.ApplicationWindow):
         self._text_draft_template_dir_row.set_text(str(self._text_draft_template_dir or ""))
         self._text_draft_template_dir_row_guard = False
 
-    def _on_choose_text_draft_external_action_cwd(self, _button: Gtk.Button) -> None:
-        dialog = Gtk.FileDialog(title="Choose external action working directory")
-        dialog.select_folder(self, None, self._on_text_draft_external_action_cwd_chosen)
-
-    def _on_text_draft_external_action_cwd_chosen(
-        self,
-        dialog: Gtk.FileDialog,
-        result: Gio.AsyncResult,
-    ) -> None:
-        try:
-            file = dialog.select_folder_finish(result)
-            path = Path(file.get_path() or "")
-        except Exception:
-            return
-        self._set_text_draft_external_action_cwd(path)
-
-    def _on_clear_text_draft_external_action_cwd(self, _button: Gtk.Button) -> None:
-        self._set_text_draft_external_action_cwd(None)
-
-    def _on_text_draft_external_action_cwd_row_changed(self, row: Gtk.Editable) -> None:
-        if self._text_draft_external_action_cwd_row_guard:
-            return
-        raw = row.get_text().strip()
-        self._text_draft_external_action = TextDraftExternalAction(
-            enabled=self._text_draft_external_action.enabled,
-            label=self._text_draft_external_action.label,
-            command=self._text_draft_external_action.command,
-            cwd=Path(raw).expanduser() if raw else None,
-            env=self._text_draft_external_action.env,
-        )
-
-    def _set_text_draft_external_action_cwd(self, path: Path | None) -> None:
-        self._text_draft_external_action = TextDraftExternalAction(
-            enabled=self._text_draft_external_action.enabled,
-            label=self._text_draft_external_action.label,
-            command=self._text_draft_external_action.command,
-            cwd=path.expanduser().resolve(strict=False) if path else None,
-            env=self._text_draft_external_action.env,
-        )
-        self._text_draft_external_action_cwd_row_guard = True
-        self._text_draft_external_action_cwd_row.set_text(str(self._text_draft_external_action.cwd or ""))
-        self._text_draft_external_action_cwd_row_guard = False
-
     def _on_choose_proof_suggestions_json_path(self, _button: Gtk.Button) -> None:
         dialog = Gtk.FileDialog(title="Choose proofreading suggestions JSON")
         dialog.open(self, None, self._on_proof_suggestions_json_path_chosen)
@@ -13612,21 +13782,9 @@ class SettingsWindow(Adw.ApplicationWindow):
             editor_action_profile_defaults[key] = MODEL_PROFILE_IDS[selected_index]
         editor_pinned_action_ids = self._current_editor_pinned_actions()
         text_draft_pinned_action_ids = self._current_text_draft_pinned_actions()
-        external_action_command: list[str] = []
-        external_action_command_text = self._text_draft_external_action_command_row.get_text().strip()
-        if external_action_command_text:
-            try:
-                external_action_command = shlex.split(external_action_command_text)
-            except ValueError as exc:
-                self._parent_window._show_toast(f"External action command is invalid: {exc}")
-                return
-        text_draft_external_action = TextDraftExternalAction(
-            enabled=self._text_draft_external_action_enabled_row.get_active(),
-            label=self._text_draft_external_action_label_row.get_text().strip() or "External",
-            command=external_action_command,
-            cwd=self._text_draft_external_action.cwd,
-            env=self._text_draft_external_action.env,
-        )
+        text_draft_external_actions = self._collect_text_draft_external_actions_from_settings()
+        if text_draft_external_actions is None:
+            return
         self._on_save(
             model_profiles,
             proof_settings,
@@ -13652,7 +13810,7 @@ class SettingsWindow(Adw.ApplicationWindow):
             editor_pinned_action_ids,
             text_draft_pinned_action_ids,
             self._text_draft_template_dir,
-            text_draft_external_action,
+            text_draft_external_actions,
             self._libreoffice_python_path,
             self._concordance_file_path,
         )

@@ -196,22 +196,35 @@ Some actions operate on the current Writer document or selection. Others use the
 
 `Reference` and `Ask Field` first run a local `tvly search --json` command and then send those search results to the configured model endpoint. This makes them work with standard OpenAI-compatible `/chat/completions` and `/responses` endpoints, including Fireworks-hosted models.
 
-### Optional: external Text Draft action
+### Optional: external Text Draft actions
 
-The Text Draft view can show one configurable external-action button next to `Copy`. This is for local workflows that are too system-specific to build directly into Prose, such as opening a terminal and handing the current draft to another tool.
+The Text Draft view can show configurable external-action buttons next to `Copy`. This is for local workflows that are too system-specific to build directly into Prose, such as opening a terminal, handing the current draft to another tool, or appending the draft to a local case log.
 
 Configure it in `Settings -> Text Draft External Action`, or edit `config.json` manually:
 
 ```json
-"text_draft_external_action": {
-  "enabled": true,
-  "label": "Codex",
-  "command": ["/home/jesse/bin/prose-text-draft-codex", "{draft_file}"],
-  "cwd": "/home/jesse"
-}
+"text_draft_external_actions": [
+  {
+    "enabled": true,
+    "label": "Codex",
+    "command": ["/home/jesse/bin/prose-text-draft-codex", "{draft_file}"],
+    "cwd": "/home/jesse",
+    "icon_name": "utilities-terminal-symbolic",
+    "tooltip": "Run Codex with the current Draft text.",
+    "success_message": "Codex launched with Draft text."
+  },
+  {
+    "enabled": true,
+    "label": "Log",
+    "command": ["/home/jesse/bin/prose-text-draft-case-log", "{draft_file}"],
+    "icon_name": "document-save-symbolic",
+    "tooltip": "Create Log Entry from the current Draft text.",
+    "success_message": "Log entry created."
+  }
+]
 ```
 
-When clicked, Prose writes the current Draft text to a UTF-8 temp file, replaces `{draft_file}` with that path in the command, sets `PROSE_TEXT_DRAFT_FILE` for the child process, and launches the command without a shell. Put any terminal-specific behavior in the wrapper script.
+When clicked, Prose writes the current Draft text to a UTF-8 temp file, replaces `{draft_file}` with that path in the selected command, sets `PROSE_TEXT_DRAFT_FILE` for the child process, and launches the command without a shell. Put any terminal-specific or case-specific behavior in wrapper scripts. `tooltip` and `success_message` are optional per-action strings. The older singular `text_draft_external_action` config key is still read as a fallback.
 
 ### Add Case
 
