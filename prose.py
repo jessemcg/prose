@@ -388,8 +388,9 @@ PROFILE_BACKED_COMMAND_TITLES = {
     "improve-generated": "Improve Generated",
     "rephrase-generated": "Rephrase Generated",
     "improve-selected": "Improve Selected",
-    "choices-profile-1": "Choices Profile 1",
-    "choices-profile-2": "Choices Profile 2",
+    "choices-improve": "Choices Improve",
+    "choices-rephrase-1": "Choices Rephrase 1",
+    "choices-rephrase-2": "Choices Rephrase 2",
     "combine": "Combine Cites",
     "thesaurus": "Thesaurus",
     "shorten": "Shorten",
@@ -402,6 +403,8 @@ PROFILE_BACKED_COMMAND_TITLES = {
     "translate": "Translate",
 }
 PROFILE_BACKED_COMMAND_KEYS = tuple(PROFILE_BACKED_COMMAND_TITLES.keys())
+MULTI_DRAFT_DIFF_VARIANTS = frozenset({"improve", "rephrase", "rephrase-1", "rephrase-2"})
+STACKED_CHOICE_VARIANTS = ("improve", "rephrase-1", "rephrase-2")
 REGENERATE_INSERT_MODE_BY_ACTION = {
     "improve-generated": "improve",
     "rephrase-generated": "improve",
@@ -1287,14 +1290,14 @@ EDITOR_QUICK_ACTIONS = (
         label="Generated Choices",
         title="Generated Choices",
         action_name="generated-choices",
-        description="Compare improve and rephrase outputs for the latest SpellingStyle output using the two Choices profiles.",
+        description="Compare Improve, Rephrase 1, and Rephrase 2 outputs for the latest SpellingStyle output.",
     ),
     QuickActionDefinition(
         key="selected-choices",
         label="Selected Choices",
         title="Selected Choices",
         action_name="selected-choices",
-        description="Compare improve and rephrase outputs for selected Writer text using the two Choices profiles.",
+        description="Compare Improve, Rephrase 1, and Rephrase 2 outputs for selected Writer text.",
     ),
     QuickActionDefinition(
         key="improve-selected",
@@ -1503,7 +1506,7 @@ TEXT_DRAFT_QUICK_ACTIONS = (
         label="Generated Choices",
         title="Generated Choices",
         action_name="text-draft-generated-choices",
-        description="Compare improve and rephrase outputs for the latest Text Draft Original Output using the two Choices profiles.",
+        description="Compare improve and rephrase outputs for the latest Text Draft Original Output using the Choices profiles.",
     ),
     QuickActionDefinition(
         key="text-draft-rephrase-generated",
@@ -1526,7 +1529,7 @@ TEXT_DRAFT_QUICK_ACTIONS = (
         label="Selected Choices",
         title="Selected Choices",
         action_name="text-draft-selected-choices",
-        description="Compare improve and rephrase outputs for selected Text Draft text using the two Choices profiles.",
+        description="Compare improve and rephrase outputs for selected Text Draft text using the Choices profiles.",
     ),
     QuickActionDefinition(
         key="text-draft-keep-original",
@@ -1606,6 +1609,12 @@ def _profile_default_lookup_key_for_action_name(action_name: str) -> str | None:
 def _profile_default_source_keys(action_key: str) -> tuple[str, ...]:
     if action_key == "improve-generated":
         return ("improve-generated", "improve")
+    if action_key == "choices-improve":
+        return ("choices-improve", "choices-profile-1", "improve-generated", "improve")
+    if action_key == "choices-rephrase-1":
+        return ("choices-rephrase-1", "choices-profile-1", "rephrase-generated")
+    if action_key == "choices-rephrase-2":
+        return ("choices-rephrase-2", "choices-profile-2", "rephrase-generated")
     return (action_key,)
 
 
@@ -3670,6 +3679,12 @@ textview.spelling-output-view.view border {{
 .multi-draft-choice-rephrase {{
   background-color: rgba(200, 136, 0, 0.08);
 }}
+.multi-draft-choice-rephrase-1 {{
+  background-color: rgba(200, 136, 0, 0.08);
+}}
+.multi-draft-choice-rephrase-2 {{
+  background-color: rgba(46, 160, 67, 0.08);
+}}
 .multi-draft-column-header {{
   font-weight: 700;
   color: @window_fg_color;
@@ -3686,6 +3701,14 @@ textview.spelling-output-view.view border {{
 }}
 .multi-draft-variant-badge-rephrase {{
   background-color: rgba(200, 136, 0, 0.18);
+  color: @window_fg_color;
+}}
+.multi-draft-variant-badge-rephrase-1 {{
+  background-color: rgba(200, 136, 0, 0.18);
+  color: @window_fg_color;
+}}
+.multi-draft-variant-badge-rephrase-2 {{
+  background-color: rgba(46, 160, 67, 0.18);
   color: @window_fg_color;
 }}
 .multi-draft-choice-output {{
@@ -5865,6 +5888,10 @@ button.improve-profile-chip {{
         if not self._select_spellingstyle_range(doc):
             self._show_toast("Unable to select the last SpellingStyle range.")
             return
+        requests = self._build_editor_improve_rephrase_choice_requests("Generated Choice")
+        if len(requests) != len(STACKED_CHOICE_VARIANTS):
+            self._show_toast("Choose Improve, Rephrase 1, and Rephrase 2 profiles in Settings first.")
+            return
         self._start_multi_draft_choices_for_text(
             title="Generated Choices",
             source_text=source_text,
@@ -5872,7 +5899,7 @@ button.improve-profile-chip {{
             prompt_text=self._improve1_settings.prompt,
             default_prompt=DEFAULT_IMPROVE_PROMPT,
             request_title="Generated Choice",
-            requests=self._build_improve_rephrase_choice_requests("Generated Choice"),
+            requests=requests,
         )
         self._multi_draft_insert_mode = "replace-generated"
         self._multi_draft_replace_doc = None
@@ -5901,6 +5928,10 @@ button.improve-profile-chip {{
         except Exception:
             self._show_toast("Unable to remember the selected text range.")
             return
+        requests = self._build_editor_improve_rephrase_choice_requests("Selected Choice")
+        if len(requests) != len(STACKED_CHOICE_VARIANTS):
+            self._show_toast("Choose Improve, Rephrase 1, and Rephrase 2 profiles in Settings first.")
+            return
         self._start_multi_draft_choices_for_text(
             title="Selected Choices",
             source_text=source_text,
@@ -5908,7 +5939,7 @@ button.improve-profile-chip {{
             prompt_text=self._improve1_settings.prompt,
             default_prompt=DEFAULT_IMPROVE_PROMPT,
             request_title="Selected Choice",
-            requests=self._build_improve_rephrase_choice_requests("Selected Choice"),
+            requests=requests,
         )
         self._multi_draft_insert_mode = "replace-selection"
         self._multi_draft_replace_doc = doc
@@ -5947,10 +5978,57 @@ button.improve-profile-chip {{
         thread = threading.Thread(target=self._run_concl_section, args=(source_text, profile), daemon=True)
         thread.start()
 
+    def _build_editor_improve_rephrase_choice_requests(self, request_title: str) -> list[MultiDraftRequest]:
+        requests: list[MultiDraftRequest] = []
+        slot_specs = (
+            (
+                "choices-improve",
+                "Improve",
+                self._compose_improve_payload,
+                self._improve1_settings.prompt,
+                DEFAULT_IMPROVE_PROMPT,
+                "improve",
+            ),
+            (
+                "choices-rephrase-1",
+                "Rephrase 1",
+                self._compose_rephrase_generated_payload,
+                self._improve2_settings.prompt,
+                DEFAULT_IMPROVE2_PROMPT,
+                "rephrase-1",
+            ),
+            (
+                "choices-rephrase-2",
+                "Rephrase 2",
+                self._compose_rephrase_generated_payload,
+                self._improve2_settings.prompt,
+                DEFAULT_IMPROVE2_PROMPT,
+                "rephrase-2",
+            ),
+        )
+        for slot_key, label, payload_builder, prompt_text, default_prompt, variant in slot_specs:
+            profile_key = self._editor_action_profile_defaults.get(slot_key)
+            profile = self._model_profile_by_key(profile_key or "")
+            if profile is None:
+                continue
+            requests.append(
+                MultiDraftRequest(
+                    key=slot_key,
+                    label=profile.display_name(),
+                    profile=profile,
+                    payload_builder=payload_builder,
+                    prompt_text=prompt_text,
+                    default_prompt=default_prompt,
+                    request_title=f"{request_title} {label}",
+                    variant=variant,
+                )
+            )
+        return requests
+
     def _build_improve_rephrase_choice_requests(self, request_title: str) -> list[MultiDraftRequest]:
         requests: list[MultiDraftRequest] = []
         seen_profiles: set[str] = set()
-        for slot_key in ("choices-profile-1", "choices-profile-2"):
+        for slot_key in ("choices-improve", "choices-rephrase-2"):
             profile_key = self._editor_action_profile_defaults.get(slot_key)
             profile = self._model_profile_by_key(profile_key or "")
             if profile is None or profile.key in seen_profiles:
@@ -6048,8 +6126,8 @@ button.improve-profile-chip {{
                 for profile in self._model_profiles
             ]
         if not requests:
-            self._status_label.set_label(f"{title}: choose two Choices profiles in Settings.")
-            self._show_toast("Choose Choices Profile 1 and Choices Profile 2 in Settings first.")
+            self._status_label.set_label(f"{title}: choose Choices profiles in Settings.")
+            self._show_toast("Choose Choices profiles in Settings first.")
             return
         self._show_multi_draft_choices(title, requests, source_text)
         self._multi_draft_run_id += 1
@@ -6082,6 +6160,15 @@ button.improve-profile-chip {{
             )
             thread.start()
 
+    def _multi_draft_variant_label(self, variant: str) -> str:
+        labels = {
+            "improve": "Improve",
+            "rephrase": "Rephrase",
+            "rephrase-1": "Rephrase 1",
+            "rephrase-2": "Rephrase 2",
+        }
+        return labels.get(variant, variant.replace("-", " ").title())
+
     def _show_multi_draft_choices(
         self,
         title: str,
@@ -6100,8 +6187,13 @@ button.improve-profile-chip {{
         paired_prompt_choices = bool(requests) and all(
             request.variant in {"improve", "rephrase"} for request in requests
         )
+        stacked_prompt_choices = (
+            len(requests) == len(STACKED_CHOICE_VARIANTS)
+            and tuple(request.variant for request in requests) == STACKED_CHOICE_VARIANTS
+        )
 
-        window = Adw.ApplicationWindow(application=app, title=title, default_width=1280, default_height=900)
+        window_width = 980 if stacked_prompt_choices else 1280
+        window = Adw.ApplicationWindow(application=app, title=title, default_width=window_width, default_height=900)
         window.set_transient_for(self)
         window.connect("close-request", self._on_multi_draft_window_closed)
 
@@ -6113,8 +6205,8 @@ button.improve-profile-chip {{
         grid = Gtk.Grid()
         grid.set_hexpand(True)
         grid.set_vexpand(True)
-        grid.set_column_homogeneous(True)
-        grid.set_row_homogeneous(not paired_prompt_choices)
+        grid.set_column_homogeneous(not stacked_prompt_choices)
+        grid.set_row_homogeneous(stacked_prompt_choices or not paired_prompt_choices)
         grid.set_column_spacing(10)
         grid.set_row_spacing(10)
         grid.set_margin_top(12)
@@ -6149,7 +6241,7 @@ button.improve-profile-chip {{
             header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
             header.set_hexpand(True)
             if request.variant:
-                variant_label = request.variant.title()
+                variant_label = self._multi_draft_variant_label(request.variant)
                 badge = Gtk.Label(label=variant_label)
                 badge.add_css_class("multi-draft-variant-badge")
                 badge.add_css_class(f"multi-draft-variant-badge-{request.variant}")
@@ -6194,8 +6286,11 @@ button.improve-profile-chip {{
             scroller.add_css_class("multi-draft-choice-output")
             choice_box.append(scroller)
 
-            row_offset = 1 if paired_prompt_choices else 0
-            grid.attach(choice_box, index % 2, index // 2 + row_offset, 1, 1)
+            if stacked_prompt_choices:
+                grid.attach(choice_box, 0, index, 1, 1)
+            else:
+                row_offset = 1 if paired_prompt_choices else 0
+                grid.attach(choice_box, index % 2, index // 2 + row_offset, 1, 1)
             self._multi_draft_insert_buttons.append(insert_button)
             self._multi_draft_choices[request.key] = MultiDraftChoice(
                 key=request.key,
@@ -6347,6 +6442,7 @@ button.improve-profile-chip {{
         self,
         source_text: str,
         output_text: str,
+        show_deletions: bool = True,
     ) -> tuple[str, list[tuple[int, int]], list[tuple[int, int]]]:
         source_words = self._changed_text_word_spans(source_text)
         output_words = self._changed_text_word_spans(output_text)
@@ -6376,7 +6472,7 @@ button.improve-profile-chip {{
                 changed_end = display_offset + output_words[output_end - 1][2] - output_offset
                 changed_ranges.append((changed_start, changed_end))
 
-            if tag == "delete":
+            if show_deletions and tag == "delete":
                 deleted_words = [
                     source_text[start:end]
                     for _word, start, end in source_words[source_start:source_end]
@@ -6396,22 +6492,25 @@ button.improve-profile-chip {{
         return "".join(display_parts), changed_ranges, deletion_marker_ranges
 
     def _set_multi_draft_choice_display_text(self, choice: MultiDraftChoice, text: str) -> None:
-        if choice.variant not in {"improve", "rephrase"}:
+        if choice.variant not in MULTI_DRAFT_DIFF_VARIANTS:
             choice.buffer.set_text(text)
             return
 
         display_text, changed_ranges, deletion_marker_ranges = self._changed_text_display_parts(
             choice.source_text,
             text,
+            show_deletions=False,
         )
         choice.buffer.set_text(display_text)
 
         changed_tag = choice.buffer.create_tag(None, weight=Pango.Weight.BOLD)
-        deletion_marker_tag = choice.buffer.create_tag(
-            None,
-            weight=Pango.Weight.BOLD,
-            style=Pango.Style.ITALIC,
-        )
+        deletion_marker_tag = None
+        if deletion_marker_ranges:
+            deletion_marker_tag = choice.buffer.create_tag(
+                None,
+                weight=Pango.Weight.BOLD,
+                style=Pango.Style.ITALIC,
+            )
         choice.deletion_marker_tag = deletion_marker_tag
 
         if changed_tag is not None:
@@ -6542,7 +6641,7 @@ button.improve-profile-chip {{
 
     def _multi_draft_choice_display_label(self, choice: MultiDraftChoice) -> str:
         if choice.variant:
-            return f"{choice.label} {choice.variant.title()}"
+            return f"{choice.label} {self._multi_draft_variant_label(choice.variant)}"
         return choice.label
 
     def _on_multi_draft_insert_clicked(self, _button: Gtk.Button, profile_key: str) -> None:
@@ -11992,6 +12091,7 @@ class SettingsWindow(Adw.ApplicationWindow):
         self._shared_style_rules_buffer: Gtk.TextBuffer | None = None
         self._model_profile_editors: dict[str, ModelProfileEditorWidgets] = {}
         self._prompt_editors: dict[str, PromptEditorWidgets] = {}
+        self._choices_profile_dropdowns: dict[str, Gtk.DropDown] = {}
         self._prompt_row_keys: dict[Gtk.ListBoxRow, str] = {}
         self._source_row_guard = False
         self._text_draft_template_dir_row_guard = False
@@ -12078,6 +12178,18 @@ class SettingsWindow(Adw.ApplicationWindow):
         prompt_list.append(profiles_row)
         self._prompt_row_keys[profiles_row] = "model-profiles"
         prompt_stack.add_named(self._build_model_profiles_page(), "model-profiles")
+
+        choices_models_row = Gtk.ListBoxRow()
+        choices_models_row_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        choices_models_row_box.set_margin_top(8)
+        choices_models_row_box.set_margin_bottom(8)
+        choices_models_row_box.set_margin_start(12)
+        choices_models_row_box.set_margin_end(12)
+        choices_models_row_box.append(Gtk.Label(label="Choices Models", xalign=0))
+        choices_models_row.set_child(choices_models_row_box)
+        prompt_list.append(choices_models_row)
+        self._prompt_row_keys[choices_models_row] = "choices-models"
+        prompt_stack.add_named(self._build_choices_models_page(), "choices-models")
 
         style_rules_row = Gtk.ListBoxRow()
         style_rules_row_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
@@ -12454,6 +12566,58 @@ class SettingsWindow(Adw.ApplicationWindow):
         page.set_vexpand(True)
         page.set_child(page_box)
         return page
+
+    def _build_choices_models_page(self) -> Gtk.Widget:
+        page_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+        page_box.set_margin_top(12)
+        page_box.set_margin_bottom(12)
+        page_box.set_margin_start(12)
+        page_box.set_margin_end(12)
+        page_box.set_valign(Gtk.Align.START)
+
+        title_label = Gtk.Label(label="Choices Models", xalign=0)
+        title_label.add_css_class("title-3")
+        page_box.append(title_label)
+
+        info_label = Gtk.Label(
+            label=(
+                "Generated Choices and Selected Choices use these same three model assignments. "
+                "Improve uses the Improve Generated prompt; Rephrase 1 and Rephrase 2 use the Rephrase Generated prompt."
+            ),
+            xalign=0,
+        )
+        info_label.add_css_class("dim-label")
+        info_label.set_wrap(True)
+        info_label.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
+        page_box.append(info_label)
+
+        group = Adw.PreferencesGroup(title="Choices Model Profiles")
+        group.add_css_class("list-stack")
+        group.set_hexpand(True)
+        page_box.append(group)
+
+        self._choices_profile_dropdowns = {}
+        rows = (
+            ("choices-improve", "Improve", "Default suggestion using the Improve Generated prompt."),
+            ("choices-rephrase-1", "Rephrase 1", "First variation using the Rephrase Generated prompt."),
+            ("choices-rephrase-2", "Rephrase 2", "Second variation using the Rephrase Generated prompt."),
+        )
+        for profile_key, title, subtitle in rows:
+            row = Adw.ActionRow(title=title, subtitle=subtitle)
+            row.set_activatable(False)
+            dropdown = Gtk.DropDown(model=self._profile_dropdown_model(include_unset=True))
+            selected_profile_key = self._editor_action_profile_defaults.get(profile_key)
+            selected_index = (
+                MODEL_PROFILE_IDS.index(selected_profile_key) + 1
+                if selected_profile_key in MODEL_PROFILE_IDS
+                else 0
+            )
+            dropdown.set_selected(selected_index)
+            row.add_suffix(dropdown)
+            group.add(row)
+            self._choices_profile_dropdowns[profile_key] = dropdown
+
+        return page_box
 
     def _build_quick_actions_page(self) -> Gtk.Widget:
         page_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
@@ -13377,9 +13541,12 @@ class SettingsWindow(Adw.ApplicationWindow):
             if not widgets.default_profile_dropdowns:
                 continue
             dropdowns_by_action_key.update(widgets.default_profile_dropdowns)
+        dropdowns_by_action_key.update(self._choices_profile_dropdowns)
         for key in PROFILE_BACKED_COMMAND_KEYS:
             dropdown = dropdowns_by_action_key.get(key)
-            selected = int(dropdown.get_selected()) if dropdown is not None else 0
+            if dropdown is None:
+                continue
+            selected = int(dropdown.get_selected())
             if selected <= 0:
                 editor_action_profile_defaults[key] = None
                 continue
@@ -13555,15 +13722,12 @@ class SettingsWindow(Adw.ApplicationWindow):
             profile_keys = (key,)
             if key == "improve-generated":
                 caption_text = (
-                    "Choose the default profiles used by Improve Generated, Improve Selected, and the Choices commands. "
-                    "Generated Choices and Selected Choices use the two Choices profiles with the Improve prompt below "
-                    "and the Rephrase prompt."
+                    "Choose the default profiles used by Improve Generated and Improve Selected. "
+                    "Generated Choices and Selected Choices use the separate Choices Models page."
                 )
                 profile_keys = (
                     "improve-generated",
                     "improve-selected",
-                    "choices-profile-1",
-                    "choices-profile-2",
                 )
 
             caption = Gtk.Label(label=caption_text, xalign=0)
