@@ -2717,9 +2717,8 @@ class ProseWindow(Adw.ApplicationWindow):
         self._text_draft_insert_end_mark: Gtk.TextMark | None = None
         self._text_draft_pending_regenerate_context: RegenerateContext | None = None
         self._text_draft_last_regenerate_context: RegenerateContext | None = None
-        self._text_draft_regenerate_label: Gtk.Label | None = None
-        self._text_draft_regenerate_profile_chip_box: Gtk.Box | None = None
-        self._text_draft_regenerate_profile_chip_buttons: list[Gtk.Button] = []
+        self._text_draft_regenerate_menu_button: Gtk.MenuButton | None = None
+        self._text_draft_regenerate_profile_buttons: list[Gtk.Button] = []
         self._text_draft_action_buttons: list[Gtk.Widget] = []
         self._text_draft_actions_wrap: Gtk.FlowBox | None = None
         self._text_draft_template_button: Gtk.MenuButton | None = None
@@ -2764,9 +2763,8 @@ class ProseWindow(Adw.ApplicationWindow):
         self._rt_prefix_entry: Gtk.Entry | None = None
         self._ct_prefix_entry: Gtk.Entry | None = None
         self._substitution_rows: list[tuple[Gtk.Entry, Gtk.Entry]] = []
-        self._regenerate_label: Gtk.Label | None = None
-        self._regenerate_profile_chip_box: Gtk.Box | None = None
-        self._regenerate_profile_chip_buttons: list[Gtk.Button] = []
+        self._regenerate_menu_button: Gtk.MenuButton | None = None
+        self._regenerate_profile_buttons: list[Gtk.Button] = []
         self._transform_action_buttons: list[Gtk.Widget] = []
         self._transform_actions_wrap: Gtk.FlowBox | None = None
         self.connect("close-request", self._on_window_close_request)
@@ -2890,7 +2888,15 @@ class ProseWindow(Adw.ApplicationWindow):
         output_header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         output_label = Gtk.Label(label="Original output", xalign=0)
         output_label.add_css_class("dim-label")
+        output_label.set_hexpand(True)
+        output_label.set_halign(Gtk.Align.START)
         output_header.append(output_label)
+        regenerate_menu_button = Gtk.MenuButton(label="Retry")
+        regenerate_menu_button.set_tooltip_text("Try the last generated output again with another model profile.")
+        self._apply_quick_action_button_classes(regenerate_menu_button)
+        output_header.append(regenerate_menu_button)
+        self._regenerate_menu_button = regenerate_menu_button
+        self._rebuild_regenerate_profile_chips()
 
         output_section.append(output_header)
 
@@ -2925,23 +2931,6 @@ class ProseWindow(Adw.ApplicationWindow):
         output_section.append(output_surface)
         self._spelling_output_buffer = output_buffer
         self._editor_output_surface = output_surface
-
-        regenerate_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        regenerate_row.set_hexpand(True)
-
-        regenerate_label = Gtk.Label(label="Try again with:", xalign=0)
-        regenerate_label.add_css_class("dim-label")
-        regenerate_row.append(regenerate_label)
-        self._regenerate_label = regenerate_label
-
-        regenerate_profile_chip_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
-        regenerate_profile_chip_box.set_halign(Gtk.Align.START)
-        regenerate_profile_chip_box.set_visible(False)
-        regenerate_row.append(regenerate_profile_chip_box)
-        self._regenerate_profile_chip_box = regenerate_profile_chip_box
-        self._rebuild_regenerate_profile_chips()
-
-        output_section.append(regenerate_row)
 
         thesaurus_section = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
         thesaurus_section.set_hexpand(True)
@@ -3057,9 +3046,19 @@ class ProseWindow(Adw.ApplicationWindow):
         self._rebuild_text_draft_action_buttons()
 
         original_section = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        original_header_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         original_header = Gtk.Label(label="Original Output", xalign=0)
         original_header.add_css_class("dim-label")
-        original_section.append(original_header)
+        original_header.set_hexpand(True)
+        original_header.set_halign(Gtk.Align.START)
+        original_header_row.append(original_header)
+        regenerate_menu_button = Gtk.MenuButton(label="Retry")
+        regenerate_menu_button.set_tooltip_text("Try the last Text Draft output again with another model profile.")
+        self._apply_quick_action_button_classes(regenerate_menu_button)
+        original_header_row.append(regenerate_menu_button)
+        self._text_draft_regenerate_menu_button = regenerate_menu_button
+        self._rebuild_text_draft_regenerate_profile_chips()
+        original_section.append(original_header_row)
 
         original_surface = Gtk.Stack()
         original_surface.set_hexpand(True)
@@ -3093,21 +3092,6 @@ class ProseWindow(Adw.ApplicationWindow):
         original_surface.set_visible_child_name("original")
         original_section.append(original_surface)
         self._text_draft_original_output_buffer = original_buffer
-
-        regenerate_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        regenerate_row.set_hexpand(True)
-        regenerate_label = Gtk.Label(label="Try again with:", xalign=0)
-        regenerate_label.add_css_class("dim-label")
-        regenerate_row.append(regenerate_label)
-        self._text_draft_regenerate_label = regenerate_label
-
-        regenerate_chip_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
-        regenerate_chip_box.set_halign(Gtk.Align.START)
-        regenerate_chip_box.set_visible(False)
-        regenerate_row.append(regenerate_chip_box)
-        self._text_draft_regenerate_profile_chip_box = regenerate_chip_box
-        self._rebuild_text_draft_regenerate_profile_chips()
-        original_section.append(regenerate_row)
 
         panel.append(original_section)
 
@@ -3285,31 +3269,88 @@ class ProseWindow(Adw.ApplicationWindow):
     def _regenerate_profile_chip_sensitive(self) -> bool:
         return not self._busy and self._active_regenerate_context() is not None
 
-    def _rebuild_regenerate_profile_chips(self) -> None:
-        box = self._regenerate_profile_chip_box
-        label = self._regenerate_label
-        if box is None:
-            return
+    def _build_regenerate_profile_popover(
+        self,
+        profiles: list[ModelProfile],
+        context: RegenerateContext | None,
+        tooltip_builder: Callable[[ModelProfile, RegenerateContext | None], str],
+        activate_handler: Callable[[Gtk.Button | None, str | None], None],
+    ) -> tuple[Gtk.Popover, list[Gtk.Button]]:
+        popover = Gtk.Popover()
+        popover.set_autohide(True)
+        popover.set_cascade_popdown(True)
+        popover.set_position(Gtk.PositionType.BOTTOM)
 
-        self._clear_box(box)
-        self._regenerate_profile_chip_buttons = []
-        profiles = self._configured_regenerate_profiles()
-        box.set_visible(bool(profiles))
-        context = self._active_regenerate_context()
-        if label is not None:
-            label.set_label("Try again with:")
-        if not profiles:
-            return
+        content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+        content.set_margin_top(10)
+        content.set_margin_bottom(10)
+        content.set_margin_start(10)
+        content.set_margin_end(10)
 
+        title = Gtk.Label(label="Try again with", xalign=0)
+        title.add_css_class("caption")
+        title.add_css_class("dim-label")
+        content.append(title)
+
+        profile_grid = Gtk.FlowBox()
+        profile_grid.set_selection_mode(Gtk.SelectionMode.NONE)
+        profile_grid.set_column_spacing(6)
+        profile_grid.set_row_spacing(6)
+        profile_grid.set_max_children_per_line(2)
+
+        buttons: list[Gtk.Button] = []
         for profile in profiles:
             button = Gtk.Button(label=self._profile_slot_label(profile))
             button.add_css_class("flat")
             button.add_css_class("improve-profile-chip")
-            button.set_tooltip_text(self._regenerate_profile_chip_tooltip(profile, context))
-            button.connect("clicked", self._on_regenerate_clicked, profile.display_name())
+            button.set_tooltip_text(tooltip_builder(profile, context))
+            button.connect(
+                "clicked",
+                self._on_regenerate_profile_menu_clicked,
+                popover,
+                activate_handler,
+                profile.display_name(),
+            )
+            profile_grid.append(button)
+            buttons.append(button)
+
+        content.append(profile_grid)
+        popover.set_child(content)
+        return popover, buttons
+
+    def _on_regenerate_profile_menu_clicked(
+        self,
+        _button: Gtk.Button,
+        popover: Gtk.Popover,
+        activate_handler: Callable[[Gtk.Button | None, str | None], None],
+        profile_nickname: str,
+    ) -> None:
+        popover.popdown()
+        activate_handler(None, profile_nickname)
+
+    def _rebuild_regenerate_profile_chips(self) -> None:
+        menu_button = self._regenerate_menu_button
+        if menu_button is None:
+            return
+
+        self._regenerate_profile_buttons = []
+        profiles = self._configured_regenerate_profiles()
+        context = self._active_regenerate_context()
+        menu_button.set_visible(bool(profiles))
+        menu_button.set_sensitive(self._regenerate_profile_chip_sensitive())
+        if not profiles:
+            return
+
+        popover, buttons = self._build_regenerate_profile_popover(
+            profiles,
+            context,
+            self._regenerate_profile_chip_tooltip,
+            self._on_regenerate_clicked,
+        )
+        for button in buttons:
             button.set_sensitive(self._regenerate_profile_chip_sensitive())
-            box.append(button)
-            self._regenerate_profile_chip_buttons.append(button)
+        menu_button.set_popover(popover)
+        self._regenerate_profile_buttons = buttons
 
     def _make_regenerate_context(self, action_key: str, source_text: str) -> RegenerateContext | None:
         insert_mode = REGENERATE_INSERT_MODE_BY_ACTION.get(action_key)
@@ -3371,30 +3412,28 @@ class ProseWindow(Adw.ApplicationWindow):
         return tooltip
 
     def _rebuild_text_draft_regenerate_profile_chips(self) -> None:
-        box = self._text_draft_regenerate_profile_chip_box
-        label = self._text_draft_regenerate_label
-        if box is None:
+        menu_button = self._text_draft_regenerate_menu_button
+        if menu_button is None:
             return
 
-        self._clear_box(box)
-        self._text_draft_regenerate_profile_chip_buttons = []
+        self._text_draft_regenerate_profile_buttons = []
         profiles = self._configured_regenerate_profiles()
-        box.set_visible(bool(profiles))
         context = self._active_text_draft_regenerate_context()
-        if label is not None:
-            label.set_label("Try again with:")
+        menu_button.set_visible(bool(profiles))
+        menu_button.set_sensitive(self._text_draft_regenerate_profile_chip_sensitive())
         if not profiles:
             return
 
-        for profile in profiles:
-            button = Gtk.Button(label=self._profile_slot_label(profile))
-            button.add_css_class("flat")
-            button.add_css_class("improve-profile-chip")
-            button.set_tooltip_text(self._text_draft_regenerate_profile_chip_tooltip(profile, context))
-            button.connect("clicked", self._on_text_draft_regenerate_clicked, profile.display_name())
+        popover, buttons = self._build_regenerate_profile_popover(
+            profiles,
+            context,
+            self._text_draft_regenerate_profile_chip_tooltip,
+            self._on_text_draft_regenerate_clicked,
+        )
+        for button in buttons:
             button.set_sensitive(self._text_draft_regenerate_profile_chip_sensitive())
-            box.append(button)
-            self._text_draft_regenerate_profile_chip_buttons.append(button)
+        menu_button.set_popover(popover)
+        self._text_draft_regenerate_profile_buttons = buttons
 
     def _make_text_draft_regenerate_context(self, action_key: str, source_text: str) -> RegenerateContext | None:
         if action_key not in {"improve-generated", "rephrase-generated", "improve-selected"}:
@@ -9784,11 +9823,15 @@ button.improve-profile-chip {{
             self._thesaurus_btn.set_sensitive(not busy)
         if hasattr(self, "_reference_btn"):
             self._reference_btn.set_sensitive(not busy)
-        if hasattr(self, "_regenerate_profile_chip_buttons"):
-            for button in self._regenerate_profile_chip_buttons:
+        if getattr(self, "_regenerate_menu_button", None) is not None:
+            self._regenerate_menu_button.set_sensitive(self._regenerate_profile_chip_sensitive())
+        if hasattr(self, "_regenerate_profile_buttons"):
+            for button in self._regenerate_profile_buttons:
                 button.set_sensitive(self._regenerate_profile_chip_sensitive())
-        if hasattr(self, "_text_draft_regenerate_profile_chip_buttons"):
-            for button in self._text_draft_regenerate_profile_chip_buttons:
+        if getattr(self, "_text_draft_regenerate_menu_button", None) is not None:
+            self._text_draft_regenerate_menu_button.set_sensitive(self._text_draft_regenerate_profile_chip_sensitive())
+        if hasattr(self, "_text_draft_regenerate_profile_buttons"):
+            for button in self._text_draft_regenerate_profile_buttons:
                 button.set_sensitive(self._text_draft_regenerate_profile_chip_sensitive())
         if hasattr(self, "_transform_action_buttons"):
             for button in self._transform_action_buttons:
