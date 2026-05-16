@@ -154,6 +154,8 @@ CONFIG_KEY_SHARED_STYLE_RULES = "shared_style_rules"
 CONFIG_KEY_TEXT_DRAFT_EXTERNAL_ACTION = "text_draft_external_action"
 CONFIG_KEY_TEXT_DRAFT_EXTERNAL_ACTIONS = "text_draft_external_actions"
 TEXT_DRAFT_EXTERNAL_ACTION_DRAFT_FILE_TOKEN = "{draft_file}"
+TEXT_DRAFT_CASE_SUGGESTION_MIN_PREFIX = 3
+TEXT_DRAFT_CASE_SUGGESTION_LIMIT = 8
 DEFAULT_TEXT_DRAFT_EXTERNAL_ACTION_ICON = "utilities-terminal-symbolic"
 
 DEFAULT_SHARED_STYLE_RULES = """## STYLE RULES
@@ -2595,6 +2597,12 @@ class TextDraftTemplateCategory:
     template_paths: list[Path]
 
 
+@dataclass(frozen=True)
+class TextDraftCaseSuggestion:
+    citation: str
+    search_terms: tuple[str, ...]
+
+
 class ProseApp(Adw.Application):
     def __init__(self) -> None:
         super().__init__(application_id=APP_ID, flags=Gio.ApplicationFlags.FLAGS_NONE)
@@ -2727,6 +2735,16 @@ class ProseWindow(Adw.ApplicationWindow):
         self._text_draft_template_emails: list[tuple[str, str]] = []
         self._text_draft_external_action_box: Gtk.Box | None = None
         self._text_draft_external_action_buttons: list[Gtk.Button] = []
+        self._text_draft_case_popover: Gtk.Popover | None = None
+        self._text_draft_case_list_box: Gtk.ListBox | None = None
+        self._text_draft_case_suggestions: list[TextDraftCaseSuggestion] = []
+        self._text_draft_case_selected_index = 0
+        self._text_draft_case_prefix = ""
+        self._text_draft_case_prefix_bounds: tuple[int, int] | None = None
+        self._text_draft_case_inserting = False
+        self._text_draft_case_index: list[TextDraftCaseSuggestion] = []
+        self._text_draft_case_index_path: Path | None = None
+        self._text_draft_case_index_mtime_ns: int | None = None
         self._text_draft_temp_path: Path | None = None
         self._text_draft_temp_flush_source_id = 0
         self._text_draft_temp_dirty = False
@@ -3156,6 +3174,10 @@ class ProseWindow(Adw.ApplicationWindow):
         draft_view.set_bottom_margin(SPELLING_OUTPUT_PADDING_PX)
         draft_view.add_css_class("spelling-output-view")
         draft_view.add_css_class("editable-text-view")
+        draft_key_controller = Gtk.EventControllerKey()
+        draft_key_controller.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
+        draft_key_controller.connect("key-pressed", self._on_text_draft_key_pressed)
+        draft_view.add_controller(draft_key_controller)
         draft_scroller.set_child(draft_view)
         draft_surface.add_named(draft_scroller, "draft")
         draft_surface.set_visible_child_name("draft")
@@ -3172,6 +3194,13 @@ class ProseWindow(Adw.ApplicationWindow):
         while child is not None:
             next_child = child.get_next_sibling()
             flow_box.remove(child)
+            child = next_child
+
+    def _clear_list_box(self, list_box: Gtk.ListBox) -> None:
+        child = list_box.get_first_child()
+        while child is not None:
+            next_child = child.get_next_sibling()
+            list_box.remove(child)
             child = next_child
 
     def _clear_box(self, box: Gtk.Box) -> None:
@@ -3850,6 +3879,14 @@ button.improve-profile-chip {{
 .reference-query-entry {{
   font-size: {SPELLING_OUTPUT_FONT_SIZE_PX}px;
 }}
+.text-draft-case-suggestion-list {{
+  min-width: 360px;
+  padding: 4px;
+}}
+.text-draft-case-suggestion-row {{
+  border-radius: 6px;
+  padding: 6px 8px;
+}}
 """
         provider = Gtk.CssProvider()
         provider.load_from_data(css.encode("utf-8"))
@@ -4376,6 +4413,7 @@ button.improve-profile-chip {{
         self._concordance_file_path = (
             concordance_file_path.expanduser().resolve(strict=False) if concordance_file_path else None
         )
+        self._load_text_draft_case_index(force=True)
         save_model_profiles(model_profiles)
         save_proofread_settings(proof_settings)
         save_spellingstyle_settings(spelling_settings)
@@ -8743,12 +8781,289 @@ button.improve-profile-chip {{
 
     def _on_text_draft_buffer_changed(self, _buffer: Gtk.TextBuffer) -> None:
         self._text_draft_temp_dirty = True
+        if not self._text_draft_case_inserting:
+            self._refresh_text_draft_case_suggestions()
         if self._text_draft_temp_flush_source_id:
             return
         self._text_draft_temp_flush_source_id = GLib.timeout_add(
             TEXT_DRAFT_TEMP_FLUSH_DELAY_MS,
             self._flush_text_draft_temp_file,
         )
+
+    def _on_text_draft_key_pressed(
+        self,
+        _controller: Gtk.EventControllerKey,
+        keyval: int,
+        _keycode: int,
+        state: Gdk.ModifierType,
+    ) -> bool:
+        if (
+            self._text_draft_case_popover is None
+            or not self._text_draft_case_suggestions
+            or not self._text_draft_case_popover.get_visible()
+        ):
+            return False
+        if keyval in (Gdk.KEY_Escape,):
+            self._hide_text_draft_case_suggestions()
+            return True
+        if keyval in (Gdk.KEY_Return, Gdk.KEY_KP_Enter):
+            self._insert_selected_text_draft_case_suggestion()
+            return True
+        if keyval in (Gdk.KEY_Down, Gdk.KEY_Tab, Gdk.KEY_ISO_Left_Tab):
+            direction = -1 if state & Gdk.ModifierType.SHIFT_MASK else 1
+            if keyval == Gdk.KEY_ISO_Left_Tab:
+                direction = -1
+            self._move_text_draft_case_selection(direction)
+            return True
+        if keyval == Gdk.KEY_Up:
+            self._move_text_draft_case_selection(-1)
+            return True
+        return False
+
+    def _hide_text_draft_case_suggestions(self) -> None:
+        if self._text_draft_case_popover is not None:
+            self._text_draft_case_popover.popdown()
+        self._text_draft_case_suggestions = []
+        self._text_draft_case_selected_index = 0
+        self._text_draft_case_prefix = ""
+        self._text_draft_case_prefix_bounds = None
+
+    def _normalize_text_draft_case_lookup_text(self, text: str) -> str:
+        return re.sub(r"\s+", " ", text).strip().lower()
+
+    def _compact_text_draft_case_lookup_text(self, text: str) -> str:
+        return re.sub(r"[^a-z0-9]+", "", text.lower())
+
+    def _text_draft_case_search_terms(self, term: str, citation: str) -> tuple[str, ...]:
+        candidates = [term, citation, self._autotext_display_name(citation)]
+        for candidate in list(candidates):
+            candidates.extend(re.findall(r"[A-Za-z][A-Za-z0-9.'’&-]*", candidate))
+        seen: set[str] = set()
+        terms: list[str] = []
+        for candidate in candidates:
+            for normalized in (
+                self._normalize_text_draft_case_lookup_text(candidate),
+                self._compact_text_draft_case_lookup_text(candidate),
+            ):
+                if len(normalized) < TEXT_DRAFT_CASE_SUGGESTION_MIN_PREFIX or normalized in seen:
+                    continue
+                seen.add(normalized)
+                terms.append(normalized)
+        return tuple(terms)
+
+    def _load_text_draft_case_index(self, *, force: bool = False) -> list[TextDraftCaseSuggestion]:
+        concordance_file = self._concordance_file_path
+        if concordance_file is None:
+            self._text_draft_case_index = []
+            self._text_draft_case_index_path = None
+            self._text_draft_case_index_mtime_ns = None
+            return []
+        try:
+            stat = concordance_file.stat()
+        except OSError:
+            self._text_draft_case_index = []
+            self._text_draft_case_index_path = concordance_file
+            self._text_draft_case_index_mtime_ns = None
+            return []
+        if (
+            not force
+            and self._text_draft_case_index_path == concordance_file
+            and self._text_draft_case_index_mtime_ns == stat.st_mtime_ns
+        ):
+            return self._text_draft_case_index
+
+        suggestions: list[TextDraftCaseSuggestion] = []
+        seen_citations: set[str] = set()
+        try:
+            lines = concordance_file.read_text(encoding="utf-8", errors="ignore").splitlines()
+        except OSError:
+            lines = []
+        for raw_line in lines:
+            line = raw_line.strip()
+            if not line or line.startswith("#"):
+                continue
+            parts = [part.strip() for part in line.split(";")]
+            if len(parts) < 3 or parts[2] != "Cases":
+                continue
+            term = parts[0]
+            citation = parts[1] or term
+            if not citation or citation in seen_citations:
+                continue
+            search_terms = self._text_draft_case_search_terms(term, citation)
+            if not search_terms:
+                continue
+            seen_citations.add(citation)
+            suggestions.append(TextDraftCaseSuggestion(citation=citation, search_terms=search_terms))
+        suggestions.sort(key=lambda suggestion: suggestion.citation.lower())
+        self._text_draft_case_index = suggestions
+        self._text_draft_case_index_path = concordance_file
+        self._text_draft_case_index_mtime_ns = stat.st_mtime_ns
+        return suggestions
+
+    def _current_text_draft_case_prefix(self) -> tuple[str, int, int] | None:
+        buffer = self._text_draft_buffer
+        if buffer is None or buffer.get_has_selection():
+            return None
+        cursor_iter = buffer.get_iter_at_mark(buffer.get_insert())
+        start_iter = cursor_iter.copy()
+        while True:
+            previous = start_iter.copy()
+            if not previous.backward_char():
+                break
+            char = previous.get_char()
+            if not re.fullmatch(r"[A-Za-z0-9.'’]", char or ""):
+                break
+            start_iter = previous
+        prefix = buffer.get_text(start_iter, cursor_iter, True)
+        if len(prefix) < TEXT_DRAFT_CASE_SUGGESTION_MIN_PREFIX:
+            return None
+        return (prefix, start_iter.get_offset(), cursor_iter.get_offset())
+
+    def _matching_text_draft_case_suggestions(self, prefix: str) -> list[TextDraftCaseSuggestion]:
+        normalized_prefix = self._normalize_text_draft_case_lookup_text(prefix)
+        compact_prefix = self._compact_text_draft_case_lookup_text(prefix)
+        if (
+            len(normalized_prefix) < TEXT_DRAFT_CASE_SUGGESTION_MIN_PREFIX
+            and len(compact_prefix) < TEXT_DRAFT_CASE_SUGGESTION_MIN_PREFIX
+        ):
+            return []
+        prefixes = tuple(
+            candidate
+            for candidate in (normalized_prefix, compact_prefix)
+            if len(candidate) >= TEXT_DRAFT_CASE_SUGGESTION_MIN_PREFIX
+        )
+        matches: list[TextDraftCaseSuggestion] = []
+        for suggestion in self._load_text_draft_case_index():
+            if any(
+                term.startswith(prefix_candidate)
+                for prefix_candidate in prefixes
+                for term in suggestion.search_terms
+            ):
+                matches.append(suggestion)
+                if len(matches) >= TEXT_DRAFT_CASE_SUGGESTION_LIMIT:
+                    break
+        return matches
+
+    def _refresh_text_draft_case_suggestions(self) -> None:
+        if self._text_draft_buffer is None or self._text_draft_view is None:
+            return
+        prefix_info = self._current_text_draft_case_prefix()
+        if prefix_info is None:
+            self._hide_text_draft_case_suggestions()
+            return
+        prefix, start_offset, end_offset = prefix_info
+        suggestions = self._matching_text_draft_case_suggestions(prefix)
+        if not suggestions:
+            self._hide_text_draft_case_suggestions()
+            return
+        if prefix != self._text_draft_case_prefix:
+            self._text_draft_case_selected_index = 0
+            self._text_draft_case_prefix = prefix
+        self._text_draft_case_suggestions = suggestions
+        self._text_draft_case_prefix_bounds = (start_offset, end_offset)
+        self._text_draft_case_selected_index = min(self._text_draft_case_selected_index, len(suggestions) - 1)
+        self._show_text_draft_case_suggestions()
+
+    def _ensure_text_draft_case_popover(self) -> Gtk.Popover | None:
+        view = self._text_draft_view
+        if view is None:
+            return None
+        if self._text_draft_case_popover is not None and self._text_draft_case_list_box is not None:
+            return self._text_draft_case_popover
+        popover = Gtk.Popover()
+        popover.set_autohide(False)
+        popover.set_has_arrow(False)
+        popover.set_parent(view)
+        list_box = Gtk.ListBox()
+        list_box.add_css_class("text-draft-case-suggestion-list")
+        list_box.set_selection_mode(Gtk.SelectionMode.SINGLE)
+        list_box.connect("row-activated", self._on_text_draft_case_row_activated)
+        popover.set_child(list_box)
+        self._text_draft_case_popover = popover
+        self._text_draft_case_list_box = list_box
+        return popover
+
+    def _show_text_draft_case_suggestions(self) -> None:
+        buffer = self._text_draft_buffer
+        view = self._text_draft_view
+        list_box = self._text_draft_case_list_box
+        popover = self._ensure_text_draft_case_popover()
+        if buffer is None or view is None or popover is None:
+            return
+        list_box = self._text_draft_case_list_box
+        if list_box is None:
+            return
+        self._clear_list_box(list_box)
+        for index, suggestion in enumerate(self._text_draft_case_suggestions):
+            row = Gtk.ListBoxRow()
+            row.set_selectable(True)
+            row.set_activatable(True)
+            row.add_css_class("text-draft-case-suggestion-row")
+            row_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+            label = Gtk.Label(label=suggestion.citation, xalign=0)
+            label.set_wrap(True)
+            row_box.append(label)
+            row.set_child(row_box)
+            list_box.append(row)
+        selected_row = list_box.get_row_at_index(self._text_draft_case_selected_index)
+        if selected_row is not None:
+            list_box.select_row(selected_row)
+
+        cursor_iter = buffer.get_iter_at_mark(buffer.get_insert())
+        location = view.get_iter_location(cursor_iter)
+        x, y = view.buffer_to_window_coords(Gtk.TextWindowType.TEXT, location.x, location.y + location.height)
+        pointing_to = Gdk.Rectangle()
+        pointing_to.x = x
+        pointing_to.y = y
+        pointing_to.width = max(1, location.width)
+        pointing_to.height = max(1, location.height)
+        popover.set_pointing_to(pointing_to)
+        popover.popup()
+
+    def _move_text_draft_case_selection(self, direction: int) -> None:
+        if not self._text_draft_case_suggestions:
+            return
+        self._text_draft_case_selected_index = (
+            self._text_draft_case_selected_index + direction
+        ) % len(self._text_draft_case_suggestions)
+        list_box = self._text_draft_case_list_box
+        if list_box is not None:
+            row = list_box.get_row_at_index(self._text_draft_case_selected_index)
+            if row is not None:
+                list_box.select_row(row)
+
+    def _on_text_draft_case_row_activated(self, _list_box: Gtk.ListBox, row: Gtk.ListBoxRow) -> None:
+        row_index = row.get_index()
+        if 0 <= row_index < len(self._text_draft_case_suggestions):
+            self._text_draft_case_selected_index = row_index
+        self._insert_selected_text_draft_case_suggestion()
+
+    def _insert_selected_text_draft_case_suggestion(self) -> None:
+        buffer = self._text_draft_buffer
+        if buffer is None or not self._text_draft_case_suggestions:
+            self._hide_text_draft_case_suggestions()
+            return
+        bounds = self._text_draft_case_prefix_bounds or (
+            self._current_text_draft_case_prefix() or ("", 0, 0)
+        )[1:]
+        if len(bounds) != 2:
+            self._hide_text_draft_case_suggestions()
+            return
+        start_offset, end_offset = bounds
+        suggestion = self._text_draft_case_suggestions[self._text_draft_case_selected_index]
+        start_iter = buffer.get_iter_at_offset(start_offset)
+        end_iter = buffer.get_iter_at_offset(end_offset)
+        self._text_draft_case_inserting = True
+        try:
+            buffer.delete(start_iter, end_iter)
+            insert_iter = buffer.get_iter_at_offset(start_offset)
+            buffer.insert(insert_iter, suggestion.citation)
+            insert_iter = buffer.get_iter_at_offset(start_offset + len(suggestion.citation))
+            buffer.place_cursor(insert_iter)
+        finally:
+            self._text_draft_case_inserting = False
+            self._hide_text_draft_case_suggestions()
+            self._text_draft_temp_dirty = True
 
     def _ensure_text_draft_temp_path(self) -> Path | None:
         if self._text_draft_temp_path is not None:
