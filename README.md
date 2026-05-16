@@ -67,6 +67,7 @@ This keeps Prose's Writer session isolated from your ordinary day-to-day LibreOf
 - Python 3
 - GTK 4
 - Libadwaita 1
+- GTK4 VTE runtime/introspection packages for the embedded Text Draft terminal
 - LibreOffice Writer installed as a normal `.deb` or `.rpm`
 - LibreOffice Python UNO bridge files available locally
 - network/API access for whichever LLM provider you configure
@@ -105,7 +106,19 @@ After installation, confirm that LibreOffice's program directory exists in a nor
 - `/usr/lib/libreoffice/program`
 - `/usr/lib64/libreoffice/program`
 
-### 2. Confirm Prose can find `python-uno`
+### 2. Install GTK4 VTE for the embedded terminal
+
+The Text Draft `Codex` action embeds an interactive terminal inside Prose. That terminal requires the GTK4 VTE runtime and GObject introspection bindings.
+
+On Debian/Ubuntu, install:
+
+```bash
+sudo apt install gir1.2-vte-3.91 libvte-2.91-gtk4-0
+```
+
+If these packages are missing, Prose still starts, but the embedded Text Draft terminal is unavailable.
+
+### 3. Confirm Prose can find `python-uno`
 
 Prose tries to auto-detect LibreOffice's Python bridge files. If it cannot, open Settings and set:
 

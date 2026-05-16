@@ -7,6 +7,7 @@ import json
 import importlib
 import os
 import re
+import signal
 import shlex
 import shutil
 import subprocess
@@ -28,6 +29,15 @@ import gi
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Adw, Gdk, Gio, GLib, Gtk, Pango  # type: ignore
+
+Vte = None  # type: ignore[assignment]
+try:
+    gi.require_version("Vte", "3.91")
+    from gi.repository import Vte as VteModule  # type: ignore
+
+    Vte = VteModule  # type: ignore[assignment]
+except (ImportError, ValueError):
+    Vte = None  # type: ignore[assignment]
 
 uno = None  # type: ignore
 PropertyValue = None  # type: ignore[assignment]
@@ -157,6 +167,50 @@ TEXT_DRAFT_EXTERNAL_ACTION_DRAFT_FILE_TOKEN = "{draft_file}"
 TEXT_DRAFT_CASE_SUGGESTION_MIN_PREFIX = 3
 TEXT_DRAFT_CASE_SUGGESTION_LIMIT = 8
 DEFAULT_TEXT_DRAFT_EXTERNAL_ACTION_ICON = "utilities-terminal-symbolic"
+PROSE_TERMINAL_DARK_FOREGROUND = "#f2f4f8"
+PROSE_TERMINAL_DARK_SELECTION = "#3d536b"
+PROSE_TERMINAL_DARK_CURSOR = "#8ab4f8"
+PROSE_TERMINAL_DARK_CURSOR_FOREGROUND = "#111318"
+PROSE_TERMINAL_DARK_PALETTE = (
+    "#1f2329",
+    "#ff7b86",
+    "#7bd88f",
+    "#f4cf65",
+    "#8ab4f8",
+    "#c58af9",
+    "#6fd6e8",
+    "#e6e9ef",
+    "#7f8b99",
+    "#ff9aa2",
+    "#9be7ad",
+    "#f8dd85",
+    "#a8c7fa",
+    "#d7aefb",
+    "#8de8f7",
+    "#ffffff",
+)
+PROSE_TERMINAL_LIGHT_FOREGROUND = "#20242c"
+PROSE_TERMINAL_LIGHT_SELECTION = "#d7e4f5"
+PROSE_TERMINAL_LIGHT_CURSOR = "#1f66d1"
+PROSE_TERMINAL_LIGHT_CURSOR_FOREGROUND = "#ffffff"
+PROSE_TERMINAL_LIGHT_PALETTE = (
+    "#2d333b",
+    "#c2414b",
+    "#2f8f4e",
+    "#8a6a00",
+    "#1f66d1",
+    "#8c4ac9",
+    "#1f7a8c",
+    "#f5f7fa",
+    "#66717f",
+    "#d95560",
+    "#3fae63",
+    "#a78300",
+    "#327fe3",
+    "#a35bd8",
+    "#2695aa",
+    "#ffffff",
+)
 
 DEFAULT_SHARED_STYLE_RULES = """## STYLE RULES
 
@@ -898,6 +952,45 @@ def _format_action_param(variant: GLib.Variant) -> str:
     if variant.is_of_type(GLib.VariantType.new("i")):
         return f"<int32 {printed}>"
     return f"<{printed}>"
+
+
+def _rgba_color(spec: str) -> Gdk.RGBA:
+    color = Gdk.RGBA()
+    if not color.parse(spec):
+        raise ValueError(f"Invalid color: {spec}")
+    return color
+
+
+def _transparent_rgba() -> Gdk.RGBA:
+    return Gdk.RGBA(red=0.0, green=0.0, blue=0.0, alpha=0.0)
+
+
+def _apply_prose_terminal_theme(terminal: Any) -> None:
+    dark = Adw.StyleManager.get_default().get_dark()
+    if dark:
+        foreground_spec = PROSE_TERMINAL_DARK_FOREGROUND
+        selection_spec = PROSE_TERMINAL_DARK_SELECTION
+        cursor_spec = PROSE_TERMINAL_DARK_CURSOR
+        cursor_foreground_spec = PROSE_TERMINAL_DARK_CURSOR_FOREGROUND
+        palette_specs = PROSE_TERMINAL_DARK_PALETTE
+    else:
+        foreground_spec = PROSE_TERMINAL_LIGHT_FOREGROUND
+        selection_spec = PROSE_TERMINAL_LIGHT_SELECTION
+        cursor_spec = PROSE_TERMINAL_LIGHT_CURSOR
+        cursor_foreground_spec = PROSE_TERMINAL_LIGHT_CURSOR_FOREGROUND
+        palette_specs = PROSE_TERMINAL_LIGHT_PALETTE
+
+    foreground = _rgba_color(foreground_spec)
+    background = _transparent_rgba()
+    palette = [_rgba_color(spec) for spec in palette_specs]
+    terminal.set_colors(foreground, background, palette)
+    terminal.set_color_background(background)
+    terminal.set_color_foreground(foreground)
+    terminal.set_clear_background(False)
+    terminal.set_color_cursor(_rgba_color(cursor_spec))
+    terminal.set_color_cursor_foreground(_rgba_color(cursor_foreground_spec))
+    terminal.set_color_highlight(_rgba_color(selection_spec))
+    terminal.set_color_highlight_foreground(foreground)
 
 
 @dataclass
@@ -2713,6 +2806,11 @@ class ProseWindow(Adw.ApplicationWindow):
         self._text_draft_original_output_buffer: Gtk.TextBuffer | None = None
         self._text_draft_buffer: Gtk.TextBuffer | None = None
         self._text_draft_view: Gtk.TextView | None = None
+        self._text_draft_draft_surface: Gtk.Stack | None = None
+        self._text_draft_terminal = None
+        self._text_draft_terminal_close_button: Gtk.Button | None = None
+        self._text_draft_terminal_active = False
+        self._text_draft_terminal_pid: int | None = None
         self._text_draft_insert_start_mark: Gtk.TextMark | None = None
         self._text_draft_insert_end_mark: Gtk.TextMark | None = None
         self._text_draft_pending_regenerate_context: RegenerateContext | None = None
@@ -2840,7 +2938,7 @@ class ProseWindow(Adw.ApplicationWindow):
         editor_page = stack.add_titled(editor_panel, "editor", "Editor")
         editor_page.set_icon_name("document-edit-symbolic")
         text_draft_page = stack.add_titled(text_draft_panel, "text-draft", "Text Draft")
-        text_draft_page.set_icon_name("document-edit-symbolic")
+        text_draft_page.set_icon_name("text-x-generic-symbolic")
         proof_page = stack.add_titled(proof_panel, "proof", "Proof Reader")
         proof_page.set_icon_name("tools-check-spelling-symbolic")
         prefixes_page = stack.add_titled(prefixes_panel, "prefixes", "Prefixes")
@@ -3117,6 +3215,16 @@ class ProseWindow(Adw.ApplicationWindow):
         draft_header_row.append(template_email_box)
         self._text_draft_template_email_box = template_email_box
 
+        terminal_close_btn = Gtk.Button(icon_name="go-previous-symbolic")
+        terminal_close_btn.add_css_class("flat")
+        terminal_close_btn.add_css_class("transform-pill")
+        terminal_close_btn.add_css_class("transform-pill-compact")
+        terminal_close_btn.set_tooltip_text("Return to the Draft text box.")
+        terminal_close_btn.set_visible(False)
+        terminal_close_btn.connect("clicked", self._on_text_draft_terminal_close_clicked)
+        draft_header_row.append(terminal_close_btn)
+        self._text_draft_terminal_close_button = terminal_close_btn
+
         external_action_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
         draft_header_row.append(external_action_box)
         self._text_draft_external_action_box = external_action_box
@@ -3164,10 +3272,53 @@ class ProseWindow(Adw.ApplicationWindow):
         draft_view.add_controller(draft_key_controller)
         draft_scroller.set_child(draft_view)
         draft_surface.add_named(draft_scroller, "draft")
+
+        if Vte is not None:
+            terminal_frame = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+            terminal_frame.set_hexpand(True)
+            terminal_frame.set_vexpand(True)
+            terminal_frame.set_size_request(-1, 260)
+            terminal_frame.add_css_class("text-draft-terminal-frame")
+            terminal_frame.set_overflow(Gtk.Overflow.HIDDEN)
+            terminal = Vte.Terminal()
+            terminal.set_hexpand(True)
+            terminal.set_vexpand(True)
+            terminal.set_margin_top(8)
+            terminal.set_margin_bottom(8)
+            terminal.set_margin_start(8)
+            terminal.set_margin_end(8)
+            terminal.add_css_class("text-draft-terminal")
+            _apply_prose_terminal_theme(terminal)
+            Adw.StyleManager.get_default().connect(
+                "notify::dark",
+                self._on_text_draft_terminal_style_changed,
+            )
+            terminal.connect("child-exited", self._on_text_draft_terminal_child_exited)
+            terminal_frame.append(terminal)
+            draft_surface.add_named(terminal_frame, "terminal")
+            self._text_draft_terminal = terminal
+        else:
+            terminal_missing = Gtk.Label(
+                label=(
+                    "Embedded terminal support requires GTK4 VTE "
+                    "(gir1.2-vte-3.91 and libvte-2.91-gtk4-0)."
+                ),
+                xalign=0,
+            )
+            terminal_missing.set_wrap(True)
+            terminal_missing.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
+            terminal_missing.set_margin_top(SPELLING_OUTPUT_PADDING_PX)
+            terminal_missing.set_margin_bottom(SPELLING_OUTPUT_PADDING_PX)
+            terminal_missing.set_margin_start(SPELLING_OUTPUT_PADDING_PX)
+            terminal_missing.set_margin_end(SPELLING_OUTPUT_PADDING_PX)
+            terminal_missing.add_css_class("dim-label")
+            draft_surface.add_named(terminal_missing, "terminal-missing")
+
         draft_surface.set_visible_child_name("draft")
         draft_section.append(draft_surface)
         self._text_draft_buffer = draft_buffer
         self._text_draft_view = draft_view
+        self._text_draft_draft_surface = draft_surface
 
         self._refresh_text_draft_templates()
         panel.append(draft_section)
@@ -3665,11 +3816,13 @@ class ProseWindow(Adw.ApplicationWindow):
         for external_action in self._text_draft_external_actions:
             if not external_action.is_configured():
                 continue
-            button = Gtk.Button(label=external_action.label, icon_name=external_action.icon_name)
+            display_label = self._text_draft_external_action_display_label(external_action)
+            icon_name = self._text_draft_external_action_display_icon(external_action)
+            button = Gtk.Button(label=display_label, icon_name=icon_name)
             button.add_css_class("flat")
             button.add_css_class("transform-pill")
             button.add_css_class("transform-pill-compact")
-            tooltip = external_action.tooltip.strip() or f"Run {external_action.label} with the current Draft text."
+            tooltip = external_action.tooltip.strip() or f"Run {display_label} with the current Draft text."
             button.set_tooltip_text(tooltip)
             button.set_sensitive(not self._busy)
             button.connect(
@@ -3812,6 +3965,16 @@ textview.spelling-output-view.view border {{
   background-color: alpha(@window_fg_color, 0.08);
   border: none;
   box-shadow: none;
+}}
+.text-draft-terminal-frame {{
+  border-radius: {SPELLING_OUTPUT_CORNER_RADIUS_PX}px;
+  background-color: transparent;
+  border: none;
+  box-shadow: none;
+}}
+.text-draft-terminal {{
+  background-color: transparent;
+  color: @window_fg_color;
 }}
 .editor-lookup-surface > stackpage {{
   background-color: transparent;
@@ -5250,6 +5413,159 @@ button.improve-profile-chip {{
         expanded = value.replace(TEXT_DRAFT_EXTERNAL_ACTION_DRAFT_FILE_TOKEN, str(draft_path))
         return os.path.expandvars(os.path.expanduser(expanded))
 
+    @staticmethod
+    def _is_text_draft_case_log_action(action: TextDraftExternalAction) -> bool:
+        if action.label.strip().lower() in {"log", "log entry", "case log"}:
+            return True
+        return any("prose-text-draft-case-log.sh" in part for part in action.command)
+
+    @staticmethod
+    def _text_draft_external_action_display_label(action: TextDraftExternalAction) -> str:
+        if ProseWindow._is_text_draft_case_log_action(action):
+            return "Log Entry"
+        label = action.label.strip()
+        return label or "External"
+
+    @staticmethod
+    def _text_draft_external_action_display_icon(action: TextDraftExternalAction) -> str:
+        if ProseWindow._is_text_draft_case_log_action(action):
+            return "document-edit-symbolic"
+        return action.icon_name.strip() or DEFAULT_TEXT_DRAFT_EXTERNAL_ACTION_ICON
+
+    def _is_text_draft_codex_action(self, action: TextDraftExternalAction) -> bool:
+        if action.label.strip().lower() == "codex":
+            return True
+        return any("prose-text-draft-codex-ghostty.sh" in part for part in action.command)
+
+    def _show_text_draft_terminal_controls(self) -> None:
+        if self._text_draft_terminal_close_button is not None:
+            self._text_draft_terminal_close_button.set_visible(True)
+            self._text_draft_terminal_close_button.set_sensitive(True)
+
+    def _hide_text_draft_terminal_controls(self) -> None:
+        if self._text_draft_terminal_close_button is not None:
+            self._text_draft_terminal_close_button.set_visible(False)
+
+    def _text_draft_embedded_terminal_unavailable(self) -> None:
+        if self._text_draft_draft_surface is not None:
+            self._text_draft_draft_surface.set_visible_child_name("terminal-missing")
+            self._show_text_draft_terminal_controls()
+        message = "Install gir1.2-vte-3.91 and libvte-2.91-gtk4-0 to use embedded Codex."
+        self._status_label.set_label(message)
+        self._show_toast(message)
+
+    def _start_text_draft_codex_terminal(self, action: TextDraftExternalAction, draft_path: Path) -> None:
+        terminal = self._text_draft_terminal
+        if Vte is None or terminal is None:
+            self._text_draft_embedded_terminal_unavailable()
+            return
+        if self._text_draft_terminal_active:
+            if self._text_draft_draft_surface is not None:
+                self._text_draft_draft_surface.set_visible_child_name("terminal")
+            terminal.grab_focus()
+            self._show_toast("Embedded Codex is already running.")
+            return
+
+        codex_bin = os.environ.get("CODEX_BIN", "codex")
+        if os.path.sep not in codex_bin and shutil.which(codex_bin) is None:
+            self._show_toast(f"Codex executable not found: {codex_bin}")
+            self._status_label.set_label(f"Codex executable not found: {codex_bin}")
+            return
+
+        env = os.environ.copy()
+        env["PROSE_TEXT_DRAFT_FILE"] = str(draft_path)
+        env.update(
+            {
+                key: self._expand_text_draft_external_action_value(value, draft_path)
+                for key, value in action.env.items()
+            }
+        )
+        envv = [f"{key}={value}" for key, value in env.items()]
+        cwd = str(action.cwd) if action.cwd is not None else os.getcwd()
+        argv = [
+            "bash",
+            "-lc",
+            (
+                'set -euo pipefail; '
+                'draft_file="$1"; '
+                'codex_bin="$2"; '
+                'prompt="$(cat "$draft_file")"; '
+                'exec "$codex_bin" "$prompt"'
+            ),
+            "bash",
+            str(draft_path),
+            codex_bin,
+        ]
+
+        try:
+            terminal.reset(True, True)
+            _apply_prose_terminal_theme(terminal)
+            terminal.spawn_async(
+                Vte.PtyFlags.DEFAULT,
+                cwd,
+                argv,
+                envv,
+                GLib.SpawnFlags.DEFAULT,
+                None,
+                None,
+                -1,
+                None,
+                self._on_text_draft_codex_terminal_spawned,
+                action.label,
+            )
+        except Exception as exc:  # noqa: BLE001
+            self._status_label.set_label(f"Unable to start embedded {action.label}: {exc}")
+            self._show_toast(f"Unable to start embedded {action.label}.")
+            return
+
+        self._text_draft_terminal_active = True
+        if self._text_draft_draft_surface is not None:
+            self._text_draft_draft_surface.set_visible_child_name("terminal")
+        self._show_text_draft_terminal_controls()
+        self._status_label.set_label(f"Started embedded {action.label}.")
+        terminal.grab_focus()
+
+    def _on_text_draft_codex_terminal_spawned(
+        self,
+        terminal: Any,
+        pid: int,
+        error: GLib.Error | None,
+        action_label: str,
+    ) -> None:
+        if error is not None:
+            self._text_draft_terminal_active = False
+            self._text_draft_terminal_pid = None
+            self._show_text_draft_terminal_controls()
+            self._status_label.set_label(f"Unable to start embedded {action_label}: {error.message}")
+            self._show_toast(f"Unable to start embedded {action_label}.")
+            return
+        self._text_draft_terminal_pid = int(pid)
+
+    def _on_text_draft_terminal_child_exited(self, _terminal: Any, _status: int) -> None:
+        self._text_draft_terminal_active = False
+        self._text_draft_terminal_pid = None
+        self._show_text_draft_terminal_controls()
+        self._status_label.set_label("Embedded Codex session ended.")
+
+    def _on_text_draft_terminal_style_changed(self, *_args: object) -> None:
+        terminal = self._text_draft_terminal
+        if terminal is not None:
+            _apply_prose_terminal_theme(terminal)
+
+    def _on_text_draft_terminal_close_clicked(self, _button: Gtk.Button) -> None:
+        if self._text_draft_terminal_active and self._text_draft_terminal_pid is not None:
+            try:
+                os.kill(self._text_draft_terminal_pid, signal.SIGTERM)
+            except OSError:
+                pass
+        self._text_draft_terminal_active = False
+        self._text_draft_terminal_pid = None
+        if self._text_draft_draft_surface is not None:
+            self._text_draft_draft_surface.set_visible_child_name("draft")
+        self._hide_text_draft_terminal_controls()
+        if self._text_draft_view is not None:
+            self._text_draft_view.grab_focus()
+
     def _on_text_draft_external_action_clicked(
         self,
         _button: Gtk.Button | None,
@@ -5268,6 +5584,10 @@ button.improve-profile-chip {{
             return
         draft_path = self._write_text_draft_temp_file_now()
         if draft_path is None:
+            return
+
+        if self._is_text_draft_codex_action(action):
+            self._start_text_draft_codex_terminal(action, draft_path)
             return
 
         command = [
@@ -5289,7 +5609,8 @@ button.improve-profile-chip {{
             self._status_label.set_label(f"Unable to launch {action.label}: {exc}")
             self._show_toast(f"Unable to launch {action.label}.")
             return
-        success_message = action.success_message.strip() or f"Launched {action.label}."
+        display_label = self._text_draft_external_action_display_label(action)
+        success_message = action.success_message.strip() or f"Launched {display_label}."
         self._status_label.set_label(success_message)
         self._show_toast(success_message)
 
@@ -9158,6 +9479,13 @@ button.improve-profile-chip {{
         self._text_draft_temp_path = None
 
     def _on_window_close_request(self, _window: Gtk.Window) -> bool:
+        if self._text_draft_terminal_active and self._text_draft_terminal_pid is not None:
+            try:
+                os.kill(self._text_draft_terminal_pid, signal.SIGTERM)
+            except OSError:
+                pass
+            self._text_draft_terminal_active = False
+            self._text_draft_terminal_pid = None
         self._cleanup_text_draft_temp_file()
         return False
 
