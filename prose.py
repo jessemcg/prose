@@ -1710,6 +1710,47 @@ def _text_draft_command_items() -> list[tuple[str, str, str | None, str, bool]]:
     return commands
 
 
+TEXT_DRAFT_VIEW_ACTION_NAMES = frozenset(
+    {
+        "text-draft-spellingstyle",
+        "text-draft-copy",
+        "text-draft-external-action",
+        *TEXT_DRAFT_QUICK_ACTION_BY_ACTION_NAME.keys(),
+    }
+)
+EDITOR_VIEW_ACTION_NAMES = frozenset(
+    {
+        "launch-writer",
+        "open-last-odt",
+        "choose-source-file",
+        "editor-commands",
+        "direct-input",
+        "direct-input-no-trailing-space",
+        "input-rt",
+        "input-ct",
+        "speech-find",
+        "combine-cites",
+        "spellingstyle",
+        "keep-original",
+        "reference-lookup",
+        "focus-ask",
+        "paste-clean-italics",
+        "improve",
+        "improve1",
+        "improve2",
+        *EDITOR_QUICK_ACTION_BY_ACTION_NAME.keys(),
+    }
+)
+
+
+def _main_view_name_for_action(action_name: str) -> str | None:
+    if action_name in TEXT_DRAFT_VIEW_ACTION_NAMES:
+        return "text-draft"
+    if action_name in EDITOR_VIEW_ACTION_NAMES:
+        return "editor"
+    return None
+
+
 def _profile_default_lookup_key_for_action_name(action_name: str) -> str | None:
     definition = EDITOR_QUICK_ACTION_BY_ACTION_NAME.get(action_name)
     if definition is not None:
@@ -4323,12 +4364,20 @@ button.improve-profile-chip {{
 
         def _add_action(name: str, handler: Callable[[], None]) -> None:
             action = Gio.SimpleAction.new(name, None)
-            action.connect("activate", lambda _action, _param: handler())
+            def _activate(_action: Gio.SimpleAction, _param: GLib.Variant | None) -> None:
+                self._show_action_view(name)
+                handler()
+
+            action.connect("activate", _activate)
             app.add_action(action)
 
         def _add_string_action(name: str, handler: Callable[[str], None]) -> None:
             action = Gio.SimpleAction.new(name, GLib.VariantType.new("s"))
-            action.connect("activate", lambda _action, param: handler(param.get_string() if param else ""))
+            def _activate(_action: Gio.SimpleAction, param: GLib.Variant | None) -> None:
+                self._show_action_view(name)
+                handler(param.get_string() if param else "")
+
+            action.connect("activate", _activate)
             app.add_action(action)
 
         _add_action("launch-writer", lambda: self._on_launch_clicked(None))
@@ -4467,6 +4516,16 @@ button.improve-profile-chip {{
         window = self._build_shortcuts_window()
         window.set_transient_for(self)
         window.present()
+
+    def _show_action_view(self, action_name: str) -> None:
+        view_name = _main_view_name_for_action(action_name)
+        if view_name is None:
+            return
+        stack = getattr(self, "_main_stack", None)
+        if stack is None:
+            return
+        if stack.get_visible_child_name() != view_name:
+            stack.set_visible_child_name(view_name)
 
     def _on_main_stack_visible_child_name_changed(self, stack: Adw.ViewStack, *_args: object) -> None:
         if stack.get_visible_child_name() == "proof":
