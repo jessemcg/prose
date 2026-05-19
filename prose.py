@@ -53,6 +53,10 @@ APP_NAME = "Prose"
 GLib.set_application_name(APP_NAME)
 
 CONFIG_FILE = Path(__file__).with_name("config.json")
+TEXT_DRAFT_CODEX_VTE_SCRIPT = (
+    Path(__file__).resolve().parent / "scripts" / "prose-text-draft-codex-vte.sh"
+)
+TEXT_DRAFT_EXTERNAL_ACTION_ENV_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 STYLE_RULES_TOKEN = "{{STYLE_RULES}}"
 STYLE_RULES_HINT_TEXT = (
     f"Use {STYLE_RULES_TOKEN} to insert the shared style rules from the Style Rules page."
@@ -1324,7 +1328,7 @@ class TextDraftExternalActionEditorWidgets:
     success_message_row: Adw.EntryRow
     command_row: Adw.EntryRow
     cwd_row: Adw.EntryRow
-    env: dict[str, str]
+    env_buffer: Gtk.TextBuffer
 
 
 @dataclass
@@ -2463,6 +2467,26 @@ def _parse_text_draft_external_action(raw: Any) -> TextDraftExternalAction | Non
         tooltip=tooltip,
         success_message=success_message,
     )
+
+
+def _format_text_draft_external_action_env(env: dict[str, str]) -> str:
+    return "\n".join(f"{key}={value}" for key, value in env.items())
+
+
+def _parse_text_draft_external_action_env(text: str) -> tuple[dict[str, str] | None, str | None]:
+    env: dict[str, str] = {}
+    for line_number, raw_line in enumerate(text.splitlines(), start=1):
+        line = raw_line.strip()
+        if not line:
+            continue
+        if "=" not in line:
+            return None, f"line {line_number} must be KEY=value."
+        key, value = line.split("=", 1)
+        key = key.strip()
+        if not TEXT_DRAFT_EXTERNAL_ACTION_ENV_NAME_RE.fullmatch(key):
+            return None, f"line {line_number} has an invalid environment variable name."
+        env[key] = value.strip()
+    return env, None
 
 
 def load_text_draft_external_actions() -> list[TextDraftExternalAction]:
@@ -5435,7 +5459,14 @@ button.improve-profile-chip {{
     def _is_text_draft_codex_action(self, action: TextDraftExternalAction) -> bool:
         if action.label.strip().lower() == "codex":
             return True
-        return any("prose-text-draft-codex-ghostty.sh" in part for part in action.command)
+        return any(
+            script_name in part
+            for part in action.command
+            for script_name in (
+                "prose-text-draft-codex-ghostty.sh",
+                "prose-text-draft-codex-vte.sh",
+            )
+        )
 
     def _show_text_draft_terminal_controls(self) -> None:
         if self._text_draft_terminal_close_button is not None:
@@ -5466,12 +5497,6 @@ button.improve-profile-chip {{
             self._show_toast("Embedded Codex is already running.")
             return
 
-        codex_bin = os.environ.get("CODEX_BIN", "codex")
-        if os.path.sep not in codex_bin and shutil.which(codex_bin) is None:
-            self._show_toast(f"Codex executable not found: {codex_bin}")
-            self._status_label.set_label(f"Codex executable not found: {codex_bin}")
-            return
-
         env = os.environ.copy()
         env["PROSE_TEXT_DRAFT_FILE"] = str(draft_path)
         env.update(
@@ -5483,19 +5508,19 @@ button.improve-profile-chip {{
         envv = [f"{key}={value}" for key, value in env.items()]
         cwd = str(action.cwd) if action.cwd is not None else os.getcwd()
         argv = [
-            "bash",
-            "-lc",
-            (
-                'set -euo pipefail; '
-                'draft_file="$1"; '
-                'codex_bin="$2"; '
-                'prompt="$(cat "$draft_file")"; '
-                'exec "$codex_bin" "$prompt"'
-            ),
-            "bash",
-            str(draft_path),
-            codex_bin,
+            self._expand_text_draft_external_action_value(part, draft_path)
+            for part in action.command
         ]
+        if (
+            not argv
+            or any("prose-text-draft-codex-ghostty.sh" in part for part in argv)
+        ):
+            if not TEXT_DRAFT_CODEX_VTE_SCRIPT.is_file():
+                message = f"Codex VTE script not found: {TEXT_DRAFT_CODEX_VTE_SCRIPT}"
+                self._status_label.set_label(message)
+                self._show_toast(message)
+                return
+            argv = ["bash", str(TEXT_DRAFT_CODEX_VTE_SCRIPT), str(draft_path)]
 
         try:
             terminal.reset(True, True)
@@ -13365,6 +13390,49 @@ class SettingsWindow(Adw.ApplicationWindow):
             cwd_row.set_show_apply_button(False)
             group.add(cwd_row)
 
+            env_buffer = Gtk.TextBuffer()
+            env_buffer.set_text(_format_text_draft_external_action_env(action.env))
+            env_row = Adw.PreferencesRow()
+            env_row.set_selectable(False)
+            env_row.set_activatable(False)
+            env_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+            env_box.set_margin_top(10)
+            env_box.set_margin_bottom(10)
+            env_box.set_margin_start(12)
+            env_box.set_margin_end(12)
+
+            env_title = Gtk.Label(label="Environment", xalign=0)
+            env_title.add_css_class("heading")
+            env_box.append(env_title)
+
+            env_hint = Gtk.Label(
+                label="Optional. Enter one KEY=value pair per line, such as CODEX_REASONING_EFFORT=xhigh.",
+                xalign=0,
+            )
+            env_hint.add_css_class("dim-label")
+            env_hint.set_wrap(True)
+            env_box.append(env_hint)
+
+            env_view = Gtk.TextView.new_with_buffer(env_buffer)
+            env_view.set_monospace(True)
+            env_view.set_wrap_mode(Gtk.WrapMode.NONE)
+            env_view.set_hexpand(True)
+            env_view.set_top_margin(8)
+            env_view.set_bottom_margin(8)
+            env_view.set_left_margin(8)
+            env_view.set_right_margin(8)
+
+            env_scroller = Gtk.ScrolledWindow()
+            env_scroller.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
+            env_scroller.set_hexpand(True)
+            env_scroller.set_min_content_height(82)
+            env_scroller.set_max_content_height(150)
+            env_scroller.set_child(env_view)
+            env_box.append(env_scroller)
+
+            env_row.set_child(env_box)
+            group.add(env_row)
+
             remove_row = Adw.ActionRow(title="Remove action")
             remove_button = Gtk.Button(icon_name="user-trash-symbolic")
             remove_button.add_css_class("flat")
@@ -13388,7 +13456,7 @@ class SettingsWindow(Adw.ApplicationWindow):
                     success_message_row=success_message_row,
                     command_row=command_row,
                     cwd_row=cwd_row,
-                    env=dict(action.env),
+                    env_buffer=env_buffer,
                 )
             )
 
@@ -13403,6 +13471,10 @@ class SettingsWindow(Adw.ApplicationWindow):
                 except ValueError as exc:
                     self._parent_window._show_toast(f"External action {index + 1} command is invalid: {exc}")
                     return None
+            env, env_error = _parse_text_draft_external_action_env(self._prompt_text(widgets.env_buffer))
+            if env_error is not None or env is None:
+                self._parent_window._show_toast(f"External action {index + 1} environment {env_error}")
+                return None
             cwd_text = widgets.cwd_row.get_text().strip()
             actions.append(
                 TextDraftExternalAction(
@@ -13410,7 +13482,7 @@ class SettingsWindow(Adw.ApplicationWindow):
                     label=widgets.label_row.get_text().strip() or "External",
                     command=command,
                     cwd=Path(cwd_text).expanduser().resolve(strict=False) if cwd_text else None,
-                    env=dict(widgets.env),
+                    env=env,
                     icon_name=widgets.icon_row.get_text().strip() or DEFAULT_TEXT_DRAFT_EXTERNAL_ACTION_ICON,
                     tooltip=widgets.tooltip_row.get_text().strip(),
                     success_message=widgets.success_message_row.get_text().strip(),
