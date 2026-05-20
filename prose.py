@@ -172,6 +172,7 @@ TEXT_DRAFT_CASE_SUGGESTION_MIN_PREFIX = 3
 TEXT_DRAFT_CASE_SUGGESTION_LIMIT = 8
 DEFAULT_TEXT_DRAFT_EXTERNAL_ACTION_ICON = "utilities-terminal-symbolic"
 PROSE_TERMINAL_DARK_FOREGROUND = "#f2f4f8"
+PROSE_TERMINAL_DARK_BACKGROUND = "#3d3d3d"
 PROSE_TERMINAL_DARK_SELECTION = "#3d536b"
 PROSE_TERMINAL_DARK_CURSOR = "#8ab4f8"
 PROSE_TERMINAL_DARK_CURSOR_FOREGROUND = "#111318"
@@ -194,6 +195,7 @@ PROSE_TERMINAL_DARK_PALETTE = (
     "#ffffff",
 )
 PROSE_TERMINAL_LIGHT_FOREGROUND = "#20242c"
+PROSE_TERMINAL_LIGHT_BACKGROUND = "#f5f5f5"
 PROSE_TERMINAL_LIGHT_SELECTION = "#d7e4f5"
 PROSE_TERMINAL_LIGHT_CURSOR = "#1f66d1"
 PROSE_TERMINAL_LIGHT_CURSOR_FOREGROUND = "#ffffff"
@@ -965,32 +967,30 @@ def _rgba_color(spec: str) -> Gdk.RGBA:
     return color
 
 
-def _transparent_rgba() -> Gdk.RGBA:
-    return Gdk.RGBA(red=0.0, green=0.0, blue=0.0, alpha=0.0)
-
-
 def _apply_prose_terminal_theme(terminal: Any) -> None:
     dark = Adw.StyleManager.get_default().get_dark()
     if dark:
         foreground_spec = PROSE_TERMINAL_DARK_FOREGROUND
+        background_spec = PROSE_TERMINAL_DARK_BACKGROUND
         selection_spec = PROSE_TERMINAL_DARK_SELECTION
         cursor_spec = PROSE_TERMINAL_DARK_CURSOR
         cursor_foreground_spec = PROSE_TERMINAL_DARK_CURSOR_FOREGROUND
         palette_specs = PROSE_TERMINAL_DARK_PALETTE
     else:
         foreground_spec = PROSE_TERMINAL_LIGHT_FOREGROUND
+        background_spec = PROSE_TERMINAL_LIGHT_BACKGROUND
         selection_spec = PROSE_TERMINAL_LIGHT_SELECTION
         cursor_spec = PROSE_TERMINAL_LIGHT_CURSOR
         cursor_foreground_spec = PROSE_TERMINAL_LIGHT_CURSOR_FOREGROUND
         palette_specs = PROSE_TERMINAL_LIGHT_PALETTE
 
     foreground = _rgba_color(foreground_spec)
-    background = _transparent_rgba()
+    background = _rgba_color(background_spec)
     palette = [_rgba_color(spec) for spec in palette_specs]
     terminal.set_colors(foreground, background, palette)
     terminal.set_color_background(background)
     terminal.set_color_foreground(foreground)
-    terminal.set_clear_background(False)
+    terminal.set_clear_background(True)
     terminal.set_color_cursor(_rgba_color(cursor_spec))
     terminal.set_color_cursor_foreground(_rgba_color(cursor_foreground_spec))
     terminal.set_color_highlight(_rgba_color(selection_spec))
