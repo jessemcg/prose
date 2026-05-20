@@ -2992,6 +2992,7 @@ class ProseWindow(Adw.ApplicationWindow):
         self._text_draft_terminal_closing = False
         self._text_draft_terminal_generated_output = ""
         self._text_draft_terminal_replace_text = ""
+        self._text_draft_clear_draft_on_terminal_return = False
         self._text_draft_insert_start_mark: Gtk.TextMark | None = None
         self._text_draft_insert_end_mark: Gtk.TextMark | None = None
         self._text_draft_pending_regenerate_context: RegenerateContext | None = None
@@ -5893,6 +5894,7 @@ button.improve-profile-chip {{
         env: dict[str, str],
         action_label: str,
         mode: str,
+        clear_draft_on_return: bool = False,
     ) -> None:
         terminal = self._text_draft_terminal
         if Vte is None or terminal is None:
@@ -5932,6 +5934,7 @@ button.improve-profile-chip {{
         self._text_draft_terminal_closing = False
         self._text_draft_terminal_generated_output = ""
         self._text_draft_terminal_replace_text = ""
+        self._text_draft_clear_draft_on_terminal_return = clear_draft_on_return
         if self._text_draft_draft_surface is not None:
             self._text_draft_draft_surface.set_visible_child_name("terminal")
         self._show_text_draft_terminal_controls()
@@ -5974,7 +5977,14 @@ button.improve-profile-chip {{
                 return
             argv = ["bash", str(TEXT_DRAFT_CODEX_VTE_SCRIPT), str(draft_path)]
 
-        self._spawn_text_draft_terminal(argv, cwd, env, action.label, "codex")
+        self._spawn_text_draft_terminal(
+            argv,
+            cwd,
+            env,
+            action.label,
+            "codex",
+            clear_draft_on_return=True,
+        )
 
     def _start_text_draft_codex_project_terminal(self, target: TextDraftCodexProjectTarget) -> None:
         if Vte is None or self._text_draft_terminal is None:
@@ -6014,7 +6024,16 @@ button.improve-profile-chip {{
 
         label = "terminal" if not fallback else "terminal after Codex exited"
         shell_cwd = cwd or str(TEXT_DRAFT_PROJECTS_DIR)
-        self._spawn_text_draft_terminal([shell], shell_cwd, os.environ.copy(), label, "shell")
+        self._spawn_text_draft_terminal(
+            [shell],
+            shell_cwd,
+            os.environ.copy(),
+            label,
+            "shell",
+            clear_draft_on_return=(
+                self._text_draft_clear_draft_on_terminal_return if fallback else False
+            ),
+        )
 
     def _on_text_draft_codex_project_clicked(
         self,
@@ -6067,6 +6086,7 @@ button.improve-profile-chip {{
             _apply_prose_terminal_theme(terminal)
 
     def _on_text_draft_terminal_close_clicked(self, _button: Gtk.Button) -> None:
+        clear_draft_on_return = self._text_draft_clear_draft_on_terminal_return
         if self._text_draft_terminal_active and self._text_draft_terminal_pid is not None:
             self._text_draft_terminal_closing = True
             try:
@@ -6074,8 +6094,11 @@ button.improve-profile-chip {{
             except OSError:
                 pass
         self._reset_text_draft_terminal_state()
+        self._text_draft_clear_draft_on_terminal_return = False
         if self._text_draft_draft_surface is not None:
             self._text_draft_draft_surface.set_visible_child_name("draft")
+        if clear_draft_on_return:
+            self._clear_text_draft_text()
         self._hide_text_draft_terminal_controls()
         if self._text_draft_view is not None:
             self._text_draft_view.grab_focus()
@@ -10035,6 +10058,15 @@ button.improve-profile-chip {{
             return ""
         start, end = self._text_draft_buffer.get_bounds()
         return self._text_draft_buffer.get_text(start, end, True)
+
+    def _clear_text_draft_text(self) -> None:
+        if self._text_draft_buffer is None:
+            return
+        self._clear_text_draft_insert_marks()
+        self._text_draft_pending_newlines = 0
+        self._text_draft_buffer.set_text("")
+        self._hide_text_draft_case_suggestions()
+        self._text_draft_temp_dirty = True
 
     def _text_draft_has_user_text(self) -> bool:
         return bool(self._get_text_draft_text().strip())
