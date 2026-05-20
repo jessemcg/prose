@@ -118,6 +118,8 @@ sudo apt install gir1.2-vte-3.91 libvte-2.91-gtk4-0
 
 If these packages are missing, Prose still starts, but the embedded Text Draft terminal is unavailable.
 
+When the embedded Codex terminal is running, Text Draft generated-text commands stream their output into the terminal at the current cursor instead of writing into the Draft text box. Prose types the text only; it does not send Enter. Replace-style commands such as `Improve Generated` erase the last terminal-routed generated text first, so they expect the Codex cursor to still be immediately after that text.
+
 ### 3. Confirm Prose can find `python-uno`
 
 Prose tries to auto-detect LibreOffice's Python bridge files. If it cannot, open Settings and set:

@@ -990,7 +990,7 @@ def _apply_prose_terminal_theme(terminal: Any) -> None:
     terminal.set_colors(foreground, background, palette)
     terminal.set_color_background(background)
     terminal.set_color_foreground(foreground)
-    terminal.set_clear_background(True)
+    terminal.set_clear_background(False)
     terminal.set_color_cursor(_rgba_color(cursor_spec))
     terminal.set_color_cursor_foreground(_rgba_color(cursor_foreground_spec))
     terminal.set_color_highlight(_rgba_color(selection_spec))
@@ -2876,6 +2876,8 @@ class ProseWindow(Adw.ApplicationWindow):
         self._text_draft_terminal_close_button: Gtk.Button | None = None
         self._text_draft_terminal_active = False
         self._text_draft_terminal_pid: int | None = None
+        self._text_draft_terminal_generated_output = ""
+        self._text_draft_terminal_replace_text = ""
         self._text_draft_insert_start_mark: Gtk.TextMark | None = None
         self._text_draft_insert_end_mark: Gtk.TextMark | None = None
         self._text_draft_pending_regenerate_context: RegenerateContext | None = None
@@ -4033,12 +4035,14 @@ textview.spelling-output-view.view border {{
 }}
 .text-draft-terminal-frame {{
   border-radius: {SPELLING_OUTPUT_CORNER_RADIUS_PX}px;
-  background-color: transparent;
+  background-color: @window_bg_color;
+  background-image: none;
   border: none;
   box-shadow: none;
 }}
 .text-draft-terminal {{
-  background-color: transparent;
+  background-color: @window_bg_color;
+  background-image: none;
   color: @window_fg_color;
 }}
 .editor-lookup-surface > stackpage {{
@@ -5309,14 +5313,26 @@ button.improve-profile-chip {{
         if not source_text.strip():
             self._show_toast("Source file is empty.")
             return
-        if not self._prepare_text_draft_append_output():
+        route_to_terminal = self._text_draft_terminal_target_available()
+        if not route_to_terminal and not self._prepare_text_draft_append_output():
             self._show_toast("Unable to prepare Text Draft output.")
             return
-        GLib.idle_add(self._set_text_draft_original_output_text, "")
+        if route_to_terminal:
+            self._text_draft_terminal_generated_output = ""
+            self._text_draft_terminal_replace_text = ""
+        else:
+            GLib.idle_add(self._set_text_draft_original_output_text, "")
         self._clear_pending_text_draft_regenerate_context()
         self._set_busy(True)
-        self._status_label.set_label("Streaming SpellingStyle output into Text Draft…")
-        thread = threading.Thread(target=self._run_text_draft_spellingstyle, args=(source_text,), daemon=True)
+        if route_to_terminal:
+            self._status_label.set_label("Streaming SpellingStyle output into embedded Codex…")
+        else:
+            self._status_label.set_label("Streaming SpellingStyle output into Text Draft…")
+        thread = threading.Thread(
+            target=self._run_text_draft_spellingstyle,
+            args=(source_text, route_to_terminal, self._text_draft_terminal_pid),
+            daemon=True,
+        )
         thread.start()
 
     def _on_text_draft_improve_clicked(self, _button: Gtk.Button | None, profile_nickname: str | None = None) -> None:
@@ -5328,28 +5344,50 @@ button.improve-profile-chip {{
         if not profile.is_configured():
             self._show_toast(f'Configure the "{profile.display_name()}" model profile in Settings first.')
             return
-        source_text = self._get_text_draft_original_output_text().strip()
+        route_to_terminal = self._text_draft_terminal_target_available()
+        source_text = self._get_text_draft_generated_source_text().strip()
         if not source_text:
             self._show_toast("Original Output is empty.")
             return
-        if not self._prepare_text_draft_generated_replace():
+        if not route_to_terminal and not self._prepare_text_draft_generated_replace():
             self._show_toast("Unable to replace the last generated draft output.")
+            return
+        if route_to_terminal and not self._delete_text_draft_terminal_generated_output():
             return
         self._set_pending_text_draft_regenerate_context("improve-generated", source_text)
         self._set_busy(True)
-        self._status_label.set_label(f"Improving Text Draft output with {profile.display_name()}…")
-        thread = threading.Thread(target=self._run_text_draft_improve, args=(source_text, profile), daemon=True)
+        if route_to_terminal:
+            self._status_label.set_label(f"Streaming improved output into embedded Codex with {profile.display_name()}…")
+        else:
+            self._status_label.set_label(f"Improving Text Draft output with {profile.display_name()}…")
+        thread = threading.Thread(
+            target=self._run_text_draft_improve,
+            args=(source_text, profile, route_to_terminal, self._text_draft_terminal_pid),
+            daemon=True,
+        )
         thread.start()
 
     def _on_text_draft_generated_choices_clicked(self, _button: Gtk.Button | None) -> None:
         if self._busy:
             return
-        source_text = self._get_text_draft_original_output_text().strip()
+        route_to_terminal = self._text_draft_terminal_target_available()
+        source_text = self._get_text_draft_generated_source_text().strip()
         if not source_text:
             self._show_toast("Original Output is empty.")
             return
-        if self._text_draft_buffer is None or self._text_draft_insert_start_mark is None or self._text_draft_insert_end_mark is None:
+        if (
+            not route_to_terminal
+            and (
+                self._text_draft_buffer is None
+                or self._text_draft_insert_start_mark is None
+                or self._text_draft_insert_end_mark is None
+            )
+        ):
             self._show_toast("Unable to replace the last generated draft output.")
+            return
+        requests = self._build_editor_improve_rephrase_choice_requests("Text Draft Generated Choice")
+        if len(requests) != len(STACKED_CHOICE_VARIANTS):
+            self._show_toast("Choose Improve, Rephrase 1, and Rephrase 2 profiles in Settings first.")
             return
         self._start_multi_draft_choices_for_text(
             title="Text Draft Generated Choices",
@@ -5358,9 +5396,9 @@ button.improve-profile-chip {{
             prompt_text=self._improve1_settings.prompt,
             default_prompt=DEFAULT_IMPROVE_PROMPT,
             request_title="Text Draft Generated Choice",
-            requests=self._build_improve_rephrase_choice_requests("Text Draft Generated Choice"),
+            requests=requests,
         )
-        self._multi_draft_insert_mode = "text-draft-replace-generated"
+        self._multi_draft_insert_mode = "text-draft-terminal-replace-generated" if route_to_terminal else "text-draft-replace-generated"
         self._multi_draft_replace_doc = None
         self._multi_draft_replace_start = None
         self._multi_draft_replace_end = None
@@ -5378,19 +5416,25 @@ button.improve-profile-chip {{
         if not profile.is_configured():
             self._show_toast(f'Configure the "{profile.display_name()}" model profile in Settings first.')
             return
-        source_text = self._get_text_draft_original_output_text().strip()
+        route_to_terminal = self._text_draft_terminal_target_available()
+        source_text = self._get_text_draft_generated_source_text().strip()
         if not source_text:
             self._show_toast("Original Output is empty.")
             return
-        if not self._prepare_text_draft_generated_replace():
+        if not route_to_terminal and not self._prepare_text_draft_generated_replace():
             self._show_toast("Unable to replace the last generated draft output.")
+            return
+        if route_to_terminal and not self._delete_text_draft_terminal_generated_output():
             return
         self._set_pending_text_draft_regenerate_context("rephrase-generated", source_text)
         self._set_busy(True)
-        self._status_label.set_label(f"Rephrasing Text Draft output with {profile.display_name()}…")
+        if route_to_terminal:
+            self._status_label.set_label(f"Streaming rephrased output into embedded Codex with {profile.display_name()}…")
+        else:
+            self._status_label.set_label(f"Rephrasing Text Draft output with {profile.display_name()}…")
         thread = threading.Thread(
             target=self._run_text_draft_rephrase_generated,
-            args=(source_text, profile),
+            args=(source_text, profile, route_to_terminal, self._text_draft_terminal_pid),
             daemon=True,
         )
         thread.start()
@@ -5412,14 +5456,23 @@ button.improve-profile-chip {{
         if not source_text:
             self._show_toast("Select text in the Draft box first.")
             return
-        if not self._prepare_text_draft_selection_replace():
+        route_to_terminal = self._text_draft_terminal_target_available()
+        if not route_to_terminal and not self._prepare_text_draft_selection_replace():
             self._show_toast("Unable to prepare Draft selection replacement.")
             return
-        self._set_text_draft_original_output_text(source_text)
+        if not route_to_terminal:
+            self._set_text_draft_original_output_text(source_text)
         self._set_pending_text_draft_regenerate_context("improve-selected", source_text)
         self._set_busy(True)
-        self._status_label.set_label(f"Improving Draft selection with {profile.display_name()}…")
-        thread = threading.Thread(target=self._run_text_draft_improve_selected, args=(source_text, profile), daemon=True)
+        if route_to_terminal:
+            self._status_label.set_label(f"Streaming improved selection into embedded Codex with {profile.display_name()}…")
+        else:
+            self._status_label.set_label(f"Improving Draft selection with {profile.display_name()}…")
+        thread = threading.Thread(
+            target=self._run_text_draft_improve_selected,
+            args=(source_text, profile, route_to_terminal, self._text_draft_terminal_pid),
+            daemon=True,
+        )
         thread.start()
 
     def _on_text_draft_selected_choices_clicked(self, _button: Gtk.Button | None) -> None:
@@ -5429,11 +5482,17 @@ button.improve-profile-chip {{
         if not source_text:
             self._show_toast("Select text in the Draft box first.")
             return
-        offsets = self._get_text_draft_selection_offsets()
-        if offsets is None:
+        route_to_terminal = self._text_draft_terminal_target_available()
+        offsets = None if route_to_terminal else self._get_text_draft_selection_offsets()
+        if not route_to_terminal and offsets is None:
             self._show_toast("Unable to remember the Draft selection.")
             return
-        self._set_text_draft_original_output_text(source_text)
+        if not route_to_terminal:
+            self._set_text_draft_original_output_text(source_text)
+        requests = self._build_editor_improve_rephrase_choice_requests("Text Draft Selected Choice")
+        if len(requests) != len(STACKED_CHOICE_VARIANTS):
+            self._show_toast("Choose Improve, Rephrase 1, and Rephrase 2 profiles in Settings first.")
+            return
         self._start_multi_draft_choices_for_text(
             title="Text Draft Selected Choices",
             source_text=source_text,
@@ -5441,29 +5500,41 @@ button.improve-profile-chip {{
             prompt_text=self._improve1_settings.prompt,
             default_prompt=DEFAULT_IMPROVE_PROMPT,
             request_title="Text Draft Selected Choice",
-            requests=self._build_improve_rephrase_choice_requests("Text Draft Selected Choice"),
+            requests=requests,
         )
-        self._multi_draft_insert_mode = "text-draft-replace-selection"
+        self._multi_draft_insert_mode = "text-draft-terminal" if route_to_terminal else "text-draft-replace-selection"
         self._multi_draft_replace_doc = None
-        self._multi_draft_replace_start = offsets[0]
-        self._multi_draft_replace_end = offsets[1]
+        self._multi_draft_replace_start = offsets[0] if offsets is not None else None
+        self._multi_draft_replace_end = offsets[1] if offsets is not None else None
 
     def _on_text_draft_keep_original_clicked(self, _button: Gtk.Button | None) -> None:
         if self._busy:
             return
-        source_text = self._get_text_draft_original_output_text().strip()
+        route_to_terminal = self._text_draft_terminal_target_available()
+        source_text = self._get_text_draft_generated_source_text().strip()
         if not source_text:
             self._show_toast("Original Output is empty.")
             return
-        if not self._prepare_text_draft_generated_replace():
+        if not route_to_terminal and not self._prepare_text_draft_generated_replace():
             self._show_toast("Unable to replace the last generated draft output.")
             return
+        if route_to_terminal and not self._delete_text_draft_terminal_generated_output():
+            return
         self._set_busy(True)
-        self._status_label.set_label("Restoring Original Output in Draft…")
-        self._append_text_draft_inserted_text(source_text)
-        self._ensure_single_text_draft_trailing_space()
+        if route_to_terminal:
+            self._status_label.set_label("Streaming original output into embedded Codex…")
+            if not self._feed_text_draft_terminal_text(source_text):
+                return
+            self._set_text_draft_terminal_generated_output(source_text)
+        else:
+            self._status_label.set_label("Restoring Original Output in Draft…")
+            self._append_text_draft_inserted_text(source_text)
+            self._ensure_single_text_draft_trailing_space()
         self._set_busy(False)
-        self._status_label.set_label("Original output restored in Draft.")
+        if route_to_terminal:
+            self._status_label.set_label("Original output streamed to embedded Codex.")
+        else:
+            self._status_label.set_label("Original output restored in Draft.")
 
     def _on_text_draft_wrap_quotes_clicked(self, _button: Gtk.Button | None) -> None:
         if self._busy:
@@ -5473,14 +5544,24 @@ button.improve-profile-chip {{
             self._show_toast("Select text in the Draft box first.")
             return
         wrapped = self._wrap_text_in_curly_quotes(source_text)
-        if not self._prepare_text_draft_selection_replace():
+        route_to_terminal = self._text_draft_terminal_target_available()
+        if not route_to_terminal and not self._prepare_text_draft_selection_replace():
             self._show_toast("Unable to prepare Draft selection replacement.")
             return
         self._set_busy(True)
-        self._status_label.set_label("Wrapping Draft selection in quotes…")
-        self._append_text_draft_inserted_text(wrapped)
+        if route_to_terminal:
+            self._status_label.set_label("Streaming quoted selection into embedded Codex…")
+            if not self._feed_text_draft_terminal_text(wrapped):
+                return
+            self._set_text_draft_terminal_generated_output(wrapped)
+        else:
+            self._status_label.set_label("Wrapping Draft selection in quotes…")
+            self._append_text_draft_inserted_text(wrapped)
         self._set_busy(False)
-        self._status_label.set_label("Draft selection wrapped in quotes.")
+        if route_to_terminal:
+            self._status_label.set_label("Quoted selection streamed to embedded Codex.")
+        else:
+            self._status_label.set_label("Draft selection wrapped in quotes.")
 
     def _on_copy_text_draft_clicked(self, _button: Gtk.Button | None) -> None:
         text = self._get_text_draft_text()
@@ -5535,6 +5616,71 @@ button.improve-profile-chip {{
     def _hide_text_draft_terminal_controls(self) -> None:
         if self._text_draft_terminal_close_button is not None:
             self._text_draft_terminal_close_button.set_visible(False)
+
+    def _text_draft_terminal_child_is_running(self, pid: int | None = None) -> bool:
+        target_pid = self._text_draft_terminal_pid if pid is None else pid
+        if target_pid is None:
+            return self._text_draft_terminal_active
+        try:
+            os.kill(target_pid, 0)
+        except ProcessLookupError:
+            return False
+        except PermissionError:
+            return True
+        except OSError:
+            return False
+        return True
+
+    def _text_draft_terminal_target_available(self) -> bool:
+        if Vte is None or self._text_draft_terminal is None:
+            return False
+        if not self._text_draft_terminal_active:
+            return False
+        if self._text_draft_terminal_child_is_running():
+            return True
+        self._text_draft_terminal_active = False
+        self._text_draft_terminal_pid = None
+        return False
+
+    def _feed_text_draft_terminal_text(self, text: str) -> bool:
+        if not text:
+            return True
+        terminal = self._text_draft_terminal
+        if terminal is None or not self._text_draft_terminal_target_available():
+            self._on_text_draft_failed("Embedded Codex is no longer running.")
+            return False
+        try:
+            terminal.feed_child(text.encode("utf-8"))
+            terminal.grab_focus()
+        except Exception as exc:  # noqa: BLE001
+            self._on_text_draft_failed(f"Unable to stream text into embedded Codex: {exc}")
+            return False
+        return True
+
+    def _append_text_draft_terminal_text(self, text: str) -> bool:
+        self._feed_text_draft_terminal_text(text)
+        return False
+
+    def _set_text_draft_terminal_generated_output(self, text: str) -> bool:
+        self._text_draft_terminal_generated_output = self._normalize_generated_output_text(text)
+        self._text_draft_terminal_replace_text = text
+        return False
+
+    def _get_text_draft_generated_source_text(self) -> str:
+        if self._text_draft_terminal_target_available() and self._text_draft_terminal_generated_output.strip():
+            return self._text_draft_terminal_generated_output
+        return self._get_text_draft_original_output_text()
+
+    def _delete_text_draft_terminal_generated_output(self) -> bool:
+        text = self._text_draft_terminal_replace_text or self._text_draft_terminal_generated_output
+        if not text:
+            return True
+        backspaces = "\x7f" * len(text)
+        if not self._feed_text_draft_terminal_text(backspaces):
+            return False
+        self._text_draft_terminal_generated_output = ""
+        self._text_draft_terminal_replace_text = ""
+        return True
 
     def _text_draft_embedded_terminal_unavailable(self) -> None:
         if self._text_draft_draft_surface is not None:
@@ -5603,6 +5749,8 @@ button.improve-profile-chip {{
             return
 
         self._text_draft_terminal_active = True
+        self._text_draft_terminal_generated_output = ""
+        self._text_draft_terminal_replace_text = ""
         if self._text_draft_draft_surface is not None:
             self._text_draft_draft_surface.set_visible_child_name("terminal")
         self._show_text_draft_terminal_controls()
@@ -5619,6 +5767,8 @@ button.improve-profile-chip {{
         if error is not None:
             self._text_draft_terminal_active = False
             self._text_draft_terminal_pid = None
+            self._text_draft_terminal_generated_output = ""
+            self._text_draft_terminal_replace_text = ""
             self._show_text_draft_terminal_controls()
             self._status_label.set_label(f"Unable to start embedded {action_label}: {error.message}")
             self._show_toast(f"Unable to start embedded {action_label}.")
@@ -5628,6 +5778,8 @@ button.improve-profile-chip {{
     def _on_text_draft_terminal_child_exited(self, _terminal: Any, _status: int) -> None:
         self._text_draft_terminal_active = False
         self._text_draft_terminal_pid = None
+        self._text_draft_terminal_generated_output = ""
+        self._text_draft_terminal_replace_text = ""
         self._show_text_draft_terminal_controls()
         self._status_label.set_label("Embedded Codex session ended.")
 
@@ -5644,6 +5796,8 @@ button.improve-profile-chip {{
                 pass
         self._text_draft_terminal_active = False
         self._text_draft_terminal_pid = None
+        self._text_draft_terminal_generated_output = ""
+        self._text_draft_terminal_replace_text = ""
         if self._text_draft_draft_surface is not None:
             self._text_draft_draft_surface.set_visible_child_name("draft")
         self._hide_text_draft_terminal_controls()
@@ -5702,15 +5856,21 @@ button.improve-profile-chip {{
         if context.action_key in REGENERATE_SOURCE_BUFFER_ACTION_KEYS:
             self._set_text_draft_original_output_text(context.source_text)
 
-    def _run_text_draft_regenerate_command(self, context: RegenerateContext, profile: ModelProfile) -> None:
+    def _run_text_draft_regenerate_command(
+        self,
+        context: RegenerateContext,
+        profile: ModelProfile,
+        route_to_terminal: bool = False,
+        terminal_pid: int | None = None,
+    ) -> None:
         if context.action_key == "improve-generated":
-            self._run_text_draft_improve(context.source_text, profile)
+            self._run_text_draft_improve(context.source_text, profile, route_to_terminal, terminal_pid)
             return
         if context.action_key == "rephrase-generated":
-            self._run_text_draft_rephrase_generated(context.source_text, profile)
+            self._run_text_draft_rephrase_generated(context.source_text, profile, route_to_terminal, terminal_pid)
             return
         if context.action_key == "improve-selected":
-            self._run_text_draft_improve_selected(context.source_text, profile)
+            self._run_text_draft_improve_selected(context.source_text, profile, route_to_terminal, terminal_pid)
             return
         GLib.idle_add(self._on_text_draft_failed, f'Unsupported Text Draft regenerate action "{context.action_key}".')
 
@@ -5731,14 +5891,29 @@ button.improve-profile-chip {{
         if not profile.is_configured():
             self._show_toast(f'Configure the "{profile.display_name()}" model profile in Settings first.')
             return
-        if not self._prepare_text_draft_generated_replace():
+        route_to_terminal = self._text_draft_terminal_target_available()
+        if not route_to_terminal and not self._prepare_text_draft_generated_replace():
             self._show_toast("Unable to replace the last generated draft output.")
             return
+        if route_to_terminal and not self._delete_text_draft_terminal_generated_output():
+            return
         self._set_pending_text_draft_regenerate_context(context.action_key, context.source_text)
-        self._prepare_text_draft_regenerate_output_state(context)
+        if not route_to_terminal:
+            self._prepare_text_draft_regenerate_output_state(context)
         self._set_busy(True)
-        self._status_label.set_label(f"Regenerating {context.command_title.lower()} in Text Draft with {profile.display_name()}…")
-        thread = threading.Thread(target=self._run_text_draft_regenerate_command, args=(context, profile), daemon=True)
+        if route_to_terminal:
+            self._status_label.set_label(
+                f"Streaming regenerated {context.command_title.lower()} into embedded Codex with {profile.display_name()}…"
+            )
+        else:
+            self._status_label.set_label(
+                f"Regenerating {context.command_title.lower()} in Text Draft with {profile.display_name()}…"
+            )
+        thread = threading.Thread(
+            target=self._run_text_draft_regenerate_command,
+            args=(context, profile, route_to_terminal, self._text_draft_terminal_pid),
+            daemon=True,
+        )
         thread.start()
 
     def _on_input_rt_clicked(self, _button: Gtk.Button) -> None:
@@ -6608,41 +6783,6 @@ button.improve-profile-chip {{
             )
         return requests
 
-    def _build_improve_rephrase_choice_requests(self, request_title: str) -> list[MultiDraftRequest]:
-        requests: list[MultiDraftRequest] = []
-        seen_profiles: set[str] = set()
-        for slot_key in ("choices-improve", "choices-rephrase-2"):
-            profile_key = self._editor_action_profile_defaults.get(slot_key)
-            profile = self._model_profile_by_key(profile_key or "")
-            if profile is None or profile.key in seen_profiles:
-                continue
-            seen_profiles.add(profile.key)
-            requests.extend(
-                [
-                    MultiDraftRequest(
-                        key=f"{profile.key}-improve",
-                        label=profile.display_name(),
-                        profile=profile,
-                        payload_builder=self._compose_improve_payload,
-                        prompt_text=self._improve1_settings.prompt,
-                        default_prompt=DEFAULT_IMPROVE_PROMPT,
-                        request_title=f"{request_title} Improve",
-                        variant="improve",
-                    ),
-                    MultiDraftRequest(
-                        key=f"{profile.key}-rephrase",
-                        label=profile.display_name(),
-                        profile=profile,
-                        payload_builder=self._compose_rephrase_generated_payload,
-                        prompt_text=self._improve2_settings.prompt,
-                        default_prompt=DEFAULT_IMPROVE2_PROMPT,
-                        request_title=f"{request_title} Rephrase",
-                        variant="rephrase",
-                    ),
-                ]
-            )
-        return requests
-
     def _start_multi_draft_choices(
         self,
         *,
@@ -7283,6 +7423,20 @@ button.improve-profile-chip {{
         if not insert_text:
             return
         choice.text = insert_text
+        if self._multi_draft_insert_mode in {"text-draft-terminal", "text-draft-terminal-replace-generated"}:
+            if not self._text_draft_terminal_target_available():
+                self._show_toast("Embedded Codex is no longer running.")
+                return
+            if (
+                self._multi_draft_insert_mode == "text-draft-terminal-replace-generated"
+                and not self._delete_text_draft_terminal_generated_output()
+            ):
+                return
+            if not self._feed_text_draft_terminal_text(insert_text):
+                return
+            self._set_text_draft_terminal_generated_output(insert_text)
+            self._finish_text_draft_terminal_choice_insert(choice)
+            return
         if self._multi_draft_insert_mode == "text-draft-replace-generated":
             if not self._prepare_text_draft_generated_replace():
                 self._show_toast("Unable to replace the last generated draft output.")
@@ -7376,6 +7530,14 @@ button.improve-profile-chip {{
         for insert_button in self._multi_draft_insert_buttons:
             insert_button.set_sensitive(False)
         self._status_label.set_label(f"Inserted {self._multi_draft_choice_display_label(choice)} draft.")
+        self._close_multi_draft_window_after_insert()
+
+    def _finish_text_draft_terminal_choice_insert(self, choice: MultiDraftChoice) -> None:
+        for insert_button in self._multi_draft_insert_buttons:
+            insert_button.set_sensitive(False)
+        self._status_label.set_label(
+            f"Streamed {self._multi_draft_choice_display_label(choice)} draft to embedded Codex."
+        )
         self._close_multi_draft_window_after_insert()
 
     def _close_multi_draft_window_after_insert(self) -> None:
@@ -11009,16 +11171,34 @@ button.improve-profile-chip {{
             return
         GLib.idle_add(self._on_spellingstyle_finished, "SpellingStyle complete.")
 
-    def _run_text_draft_spellingstyle(self, source_text: str) -> None:
+    def _run_text_draft_spellingstyle(
+        self,
+        source_text: str,
+        route_to_terminal: bool = False,
+        terminal_pid: int | None = None,
+    ) -> None:
+        generated_parts: list[str] = []
         try:
             payload = self._compose_text_draft_spellingstyle_payload(source_text)
             for chunk in self._stream_spellingstyle(payload):
-                GLib.idle_add(self._append_text_draft_inserted_text, chunk)
-                GLib.idle_add(self._append_text_draft_original_output_text, chunk)
+                if route_to_terminal:
+                    if not self._text_draft_terminal_child_is_running(terminal_pid):
+                        raise RuntimeError("Embedded Codex is no longer running.")
+                    generated_parts.append(chunk)
+                    GLib.idle_add(self._append_text_draft_terminal_text, chunk)
+                else:
+                    GLib.idle_add(self._append_text_draft_inserted_text, chunk)
+                    GLib.idle_add(self._append_text_draft_original_output_text, chunk)
         except Exception as exc:  # noqa: BLE001
             GLib.idle_add(self._on_text_draft_failed, str(exc))
             return
-        GLib.idle_add(self._on_text_draft_spellingstyle_finished, "Text Draft SpellingStyle complete.")
+        if route_to_terminal:
+            GLib.idle_add(self._set_text_draft_terminal_generated_output, "".join(generated_parts))
+        GLib.idle_add(
+            self._on_text_draft_spellingstyle_finished,
+            "Text Draft SpellingStyle streamed to embedded Codex." if route_to_terminal else "Text Draft SpellingStyle complete.",
+            route_to_terminal,
+        )
 
     def _run_improve(self, source_text: str, profile: ModelProfile) -> None:
         payload = self._compose_improve_payload(source_text, profile)
@@ -11030,15 +11210,38 @@ button.improve-profile-chip {{
             return
         GLib.idle_add(self._on_improve_finished, f"Improve Generated complete with {profile.display_name()}.")
 
-    def _run_text_draft_improve(self, source_text: str, profile: ModelProfile) -> None:
+    def _run_text_draft_improve(
+        self,
+        source_text: str,
+        profile: ModelProfile,
+        route_to_terminal: bool = False,
+        terminal_pid: int | None = None,
+    ) -> None:
         payload = self._compose_improve_payload(source_text, profile)
+        generated_parts: list[str] = []
         try:
             for chunk in self._stream_custom(payload, profile.api_url, profile.api_key, request_title="Improve"):
-                GLib.idle_add(self._append_text_draft_inserted_text, chunk)
+                if route_to_terminal:
+                    if not self._text_draft_terminal_child_is_running(terminal_pid):
+                        raise RuntimeError("Embedded Codex is no longer running.")
+                    generated_parts.append(chunk)
+                    GLib.idle_add(self._append_text_draft_terminal_text, chunk)
+                else:
+                    GLib.idle_add(self._append_text_draft_inserted_text, chunk)
         except Exception as exc:  # noqa: BLE001
             GLib.idle_add(self._on_text_draft_failed, str(exc))
             return
-        GLib.idle_add(self._on_text_draft_improve_finished, f"Improve Generated complete with {profile.display_name()}.")
+        if route_to_terminal:
+            GLib.idle_add(self._set_text_draft_terminal_generated_output, "".join(generated_parts))
+        GLib.idle_add(
+            self._on_text_draft_improve_finished,
+            (
+                f"Improve Generated streamed to embedded Codex with {profile.display_name()}."
+                if route_to_terminal
+                else f"Improve Generated complete with {profile.display_name()}."
+            ),
+            route_to_terminal,
+        )
 
     def _run_rephrase_generated(self, source_text: str, profile: ModelProfile) -> None:
         payload = self._compose_rephrase_generated_payload(source_text, profile)
@@ -11050,17 +11253,37 @@ button.improve-profile-chip {{
             return
         GLib.idle_add(self._on_improve_finished, f"Rephrase Generated complete with {profile.display_name()}.")
 
-    def _run_text_draft_rephrase_generated(self, source_text: str, profile: ModelProfile) -> None:
+    def _run_text_draft_rephrase_generated(
+        self,
+        source_text: str,
+        profile: ModelProfile,
+        route_to_terminal: bool = False,
+        terminal_pid: int | None = None,
+    ) -> None:
         payload = self._compose_rephrase_generated_payload(source_text, profile)
+        generated_parts: list[str] = []
         try:
             for chunk in self._stream_custom(payload, profile.api_url, profile.api_key, request_title="Rephrase"):
-                GLib.idle_add(self._append_text_draft_inserted_text, chunk)
+                if route_to_terminal:
+                    if not self._text_draft_terminal_child_is_running(terminal_pid):
+                        raise RuntimeError("Embedded Codex is no longer running.")
+                    generated_parts.append(chunk)
+                    GLib.idle_add(self._append_text_draft_terminal_text, chunk)
+                else:
+                    GLib.idle_add(self._append_text_draft_inserted_text, chunk)
         except Exception as exc:  # noqa: BLE001
             GLib.idle_add(self._on_text_draft_failed, str(exc))
             return
+        if route_to_terminal:
+            GLib.idle_add(self._set_text_draft_terminal_generated_output, "".join(generated_parts))
         GLib.idle_add(
             self._on_text_draft_improve_finished,
-            f"Rephrase Generated complete with {profile.display_name()}.",
+            (
+                f"Rephrase Generated streamed to embedded Codex with {profile.display_name()}."
+                if route_to_terminal
+                else f"Rephrase Generated complete with {profile.display_name()}."
+            ),
+            route_to_terminal,
         )
 
     def _run_improve_selected(self, source_text: str, profile: ModelProfile) -> None:
@@ -11076,17 +11299,37 @@ button.improve-profile-chip {{
             f"Improve Selected complete with {profile.display_name()}.",
         )
 
-    def _run_text_draft_improve_selected(self, source_text: str, profile: ModelProfile) -> None:
+    def _run_text_draft_improve_selected(
+        self,
+        source_text: str,
+        profile: ModelProfile,
+        route_to_terminal: bool = False,
+        terminal_pid: int | None = None,
+    ) -> None:
         payload = self._compose_improve_payload(source_text, profile)
+        generated_parts: list[str] = []
         try:
             for chunk in self._stream_custom(payload, profile.api_url, profile.api_key, request_title="Improve"):
-                GLib.idle_add(self._append_text_draft_inserted_text, chunk)
+                if route_to_terminal:
+                    if not self._text_draft_terminal_child_is_running(terminal_pid):
+                        raise RuntimeError("Embedded Codex is no longer running.")
+                    generated_parts.append(chunk)
+                    GLib.idle_add(self._append_text_draft_terminal_text, chunk)
+                else:
+                    GLib.idle_add(self._append_text_draft_inserted_text, chunk)
         except Exception as exc:  # noqa: BLE001
             GLib.idle_add(self._on_text_draft_failed, str(exc))
             return
+        if route_to_terminal:
+            GLib.idle_add(self._set_text_draft_terminal_generated_output, "".join(generated_parts))
         GLib.idle_add(
             self._on_text_draft_improve_finished,
-            f"Improve Selected complete with {profile.display_name()}.",
+            (
+                f"Improve Selected streamed to embedded Codex with {profile.display_name()}."
+                if route_to_terminal
+                else f"Improve Selected complete with {profile.display_name()}."
+            ),
+            route_to_terminal,
         )
 
     def _run_shorten(self, source_text: str, profile: ModelProfile) -> None:
@@ -12228,9 +12471,11 @@ button.improve-profile-chip {{
         self._capture_spellingstyle_range_end()
         return False
 
-    def _on_text_draft_spellingstyle_finished(self, message: str) -> bool:
+    def _on_text_draft_spellingstyle_finished(self, message: str, route_to_terminal: bool = False) -> bool:
         self._set_busy(False)
         self._status_label.set_label(message)
+        if route_to_terminal:
+            return False
         self._flush_text_draft_pending_newlines(is_original_output=False)
         self._flush_text_draft_pending_newlines(is_original_output=True)
         self._ensure_single_text_draft_trailing_space()
@@ -12257,9 +12502,12 @@ button.improve-profile-chip {{
         self._capture_improve1_range_end()
         return False
 
-    def _on_text_draft_improve_finished(self, message: str) -> bool:
+    def _on_text_draft_improve_finished(self, message: str, route_to_terminal: bool = False) -> bool:
         self._set_busy(False)
         self._status_label.set_label(message)
+        if route_to_terminal:
+            self._commit_pending_text_draft_regenerate_context()
+            return False
         self._flush_text_draft_pending_newlines(is_original_output=False)
         self._ensure_single_text_draft_trailing_space()
         self._focus_text_draft_insert_end()
