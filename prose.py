@@ -1304,6 +1304,7 @@ class MultiDraftRequest:
     default_prompt: str
     request_title: str
     variant: str | None = None
+    stacked: bool = False
 
 
 @dataclass
@@ -1475,6 +1476,13 @@ EDITOR_QUICK_ACTIONS = (
         supports_profiles=True,
     ),
     QuickActionDefinition(
+        key="concl-section-choices",
+        label="Section Conclusion Choices",
+        title="Section Conclusion Choices",
+        action_name="transform-concl-section-choices",
+        description="Compare section conclusions using the Choices profiles.",
+    ),
+    QuickActionDefinition(
         key="add-case",
         label="Add Case",
         title="Add Case",
@@ -1501,7 +1509,7 @@ EDITOR_QUICK_ACTIONS = (
         label="Introduction Choices",
         title="Introduction Choices",
         action_name="transform-introduction-choices",
-        description="Compare introductions from all configured model profiles.",
+        description="Compare introductions using the Choices profiles.",
     ),
     QuickActionDefinition(
         key="intro-reply",
@@ -1516,7 +1524,7 @@ EDITOR_QUICK_ACTIONS = (
         label="Introduction Reply Choices",
         title="Introduction Reply Choices",
         action_name="transform-introduction-reply-choices",
-        description="Compare reply introductions from all configured model profiles.",
+        description="Compare reply introductions using the Choices profiles.",
     ),
     QuickActionDefinition(
         key="conclusion",
@@ -1531,7 +1539,7 @@ EDITOR_QUICK_ACTIONS = (
         label="Conclusion Choices",
         title="Conclusion Choices",
         action_name="transform-conclusion-choices",
-        description="Compare conclusions from all configured model profiles.",
+        description="Compare conclusions using the Choices profiles.",
     ),
     QuickActionDefinition(
         key="concl-no-issues",
@@ -1546,7 +1554,7 @@ EDITOR_QUICK_ACTIONS = (
         label="Conclusion No Issues Choices",
         title="Conclusion No Issues Choices",
         action_name="transform-concl-no-issues-choices",
-        description="Compare no-issues conclusions from all configured model profiles.",
+        description="Compare no-issues conclusions using the Choices profiles.",
     ),
     QuickActionDefinition(
         key="quotes",
@@ -1585,6 +1593,7 @@ EDITOR_DRAFT_CHOICE_ACTION_KEYS = (
     "intro-reply-choices",
     "conclusion-choices",
     "concl-no-issues-choices",
+    "concl-section-choices",
 )
 EDITOR_DEDICATED_QUICK_ACTION_KEYS = frozenset(EDITOR_DRAFT_CHOICE_ACTION_KEYS)
 EDITOR_TOOLBAR_EXCLUDED_ACTION_KEYS = EDITOR_SINGLE_DRAFT_ACTION_KEYS | EDITOR_DEDICATED_QUICK_ACTION_KEYS
@@ -4695,6 +4704,7 @@ button.improve-profile-chip {{
         )
         _add_action("transform-concl-no-issues-choices", lambda: self._on_concl_no_issues_choices_clicked(None))
         _add_string_action("transform-concl-section", lambda nickname: self._on_concl_section_clicked(None, nickname))
+        _add_action("transform-concl-section-choices", lambda: self._on_concl_section_choices_clicked(None))
         _add_action("add-case", lambda: self._on_add_case_clicked(None))
         _add_action("import-socf", lambda: self._on_import_socf_clicked(None))
         _add_action("request-changes", lambda: self._on_request_clicked(None))
@@ -7119,6 +7129,78 @@ button.improve-profile-chip {{
         thread = threading.Thread(target=self._run_concl_section, args=(source_text, profile), daemon=True)
         thread.start()
 
+    def _on_concl_section_choices_clicked(self, _button: Gtk.Button | None) -> None:
+        if self._busy:
+            return
+        desktop = self._get_desktop()
+        if not desktop:
+            self._show_toast("Unable to reach LibreOffice listener. Is the service running?")
+            return
+        doc = self._get_active_writer(desktop)
+        if not doc:
+            self._show_toast("Open a Writer document (File → Launch Writer).")
+            return
+        view_cursor = doc.getCurrentController().getViewCursor()
+        source_text = self._extract_section_to_last_heading(doc, view_cursor)
+        if not source_text:
+            self._show_toast("Unable to find a heading before the cursor.")
+            return
+        requests = self._build_editor_stacked_choice_requests(
+            request_title="Section Conclusion Choice",
+            payload_builder=self._compose_concl_section_payload,
+            prompt_text=self._concl_section_settings.prompt,
+            default_prompt=DEFAULT_CONCL_SECTION_PROMPT,
+        )
+        if len(requests) != len(STACKED_CHOICE_VARIANTS):
+            self._show_toast("Choose Improve, Rephrase 1, and Rephrase 2 profiles in Settings first.")
+            return
+        self._multi_draft_insert_mode = "editor"
+        self._multi_draft_replace_doc = None
+        self._multi_draft_replace_start = None
+        self._multi_draft_replace_end = None
+        self._start_multi_draft_choices_for_text(
+            title="Section Conclusion Choices",
+            source_text=source_text,
+            payload_builder=self._compose_concl_section_payload,
+            prompt_text=self._concl_section_settings.prompt,
+            default_prompt=DEFAULT_CONCL_SECTION_PROMPT,
+            request_title="Section Conclusion Choice",
+            requests=requests,
+        )
+
+    def _build_editor_stacked_choice_requests(
+        self,
+        *,
+        request_title: str,
+        payload_builder: Callable[[str, ModelProfile], dict[str, Any]],
+        prompt_text: str,
+        default_prompt: str,
+    ) -> list[MultiDraftRequest]:
+        requests: list[MultiDraftRequest] = []
+        slot_specs = (
+            ("choices-improve", "Choice 1"),
+            ("choices-rephrase-1", "Choice 2"),
+            ("choices-rephrase-2", "Choice 3"),
+        )
+        for slot_key, label in slot_specs:
+            profile_key = self._editor_action_profile_defaults.get(slot_key)
+            profile = self._model_profile_by_key(profile_key or "")
+            if profile is None:
+                continue
+            requests.append(
+                MultiDraftRequest(
+                    key=slot_key,
+                    label=profile.display_name(),
+                    profile=profile,
+                    payload_builder=payload_builder,
+                    prompt_text=prompt_text,
+                    default_prompt=default_prompt,
+                    request_title=f"{request_title} {label}",
+                    stacked=True,
+                )
+            )
+        return requests
+
     def _build_editor_improve_rephrase_choice_requests(self, request_title: str) -> list[MultiDraftRequest]:
         requests: list[MultiDraftRequest] = []
         slot_specs = (
@@ -7191,6 +7273,15 @@ button.improve-profile-chip {{
         if not source_text:
             self._show_toast(f'Unable to find text between "{source_start}" and "{source_end}".')
             return
+        requests = self._build_editor_stacked_choice_requests(
+            request_title=request_title,
+            payload_builder=payload_builder,
+            prompt_text=prompt_text,
+            default_prompt=default_prompt,
+        )
+        if len(requests) != len(STACKED_CHOICE_VARIANTS):
+            self._show_toast("Choose Improve, Rephrase 1, and Rephrase 2 profiles in Settings first.")
+            return
 
         self._multi_draft_insert_mode = "editor"
         self._multi_draft_replace_doc = None
@@ -7203,6 +7294,7 @@ button.improve-profile-chip {{
             prompt_text=prompt_text,
             default_prompt=default_prompt,
             request_title=request_title,
+            requests=requests,
         )
 
     def _start_multi_draft_choices_for_text(
@@ -7333,7 +7425,10 @@ button.improve-profile-chip {{
         )
         stacked_prompt_choices = (
             len(requests) == len(STACKED_CHOICE_VARIANTS)
-            and tuple(request.variant for request in requests) == STACKED_CHOICE_VARIANTS
+            and (
+                tuple(request.variant for request in requests) == STACKED_CHOICE_VARIANTS
+                or all(request.stacked for request in requests)
+            )
         )
 
         window_width = 980 if stacked_prompt_choices else 1280
@@ -7385,12 +7480,15 @@ button.improve-profile-chip {{
 
         for index, request in enumerate(requests):
             profile = request.profile
+            style_variant = request.variant
+            if style_variant is None and request.stacked and index < len(STACKED_CHOICE_VARIANTS):
+                style_variant = STACKED_CHOICE_VARIANTS[index]
             choice_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
             choice_box.set_hexpand(True)
             choice_box.set_vexpand(True)
             choice_box.add_css_class("multi-draft-choice")
-            if request.variant:
-                choice_box.add_css_class(f"multi-draft-choice-{request.variant}")
+            if style_variant:
+                choice_box.add_css_class(f"multi-draft-choice-{style_variant}")
 
             header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
             header.set_hexpand(True)
@@ -14371,7 +14469,9 @@ class SettingsWindow(Adw.ApplicationWindow):
         info_label = Gtk.Label(
             label=(
                 "Generated Choices and Selected Choices use these same three model assignments. "
-                "Improve uses the Improve Generated prompt; Rephrase 1 and Rephrase 2 use the Rephrase Generated prompt."
+                "Improve uses the Improve Generated prompt; Rephrase 1 and Rephrase 2 use the Rephrase Generated prompt. "
+                "Draft introduction and conclusion Choices, including Section Conclusion Choices, use the action prompt "
+                "for all three assignments."
             ),
             xalign=0,
         )
@@ -14387,9 +14487,9 @@ class SettingsWindow(Adw.ApplicationWindow):
 
         self._choices_profile_dropdowns = {}
         rows = (
-            ("choices-improve", "Improve", "Default suggestion using the Improve Generated prompt."),
-            ("choices-rephrase-1", "Rephrase 1", "First variation using the Rephrase Generated prompt."),
-            ("choices-rephrase-2", "Rephrase 2", "Second variation using the Rephrase Generated prompt."),
+            ("choices-improve", "Improve", "Default Choices model assignment."),
+            ("choices-rephrase-1", "Rephrase 1", "First Choices variation model assignment."),
+            ("choices-rephrase-2", "Rephrase 2", "Second Choices variation model assignment."),
         )
         for profile_key, title, subtitle in rows:
             row = Adw.ActionRow(title=title, subtitle=subtitle)
