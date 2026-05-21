@@ -56,9 +56,6 @@ CONFIG_FILE = Path(__file__).with_name("config.json")
 TEXT_DRAFT_CODEX_VTE_SCRIPT = (
     Path(__file__).resolve().parent / "scripts" / "prose-text-draft-codex-vte.sh"
 )
-TEXT_DRAFT_CODEX_PROJECT_VTE_SCRIPT = (
-    Path(__file__).resolve().parent / "scripts" / "prose-text-draft-codex-project-vte.sh"
-)
 TEXT_DRAFT_PROJECTS_DIR = Path(__file__).resolve().parent.parent
 TEXT_DRAFT_EXTERNAL_ACTION_ENV_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 STYLE_RULES_TOKEN = "{{STYLE_RULES}}"
@@ -176,7 +173,6 @@ TEXT_DRAFT_EXTERNAL_ACTION_DRAFT_FILE_TOKEN = "{draft_file}"
 TEXT_DRAFT_CASE_SUGGESTION_MIN_PREFIX = 3
 TEXT_DRAFT_CASE_SUGGESTION_LIMIT = 8
 DEFAULT_TEXT_DRAFT_EXTERNAL_ACTION_ICON = "utilities-terminal-symbolic"
-DEFAULT_TEXT_DRAFT_CODEX_PROJECT_ICON = "folder-symbolic"
 PROSE_TERMINAL_DARK_FOREGROUND = "#f2f4f8"
 PROSE_TERMINAL_DARK_BACKGROUND = "#3d3d3d"
 PROSE_TERMINAL_DARK_SELECTION = "#3d536b"
@@ -996,7 +992,7 @@ def _apply_prose_terminal_theme(terminal: Any) -> None:
     terminal.set_colors(foreground, background, palette)
     terminal.set_color_background(background)
     terminal.set_color_foreground(foreground)
-    terminal.set_clear_background(False)
+    terminal.set_clear_background(True)
     terminal.set_color_cursor(_rgba_color(cursor_spec))
     terminal.set_color_cursor_foreground(_rgba_color(cursor_foreground_spec))
     terminal.set_color_highlight(_rgba_color(selection_spec))
@@ -1320,6 +1316,7 @@ class TextDraftExternalAction:
     icon_name: str = DEFAULT_TEXT_DRAFT_EXTERNAL_ACTION_ICON
     tooltip: str = ""
     success_message: str = ""
+    codex_project_targets: list["TextDraftCodexProjectTarget"] | None = None
 
     def is_configured(self) -> bool:
         return self.enabled and bool(self.command)
@@ -1334,7 +1331,6 @@ class TextDraftCodexProjectTarget:
 @dataclass
 class TextDraftCodexProjectAction:
     enabled: bool = True
-    icon_name: str = DEFAULT_TEXT_DRAFT_CODEX_PROJECT_ICON
     reasoning_effort: str = ""
     targets: list[TextDraftCodexProjectTarget] | None = None
 
@@ -1351,7 +1347,7 @@ class TextDraftExternalActionEditorWidgets:
     success_message_row: Adw.EntryRow
     command_row: Adw.EntryRow
     cwd_row: Adw.EntryRow
-    codex_reasoning_effort_row: Adw.EntryRow | None
+    codex_project_targets_buffer: Gtk.TextBuffer | None
     env_buffer: Gtk.TextBuffer
 
 
@@ -2522,6 +2518,18 @@ def _parse_text_draft_external_action(raw: Any) -> TextDraftExternalAction | Non
     if isinstance(raw_env, dict):
         env = {str(key): str(value) for key, value in raw_env.items() if str(key)}
 
+    raw_codex_project_targets = raw.get("codex_project_targets")
+    codex_project_targets: list[TextDraftCodexProjectTarget] = []
+    if isinstance(raw_codex_project_targets, list):
+        codex_project_targets = [
+            target
+            for target in (
+                _parse_text_draft_codex_project_target(item)
+                for item in raw_codex_project_targets
+            )
+            if target is not None
+        ]
+
     return TextDraftExternalAction(
         enabled=enabled,
         label=label,
@@ -2531,6 +2539,7 @@ def _parse_text_draft_external_action(raw: Any) -> TextDraftExternalAction | Non
         icon_name=icon_name,
         tooltip=tooltip,
         success_message=success_message,
+        codex_project_targets=codex_project_targets,
     )
 
 
@@ -2563,10 +2572,11 @@ def load_text_draft_external_actions() -> list[TextDraftExternalAction]:
             for action in (_parse_text_draft_external_action(item) for item in raw_actions)
             if action is not None
         ]
-        return actions
+        return _migrate_text_draft_codex_project_targets(actions, raw)
 
     legacy_action = _parse_text_draft_external_action(raw.get(CONFIG_KEY_TEXT_DRAFT_EXTERNAL_ACTION))
-    return [legacy_action] if legacy_action is not None else []
+    actions = [legacy_action] if legacy_action is not None else []
+    return _migrate_text_draft_codex_project_targets(actions, raw)
 
 
 def _text_draft_external_action_has_payload(action: TextDraftExternalAction) -> bool:
@@ -2582,6 +2592,7 @@ def _text_draft_external_action_has_payload(action: TextDraftExternalAction) -> 
         or has_custom_icon
         or bool(action.tooltip.strip())
         or bool(action.success_message.strip())
+        or bool(action.codex_project_targets)
     )
 
 
@@ -2602,6 +2613,14 @@ def _text_draft_external_action_payload(action: TextDraftExternalAction) -> dict
         payload["tooltip"] = action.tooltip.strip()
     if action.success_message.strip():
         payload["success_message"] = action.success_message.strip()
+    if action.codex_project_targets:
+        payload["codex_project_targets"] = [
+            {
+                "label": target.label.strip() or target.cwd.name or str(target.cwd),
+                "cwd": str(target.cwd.expanduser().resolve(strict=False)),
+            }
+            for target in action.codex_project_targets
+        ]
     return payload
 
 
@@ -2613,6 +2632,7 @@ def save_text_draft_external_actions(actions: list[TextDraftExternalAction]) -> 
         if _text_draft_external_action_has_payload(action)
     ]
     data.pop(CONFIG_KEY_TEXT_DRAFT_EXTERNAL_ACTION, None)
+    data.pop(CONFIG_KEY_TEXT_DRAFT_CODEX_PROJECT_ACTION, None)
     if payload:
         data[CONFIG_KEY_TEXT_DRAFT_EXTERNAL_ACTIONS] = payload
     else:
@@ -2649,7 +2669,6 @@ def load_text_draft_codex_project_action() -> TextDraftCodexProjectAction:
     raw = _read_config().get(CONFIG_KEY_TEXT_DRAFT_CODEX_PROJECT_ACTION)
     if not isinstance(raw, dict):
         return TextDraftCodexProjectAction(targets=[])
-    icon_name = str(raw.get("icon_name") or DEFAULT_TEXT_DRAFT_CODEX_PROJECT_ICON).strip()
     raw_targets = raw.get("targets")
     targets: list[TextDraftCodexProjectTarget] = []
     if isinstance(raw_targets, list):
@@ -2660,30 +2679,9 @@ def load_text_draft_codex_project_action() -> TextDraftCodexProjectAction:
         ]
     return TextDraftCodexProjectAction(
         enabled=_coerce_bool_config(raw.get("enabled"), True),
-        icon_name=icon_name or DEFAULT_TEXT_DRAFT_CODEX_PROJECT_ICON,
         reasoning_effort=str(raw.get("reasoning_effort") or "").strip(),
         targets=targets,
     )
-
-
-def save_text_draft_codex_project_action(action: TextDraftCodexProjectAction) -> None:
-    data = _read_config()
-    icon_name = action.icon_name.strip() or DEFAULT_TEXT_DRAFT_CODEX_PROJECT_ICON
-    payload: dict[str, Any] = {
-        "enabled": bool(action.enabled),
-        "icon_name": icon_name,
-        "targets": [
-            {
-                "label": target.label.strip() or target.cwd.name or str(target.cwd),
-                "cwd": str(target.cwd.expanduser().resolve(strict=False)),
-            }
-            for target in action.configured_targets()
-        ],
-    }
-    if action.reasoning_effort.strip():
-        payload["reasoning_effort"] = action.reasoning_effort.strip()
-    data[CONFIG_KEY_TEXT_DRAFT_CODEX_PROJECT_ACTION] = payload
-    _write_config(data)
 
 
 def _format_text_draft_codex_project_targets(targets: Iterable[TextDraftCodexProjectTarget]) -> str:
@@ -2714,6 +2712,52 @@ def _parse_text_draft_codex_project_targets(text: str) -> list[TextDraftCodexPro
         cwd = Path(path_text).expanduser().resolve(strict=False)
         targets.append(TextDraftCodexProjectTarget(label=label or cwd.name or str(cwd), cwd=cwd))
     return targets
+
+
+def _is_text_draft_codex_external_action(action: TextDraftExternalAction) -> bool:
+    if action.label.strip().lower() == "codex":
+        return True
+    return any(
+        script_name in part
+        for part in action.command
+        for script_name in (
+            "prose-text-draft-codex-ghostty.sh",
+            "prose-text-draft-codex-vte.sh",
+        )
+    )
+
+
+def _migrate_text_draft_codex_project_targets(
+    actions: list[TextDraftExternalAction],
+    raw_config: dict[str, Any],
+) -> list[TextDraftExternalAction]:
+    legacy_raw = raw_config.get(CONFIG_KEY_TEXT_DRAFT_CODEX_PROJECT_ACTION)
+    if not isinstance(legacy_raw, dict):
+        return actions
+    legacy_action = load_text_draft_codex_project_action()
+    targets = legacy_action.configured_targets()
+    if not targets:
+        return actions
+
+    codex_action = next(
+        (action for action in actions if _is_text_draft_codex_external_action(action)),
+        None,
+    )
+    if codex_action is None:
+        codex_action = TextDraftExternalAction(
+            enabled=legacy_action.enabled,
+            label="Codex",
+            command=["bash", str(TEXT_DRAFT_CODEX_VTE_SCRIPT), TEXT_DRAFT_EXTERNAL_ACTION_DRAFT_FILE_TOKEN],
+            cwd=None,
+            env={},
+            icon_name=DEFAULT_TEXT_DRAFT_EXTERNAL_ACTION_ICON,
+            tooltip="Start Codex with the current Draft as the initial prompt.",
+            success_message="Codex launched with Draft text.",
+        )
+        actions.append(codex_action)
+    if not codex_action.codex_project_targets:
+        codex_action.codex_project_targets = targets
+    return actions
 
 
 def load_last_odt_file() -> Path | None:
@@ -2927,7 +2971,6 @@ class ProseWindow(Adw.ApplicationWindow):
         self._prefix_settings = load_prefix_settings()
         self._editor_source_file = load_editor_source_file()
         self._text_draft_template_dir = load_text_draft_template_dir()
-        self._text_draft_codex_project_action = load_text_draft_codex_project_action()
         self._text_draft_external_actions = load_text_draft_external_actions()
         self._last_odt_path = load_last_odt_file()
         self._concordance_file_path = load_concordance_file_path()
@@ -3012,10 +3055,8 @@ class ProseWindow(Adw.ApplicationWindow):
         self._text_draft_template_email_box: Gtk.Box | None = None
         self._text_draft_template_email_buttons: list[Gtk.Button] = []
         self._text_draft_template_emails: list[tuple[str, str]] = []
-        self._text_draft_codex_project_button: Gtk.MenuButton | None = None
-        self._text_draft_codex_project_popover: Gtk.Popover | None = None
         self._text_draft_external_action_box: Gtk.Box | None = None
-        self._text_draft_external_action_buttons: list[Gtk.Button] = []
+        self._text_draft_external_action_buttons: list[Gtk.Widget] = []
         self._text_draft_case_popover: Gtk.Popover | None = None
         self._text_draft_case_list_box: Gtk.ListBox | None = None
         self._text_draft_case_suggestions: list[TextDraftCaseSuggestion] = []
@@ -3409,21 +3450,6 @@ class ProseWindow(Adw.ApplicationWindow):
         draft_header_row.append(terminal_close_btn)
         self._text_draft_terminal_close_button = terminal_close_btn
 
-        codex_project_button = Gtk.MenuButton(
-            icon_name=(
-                self._text_draft_codex_project_action.icon_name.strip()
-                or DEFAULT_TEXT_DRAFT_CODEX_PROJECT_ICON
-            )
-        )
-        codex_project_button.add_css_class("flat")
-        codex_project_button.add_css_class("transform-pill")
-        codex_project_button.add_css_class("transform-pill-compact")
-        codex_project_button.set_tooltip_text("Start Codex in a configured project directory.")
-        draft_header_row.append(codex_project_button)
-        self._text_draft_codex_project_button = codex_project_button
-        self._text_draft_terminal_buttons.append(codex_project_button)
-        self._rebuild_text_draft_codex_project_menu()
-
         external_action_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
         draft_header_row.append(external_action_box)
         self._text_draft_external_action_box = external_action_box
@@ -3482,12 +3508,12 @@ class ProseWindow(Adw.ApplicationWindow):
             terminal = Vte.Terminal()
             terminal.set_hexpand(True)
             terminal.set_vexpand(True)
-            terminal.set_margin_top(8)
-            terminal.set_margin_bottom(8)
-            terminal.set_margin_start(8)
-            terminal.set_margin_end(8)
             terminal.add_css_class("text-draft-terminal")
             _apply_prose_terminal_theme(terminal)
+            terminal_key_controller = Gtk.EventControllerKey()
+            terminal_key_controller.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
+            terminal_key_controller.connect("key-pressed", self._on_text_draft_terminal_key_pressed)
+            terminal.add_controller(terminal_key_controller)
             Adw.StyleManager.get_default().connect(
                 "notify::dark",
                 self._on_text_draft_terminal_style_changed,
@@ -4017,6 +4043,17 @@ class ProseWindow(Adw.ApplicationWindow):
                 continue
             display_label = self._text_draft_external_action_display_label(external_action)
             icon_name = self._text_draft_external_action_display_icon(external_action)
+            targets = list(external_action.codex_project_targets or [])
+            if self._is_text_draft_codex_action(external_action) and targets:
+                button = self._build_text_draft_codex_external_action_menu(
+                    external_action,
+                    display_label,
+                    icon_name,
+                    targets,
+                )
+                box.append(button)
+                self._text_draft_external_action_buttons.append(button)
+                continue
             button = Gtk.Button(label=display_label, icon_name=icon_name)
             button.add_css_class("flat")
             button.add_css_class("transform-pill")
@@ -4034,25 +4071,37 @@ class ProseWindow(Adw.ApplicationWindow):
             box.append(button)
             self._text_draft_external_action_buttons.append(button)
 
-    def _rebuild_text_draft_codex_project_menu(self) -> None:
-        button = self._text_draft_codex_project_button
-        if button is None:
-            return
-        icon_name = (
-            self._text_draft_codex_project_action.icon_name.strip()
-            or DEFAULT_TEXT_DRAFT_CODEX_PROJECT_ICON
-        )
-        button.set_icon_name(icon_name)
-        targets = self._text_draft_codex_project_action.configured_targets()
-        button.set_visible(self._text_draft_codex_project_action.enabled and bool(targets))
-        button.set_sensitive(not self._busy and bool(targets))
-
+    def _build_text_draft_codex_external_action_menu(
+        self,
+        action: TextDraftExternalAction,
+        display_label: str,
+        icon_name: str,
+        targets: list[TextDraftCodexProjectTarget],
+    ) -> Gtk.MenuButton:
+        button = Gtk.MenuButton(label=display_label, icon_name=icon_name)
+        button.add_css_class("flat")
+        button.add_css_class("transform-pill")
+        button.add_css_class("transform-pill-compact")
+        tooltip = action.tooltip.strip() or "Start Codex with the current Draft as the initial prompt."
+        button.set_tooltip_text(tooltip)
+        button.set_sensitive(not self._busy)
         popover = Gtk.Popover()
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         box.set_margin_top(6)
         box.set_margin_bottom(6)
         box.set_margin_start(6)
         box.set_margin_end(6)
+        home_item = Gtk.Button(label="Home")
+        home_item.add_css_class("flat")
+        home_item.set_halign(Gtk.Align.FILL)
+        home_item.set_tooltip_text(str(Path.home()))
+        home_item.connect(
+            "clicked",
+            self._on_text_draft_codex_external_home_clicked,
+            popover,
+            action,
+        )
+        box.append(home_item)
         for target in targets:
             item = Gtk.Button(label=target.label.strip() or target.cwd.name or str(target.cwd))
             item.add_css_class("flat")
@@ -4060,15 +4109,34 @@ class ProseWindow(Adw.ApplicationWindow):
             item.set_tooltip_text(str(target.cwd))
             item.connect(
                 "clicked",
-                lambda clicked_button, project_target=target: self._on_text_draft_codex_project_clicked(
-                    clicked_button,
-                    project_target,
-                ),
+                self._on_text_draft_codex_external_target_clicked,
+                popover,
+                action,
+                target,
             )
             box.append(item)
         popover.set_child(box)
         button.set_popover(popover)
-        self._text_draft_codex_project_popover = popover
+        return button
+
+    def _on_text_draft_codex_external_home_clicked(
+        self,
+        button: Gtk.Button,
+        popover: Gtk.Popover,
+        action: TextDraftExternalAction,
+    ) -> None:
+        popover.popdown()
+        self._on_text_draft_external_action_clicked(button, action, codex_home=True)
+
+    def _on_text_draft_codex_external_target_clicked(
+        self,
+        button: Gtk.Button,
+        popover: Gtk.Popover,
+        action: TextDraftExternalAction,
+        target: TextDraftCodexProjectTarget,
+    ) -> None:
+        popover.popdown()
+        self._on_text_draft_external_action_clicked(button, action, target)
 
     def _ensure_css(self) -> None:
         if self._css_provider is not None:
@@ -4209,6 +4277,8 @@ textview.spelling-output-view.view border {{
   box-shadow: none;
 }}
 .text-draft-terminal {{
+  border-radius: {SPELLING_OUTPUT_CORNER_RADIUS_PX}px;
+  padding: 8px;
   background-color: @window_bg_color;
   background-image: none;
   color: @window_fg_color;
@@ -4676,6 +4746,15 @@ button.improve-profile-chip {{
         )
         section.append(editor_group)
 
+        terminal_group = Gtk.ShortcutsGroup(title="Text Draft Terminal")
+        terminal_group.append(
+            Gtk.ShortcutsShortcut(title="Copy terminal selection", accelerator="<Primary><Shift>C")
+        )
+        terminal_group.append(
+            Gtk.ShortcutsShortcut(title="Paste into terminal", accelerator="<Primary><Shift>V")
+        )
+        section.append(terminal_group)
+
         help_group = Gtk.ShortcutsGroup(title="Reference")
         help_group.append(Gtk.ShortcutsShortcut(title="Show keyboard shortcuts", accelerator="F1"))
         section.append(help_group)
@@ -4789,7 +4868,6 @@ button.improve-profile-chip {{
             self._editor_pinned_action_ids,
             self._text_draft_pinned_action_ids,
             self._text_draft_template_dir,
-            self._text_draft_codex_project_action,
             self._text_draft_external_actions,
             self._libreoffice_python_path,
             self._concordance_file_path,
@@ -4835,7 +4913,6 @@ button.improve-profile-chip {{
         editor_pinned_action_ids: list[str],
         text_draft_pinned_action_ids: list[str],
         text_draft_template_dir: Path | None,
-        text_draft_codex_project_action: TextDraftCodexProjectAction,
         text_draft_external_actions: list[TextDraftExternalAction],
         libreoffice_python_path: Path | None,
         concordance_file_path: Path | None,
@@ -4867,7 +4944,6 @@ button.improve-profile-chip {{
         self._text_draft_template_dir = (
             text_draft_template_dir.expanduser().resolve(strict=False) if text_draft_template_dir else None
         )
-        self._text_draft_codex_project_action = text_draft_codex_project_action
         self._text_draft_external_actions = text_draft_external_actions
         self._libreoffice_python_path = libreoffice_python_path.expanduser().resolve(strict=False) if libreoffice_python_path else None
         self._concordance_file_path = (
@@ -4898,12 +4974,10 @@ button.improve-profile-chip {{
         save_editor_pinned_actions(self._editor_pinned_action_ids)
         save_text_draft_pinned_actions(self._text_draft_pinned_action_ids)
         save_text_draft_template_dir(self._text_draft_template_dir)
-        save_text_draft_codex_project_action(self._text_draft_codex_project_action)
         save_text_draft_external_actions(self._text_draft_external_actions)
         save_libreoffice_python_path(self._libreoffice_python_path)
         save_concordance_file_path(self._concordance_file_path)
         self._rebuild_transform_action_buttons()
-        self._rebuild_text_draft_codex_project_menu()
         self._rebuild_text_draft_action_buttons()
         self._rebuild_text_draft_external_action_buttons()
         self._rebuild_regenerate_profile_chips()
@@ -5773,16 +5847,7 @@ button.improve-profile-chip {{
 
     @staticmethod
     def _is_text_draft_codex_action(action: TextDraftExternalAction) -> bool:
-        if action.label.strip().lower() == "codex":
-            return True
-        return any(
-            script_name in part
-            for part in action.command
-            for script_name in (
-                "prose-text-draft-codex-ghostty.sh",
-                "prose-text-draft-codex-vte.sh",
-            )
-        )
+        return _is_text_draft_codex_external_action(action)
 
     def _text_draft_codex_action(self) -> TextDraftExternalAction | None:
         return next(
@@ -5941,7 +6006,13 @@ button.improve-profile-chip {{
         self._status_label.set_label(f"Started embedded {action_label}.")
         terminal.grab_focus()
 
-    def _start_text_draft_codex_terminal(self, action: TextDraftExternalAction, draft_path: Path) -> None:
+    def _start_text_draft_codex_terminal(
+        self,
+        action: TextDraftExternalAction,
+        draft_path: Path,
+        cwd_override: Path | None = None,
+        reasoning_effort: str = "medium",
+    ) -> None:
         terminal = self._text_draft_terminal
         if Vte is None or terminal is None:
             self._text_draft_embedded_terminal_unavailable()
@@ -5961,7 +6032,12 @@ button.improve-profile-chip {{
                 for key, value in action.env.items()
             }
         )
-        cwd = str(action.cwd) if action.cwd is not None else os.getcwd()
+        env["CODEX_REASONING_EFFORT"] = reasoning_effort
+        env.pop("PROSE_CODEX_EMPTY_SESSION", None)
+        cwd_path = cwd_override or action.cwd
+        cwd = str(cwd_path) if cwd_path is not None else os.getcwd()
+        if cwd_override is not None:
+            env["CODEX_CWD"] = cwd
         argv = [
             self._expand_text_draft_external_action_value(part, draft_path)
             for part in action.command
@@ -5985,22 +6061,6 @@ button.improve-profile-chip {{
             "codex",
             clear_draft_on_return=True,
         )
-
-    def _start_text_draft_codex_project_terminal(self, target: TextDraftCodexProjectTarget) -> None:
-        if Vte is None or self._text_draft_terminal is None:
-            self._text_draft_embedded_terminal_unavailable()
-            return
-        if not TEXT_DRAFT_CODEX_PROJECT_VTE_SCRIPT.is_file():
-            message = f"Codex project VTE script not found: {TEXT_DRAFT_CODEX_PROJECT_VTE_SCRIPT}"
-            self._status_label.set_label(message)
-            self._show_toast(message)
-            return
-        env = os.environ.copy()
-        if self._text_draft_codex_project_action.reasoning_effort.strip():
-            env["CODEX_REASONING_EFFORT"] = self._text_draft_codex_project_action.reasoning_effort.strip()
-        label = target.label.strip() or target.cwd.name or str(target.cwd)
-        argv = ["bash", str(TEXT_DRAFT_CODEX_PROJECT_VTE_SCRIPT), str(target.cwd)]
-        self._spawn_text_draft_terminal(argv, str(target.cwd), env, f"Codex in {label}", "codex")
 
     def _start_text_draft_shell_terminal(self, fallback: bool = False, cwd: str | None = None) -> None:
         terminal = self._text_draft_terminal
@@ -6034,17 +6094,6 @@ button.improve-profile-chip {{
                 self._text_draft_clear_draft_on_terminal_return if fallback else False
             ),
         )
-
-    def _on_text_draft_codex_project_clicked(
-        self,
-        _button: Gtk.Button | None,
-        target: TextDraftCodexProjectTarget,
-    ) -> None:
-        if self._text_draft_codex_project_popover is not None:
-            self._text_draft_codex_project_popover.popdown()
-        if self._busy:
-            return
-        self._start_text_draft_codex_project_terminal(target)
 
     def _on_text_draft_terminal_spawned(
         self,
@@ -6085,6 +6134,27 @@ button.improve-profile-chip {{
         if terminal is not None:
             _apply_prose_terminal_theme(terminal)
 
+    def _on_text_draft_terminal_key_pressed(
+        self,
+        _controller: Gtk.EventControllerKey,
+        keyval: int,
+        _keycode: int,
+        state: Gdk.ModifierType,
+    ) -> bool:
+        terminal = self._text_draft_terminal
+        if Vte is None or terminal is None:
+            return False
+        required_modifiers = Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.SHIFT_MASK
+        if state & required_modifiers != required_modifiers:
+            return False
+        if keyval in (Gdk.KEY_C, Gdk.KEY_c):
+            terminal.copy_clipboard_format(Vte.Format.TEXT)
+            return True
+        if keyval in (Gdk.KEY_V, Gdk.KEY_v):
+            terminal.paste_clipboard()
+            return True
+        return False
+
     def _on_text_draft_terminal_close_clicked(self, _button: Gtk.Button) -> None:
         clear_draft_on_return = self._text_draft_clear_draft_on_terminal_return
         if self._text_draft_terminal_active and self._text_draft_terminal_pid is not None:
@@ -6107,6 +6177,8 @@ button.improve-profile-chip {{
         self,
         _button: Gtk.Button | None,
         action: TextDraftExternalAction | None = None,
+        codex_target: TextDraftCodexProjectTarget | None = None,
+        codex_home: bool = False,
     ) -> None:
         if action is None:
             action = next((item for item in self._text_draft_external_actions if item.is_configured()), None)
@@ -6124,7 +6196,19 @@ button.improve-profile-chip {{
             return
 
         if self._is_text_draft_codex_action(action):
-            self._start_text_draft_codex_terminal(action, draft_path)
+            cwd_override = None
+            reasoning_effort = "medium"
+            if codex_target is not None:
+                cwd_override = codex_target.cwd
+                reasoning_effort = "xhigh"
+            elif codex_home:
+                cwd_override = Path.home()
+            self._start_text_draft_codex_terminal(
+                action,
+                draft_path,
+                cwd_override=cwd_override,
+                reasoning_effort=reasoning_effort,
+            )
             return
 
         command = [
@@ -13481,7 +13565,6 @@ class SettingsWindow(Adw.ApplicationWindow):
         editor_pinned_action_ids: list[str],
         text_draft_pinned_action_ids: list[str],
         text_draft_template_dir: Path | None,
-        text_draft_codex_project_action: TextDraftCodexProjectAction,
         text_draft_external_actions: list[TextDraftExternalAction],
         libreoffice_python_path: Path | None,
         concordance_file_path: Path | None,
@@ -13514,7 +13597,6 @@ class SettingsWindow(Adw.ApplicationWindow):
                 list[str],
                 list[str],
                 Path | None,
-                TextDraftCodexProjectAction,
                 list[TextDraftExternalAction],
                 Path | None,
                 Path | None,
@@ -13563,7 +13645,6 @@ class SettingsWindow(Adw.ApplicationWindow):
         self._text_draft_template_dir = (
             text_draft_template_dir.expanduser().resolve(strict=False) if text_draft_template_dir else None
         )
-        self._text_draft_codex_project_action = text_draft_codex_project_action
         self._text_draft_external_actions = list(text_draft_external_actions)
         self._libreoffice_python_path = libreoffice_python_path
         self._concordance_file_path = concordance_file_path
@@ -13577,10 +13658,6 @@ class SettingsWindow(Adw.ApplicationWindow):
         self._prompt_row_keys: dict[Gtk.ListBoxRow, str] = {}
         self._source_row_guard = False
         self._text_draft_template_dir_row_guard = False
-        self._text_draft_codex_project_enabled_row: Adw.SwitchRow | None = None
-        self._text_draft_codex_project_icon_row: Adw.EntryRow | None = None
-        self._text_draft_codex_project_reasoning_row: Adw.EntryRow | None = None
-        self._text_draft_codex_project_targets_buffer: Gtk.TextBuffer | None = None
         self._text_draft_external_actions_box: Gtk.Box | None = None
         self._text_draft_external_action_widgets: list[TextDraftExternalActionEditorWidgets] = []
         self._libreoffice_path_row_guard = False
@@ -13939,8 +14016,6 @@ class SettingsWindow(Adw.ApplicationWindow):
         title_label.add_css_class("title-3")
         page_box.append(title_label)
 
-        self._append_text_draft_codex_project_settings(page_box)
-
         actions_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
         actions_box.set_hexpand(True)
         page_box.append(actions_box)
@@ -13955,85 +14030,6 @@ class SettingsWindow(Adw.ApplicationWindow):
         page_box.append(add_button)
 
         return page_box
-
-    def _append_text_draft_codex_project_settings(self, box: Gtk.Box) -> None:
-        group = Adw.PreferencesGroup(title="Codex Project Sessions")
-        group.add_css_class("list-stack")
-        group.set_hexpand(True)
-        box.append(group)
-
-        enabled_row = Adw.SwitchRow(
-            title="Enable action",
-            subtitle="Show a Draft-header menu of configured Codex project directories.",
-        )
-        enabled_row.set_active(self._text_draft_codex_project_action.enabled)
-        group.add(enabled_row)
-
-        icon_row = Adw.EntryRow(title="Icon name")
-        icon_row.set_text(
-            self._text_draft_codex_project_action.icon_name
-            or DEFAULT_TEXT_DRAFT_CODEX_PROJECT_ICON
-        )
-        group.add(icon_row)
-
-        reasoning_row = Adw.EntryRow(title="Codex reasoning effort")
-        reasoning_row.set_text(self._text_draft_codex_project_action.reasoning_effort)
-        reasoning_row.set_tooltip_text(
-            "Optional. Passed to Codex as CODEX_REASONING_EFFORT for project sessions."
-        )
-        group.add(reasoning_row)
-
-        targets_buffer = Gtk.TextBuffer()
-        targets_buffer.set_text(
-            _format_text_draft_codex_project_targets(
-                self._text_draft_codex_project_action.configured_targets()
-            )
-        )
-        targets_row = Adw.PreferencesRow()
-        targets_row.set_selectable(False)
-        targets_row.set_activatable(False)
-        targets_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
-        targets_box.set_margin_top(10)
-        targets_box.set_margin_bottom(10)
-        targets_box.set_margin_start(12)
-        targets_box.set_margin_end(12)
-
-        targets_title = Gtk.Label(label="Directories", xalign=0)
-        targets_title.add_css_class("heading")
-        targets_box.append(targets_title)
-
-        targets_hint = Gtk.Label(
-            label="Enter one directory per line. Use Label=/path to customize the menu label.",
-            xalign=0,
-        )
-        targets_hint.add_css_class("dim-label")
-        targets_hint.set_wrap(True)
-        targets_box.append(targets_hint)
-
-        targets_view = Gtk.TextView.new_with_buffer(targets_buffer)
-        targets_view.set_monospace(True)
-        targets_view.set_wrap_mode(Gtk.WrapMode.NONE)
-        targets_view.set_hexpand(True)
-        targets_view.set_top_margin(8)
-        targets_view.set_bottom_margin(8)
-        targets_view.set_left_margin(8)
-        targets_view.set_right_margin(8)
-
-        targets_scroller = Gtk.ScrolledWindow()
-        targets_scroller.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
-        targets_scroller.set_hexpand(True)
-        targets_scroller.set_min_content_height(96)
-        targets_scroller.set_max_content_height(180)
-        targets_scroller.set_child(targets_view)
-        targets_box.append(targets_scroller)
-
-        targets_row.set_child(targets_box)
-        group.add(targets_row)
-
-        self._text_draft_codex_project_enabled_row = enabled_row
-        self._text_draft_codex_project_icon_row = icon_row
-        self._text_draft_codex_project_reasoning_row = reasoning_row
-        self._text_draft_codex_project_targets_buffer = targets_buffer
 
     def _clear_settings_box(self, box: Gtk.Box) -> None:
         child = box.get_first_child()
@@ -14096,15 +14092,55 @@ class SettingsWindow(Adw.ApplicationWindow):
             cwd_row.set_show_apply_button(False)
             group.add(cwd_row)
 
-            codex_reasoning_effort_row = None
+            codex_project_targets_buffer = None
             env_values = dict(action.env)
             if self._parent_window._is_text_draft_codex_action(action):
-                codex_reasoning_effort_row = Adw.EntryRow(title="Codex reasoning effort")
-                codex_reasoning_effort_row.set_text(env_values.pop("CODEX_REASONING_EFFORT", ""))
-                codex_reasoning_effort_row.set_tooltip_text(
-                    "Optional. Passed to Codex as CODEX_REASONING_EFFORT, such as low, medium, high, or xhigh."
+                env_values.pop("CODEX_REASONING_EFFORT", None)
+
+                codex_project_targets_buffer = Gtk.TextBuffer()
+                codex_project_targets_buffer.set_text(
+                    _format_text_draft_codex_project_targets(action.codex_project_targets or [])
                 )
-                group.add(codex_reasoning_effort_row)
+                targets_row = Adw.PreferencesRow()
+                targets_row.set_selectable(False)
+                targets_row.set_activatable(False)
+                targets_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+                targets_box.set_margin_top(10)
+                targets_box.set_margin_bottom(10)
+                targets_box.set_margin_start(12)
+                targets_box.set_margin_end(12)
+
+                targets_title = Gtk.Label(label="Codex project directories", xalign=0)
+                targets_title.add_css_class("heading")
+                targets_box.append(targets_title)
+
+                targets_hint = Gtk.Label(
+                    label="Optional. Enter one directory per line. Use Label=/path to customize its menu label.",
+                    xalign=0,
+                )
+                targets_hint.add_css_class("dim-label")
+                targets_hint.set_wrap(True)
+                targets_box.append(targets_hint)
+
+                targets_view = Gtk.TextView.new_with_buffer(codex_project_targets_buffer)
+                targets_view.set_monospace(True)
+                targets_view.set_wrap_mode(Gtk.WrapMode.NONE)
+                targets_view.set_hexpand(True)
+                targets_view.set_top_margin(8)
+                targets_view.set_bottom_margin(8)
+                targets_view.set_left_margin(8)
+                targets_view.set_right_margin(8)
+
+                targets_scroller = Gtk.ScrolledWindow()
+                targets_scroller.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
+                targets_scroller.set_hexpand(True)
+                targets_scroller.set_min_content_height(96)
+                targets_scroller.set_max_content_height(180)
+                targets_scroller.set_child(targets_view)
+                targets_box.append(targets_scroller)
+
+                targets_row.set_child(targets_box)
+                group.add(targets_row)
 
             env_buffer = Gtk.TextBuffer()
             env_buffer.set_text(_format_text_draft_external_action_env(env_values))
@@ -14172,7 +14208,7 @@ class SettingsWindow(Adw.ApplicationWindow):
                     success_message_row=success_message_row,
                     command_row=command_row,
                     cwd_row=cwd_row,
-                    codex_reasoning_effort_row=codex_reasoning_effort_row,
+                    codex_project_targets_buffer=codex_project_targets_buffer,
                     env_buffer=env_buffer,
                 )
             )
@@ -14192,11 +14228,15 @@ class SettingsWindow(Adw.ApplicationWindow):
             if env_error is not None or env is None:
                 self._parent_window._show_toast(f"External action {index + 1} environment {env_error}")
                 return None
-            if widgets.codex_reasoning_effort_row is not None:
+            if widgets.codex_project_targets_buffer is not None:
                 env.pop("CODEX_REASONING_EFFORT", None)
-                reasoning_effort = widgets.codex_reasoning_effort_row.get_text().strip()
-                if reasoning_effort:
-                    env["CODEX_REASONING_EFFORT"] = reasoning_effort
+            codex_project_targets = (
+                _parse_text_draft_codex_project_targets(
+                    self._prompt_text(widgets.codex_project_targets_buffer)
+                )
+                if widgets.codex_project_targets_buffer is not None
+                else []
+            )
             cwd_text = widgets.cwd_row.get_text().strip()
             actions.append(
                 TextDraftExternalAction(
@@ -14208,37 +14248,10 @@ class SettingsWindow(Adw.ApplicationWindow):
                     icon_name=widgets.icon_row.get_text().strip() or DEFAULT_TEXT_DRAFT_EXTERNAL_ACTION_ICON,
                     tooltip=widgets.tooltip_row.get_text().strip(),
                     success_message=widgets.success_message_row.get_text().strip(),
+                    codex_project_targets=codex_project_targets,
                 )
             )
         return actions
-
-    def _collect_text_draft_codex_project_action_from_settings(self) -> TextDraftCodexProjectAction:
-        enabled = (
-            self._text_draft_codex_project_enabled_row.get_active()
-            if self._text_draft_codex_project_enabled_row is not None
-            else True
-        )
-        icon_name = (
-            self._text_draft_codex_project_icon_row.get_text().strip()
-            if self._text_draft_codex_project_icon_row is not None
-            else ""
-        )
-        reasoning_effort = (
-            self._text_draft_codex_project_reasoning_row.get_text().strip()
-            if self._text_draft_codex_project_reasoning_row is not None
-            else ""
-        )
-        target_text = (
-            self._prompt_text(self._text_draft_codex_project_targets_buffer)
-            if self._text_draft_codex_project_targets_buffer is not None
-            else ""
-        )
-        return TextDraftCodexProjectAction(
-            enabled=enabled,
-            icon_name=icon_name or DEFAULT_TEXT_DRAFT_CODEX_PROJECT_ICON,
-            reasoning_effort=reasoning_effort,
-            targets=_parse_text_draft_codex_project_targets(target_text),
-        )
 
     def _on_add_text_draft_external_action_clicked(self, _button: Gtk.Button) -> None:
         actions = self._collect_text_draft_external_actions_from_settings()
@@ -15290,7 +15303,6 @@ class SettingsWindow(Adw.ApplicationWindow):
             editor_action_profile_defaults[key] = MODEL_PROFILE_IDS[selected_index]
         editor_pinned_action_ids = self._current_editor_pinned_actions()
         text_draft_pinned_action_ids = self._current_text_draft_pinned_actions()
-        text_draft_codex_project_action = self._collect_text_draft_codex_project_action_from_settings()
         text_draft_external_actions = self._collect_text_draft_external_actions_from_settings()
         if text_draft_external_actions is None:
             return
@@ -15319,7 +15331,6 @@ class SettingsWindow(Adw.ApplicationWindow):
             editor_pinned_action_ids,
             text_draft_pinned_action_ids,
             self._text_draft_template_dir,
-            text_draft_codex_project_action,
             text_draft_external_actions,
             self._libreoffice_python_path,
             self._concordance_file_path,
