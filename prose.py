@@ -166,10 +166,13 @@ CONFIG_KEY_CONCORDANCE_FILE_PATH = "concordance_file_path"
 CONFIG_KEY_EDITOR_PINNED_ACTIONS = "editor_pinned_actions"
 CONFIG_KEY_TEXT_DRAFT_PINNED_ACTIONS = "text_draft_pinned_actions"
 CONFIG_KEY_TEXT_DRAFT_CODEX_PROJECT_ACTION = "text_draft_codex_project_action"
+CONFIG_KEY_TEXT_DRAFT_CODEX_SESSION_ACTION = "text_draft_codex_session_action"
 CONFIG_KEY_SHARED_STYLE_RULES = "shared_style_rules"
 CONFIG_KEY_TEXT_DRAFT_EXTERNAL_ACTION = "text_draft_external_action"
 CONFIG_KEY_TEXT_DRAFT_EXTERNAL_ACTIONS = "text_draft_external_actions"
 TEXT_DRAFT_EXTERNAL_ACTION_DRAFT_FILE_TOKEN = "{draft_file}"
+TEXT_DRAFT_CODEX_REASONING_EFFORTS = ("minimal", "low", "medium", "high", "xhigh")
+DEFAULT_TEXT_DRAFT_CODEX_REASONING_EFFORT = "medium"
 TEXT_DRAFT_CASE_SUGGESTION_MIN_PREFIX = 3
 TEXT_DRAFT_CASE_SUGGESTION_LIMIT = 8
 DEFAULT_TEXT_DRAFT_EXTERNAL_ACTION_ICON = "utilities-terminal-symbolic"
@@ -1317,26 +1320,10 @@ class TextDraftExternalAction:
     icon_name: str = DEFAULT_TEXT_DRAFT_EXTERNAL_ACTION_ICON
     tooltip: str = ""
     success_message: str = ""
-    codex_project_targets: list["TextDraftCodexProjectTarget"] | None = None
+    codex_reasoning_effort: str = DEFAULT_TEXT_DRAFT_CODEX_REASONING_EFFORT
 
     def is_configured(self) -> bool:
         return self.enabled and bool(self.command)
-
-
-@dataclass
-class TextDraftCodexProjectTarget:
-    label: str
-    cwd: Path
-
-
-@dataclass
-class TextDraftCodexProjectAction:
-    enabled: bool = True
-    reasoning_effort: str = ""
-    targets: list[TextDraftCodexProjectTarget] | None = None
-
-    def configured_targets(self) -> list[TextDraftCodexProjectTarget]:
-        return list(self.targets or [])
 
 
 @dataclass
@@ -1348,7 +1335,7 @@ class TextDraftExternalActionEditorWidgets:
     success_message_row: Adw.EntryRow
     command_row: Adw.EntryRow
     cwd_row: Adw.EntryRow
-    codex_project_targets_buffer: Gtk.TextBuffer | None
+    codex_reasoning_dropdown: Gtk.DropDown | None
     env_buffer: Gtk.TextBuffer
 
 
@@ -2527,18 +2514,6 @@ def _parse_text_draft_external_action(raw: Any) -> TextDraftExternalAction | Non
     if isinstance(raw_env, dict):
         env = {str(key): str(value) for key, value in raw_env.items() if str(key)}
 
-    raw_codex_project_targets = raw.get("codex_project_targets")
-    codex_project_targets: list[TextDraftCodexProjectTarget] = []
-    if isinstance(raw_codex_project_targets, list):
-        codex_project_targets = [
-            target
-            for target in (
-                _parse_text_draft_codex_project_target(item)
-                for item in raw_codex_project_targets
-            )
-            if target is not None
-        ]
-
     return TextDraftExternalAction(
         enabled=enabled,
         label=label,
@@ -2548,8 +2523,17 @@ def _parse_text_draft_external_action(raw: Any) -> TextDraftExternalAction | Non
         icon_name=icon_name,
         tooltip=tooltip,
         success_message=success_message,
-        codex_project_targets=codex_project_targets,
+        codex_reasoning_effort=_sanitize_text_draft_codex_reasoning_effort(
+            raw.get("codex_reasoning_effort")
+        ),
     )
+
+
+def _sanitize_text_draft_codex_reasoning_effort(raw: Any) -> str:
+    reasoning_effort = str(raw or "").strip().lower()
+    if reasoning_effort in TEXT_DRAFT_CODEX_REASONING_EFFORTS:
+        return reasoning_effort
+    return DEFAULT_TEXT_DRAFT_CODEX_REASONING_EFFORT
 
 
 def _format_text_draft_external_action_env(env: dict[str, str]) -> str:
@@ -2581,11 +2565,10 @@ def load_text_draft_external_actions() -> list[TextDraftExternalAction]:
             for action in (_parse_text_draft_external_action(item) for item in raw_actions)
             if action is not None
         ]
-        return _migrate_text_draft_codex_project_targets(actions, raw)
+        return actions
 
     legacy_action = _parse_text_draft_external_action(raw.get(CONFIG_KEY_TEXT_DRAFT_EXTERNAL_ACTION))
-    actions = [legacy_action] if legacy_action is not None else []
-    return _migrate_text_draft_codex_project_targets(actions, raw)
+    return [legacy_action] if legacy_action is not None else []
 
 
 def _text_draft_external_action_has_payload(action: TextDraftExternalAction) -> bool:
@@ -2601,7 +2584,6 @@ def _text_draft_external_action_has_payload(action: TextDraftExternalAction) -> 
         or has_custom_icon
         or bool(action.tooltip.strip())
         or bool(action.success_message.strip())
-        or bool(action.codex_project_targets)
     )
 
 
@@ -2622,14 +2604,10 @@ def _text_draft_external_action_payload(action: TextDraftExternalAction) -> dict
         payload["tooltip"] = action.tooltip.strip()
     if action.success_message.strip():
         payload["success_message"] = action.success_message.strip()
-    if action.codex_project_targets:
-        payload["codex_project_targets"] = [
-            {
-                "label": target.label.strip() or target.cwd.name or str(target.cwd),
-                "cwd": str(target.cwd.expanduser().resolve(strict=False)),
-            }
-            for target in action.codex_project_targets
-        ]
+    if _is_text_draft_codex_external_action(action):
+        payload["codex_reasoning_effort"] = _sanitize_text_draft_codex_reasoning_effort(
+            action.codex_reasoning_effort
+        )
     return payload
 
 
@@ -2642,6 +2620,7 @@ def save_text_draft_external_actions(actions: list[TextDraftExternalAction]) -> 
     ]
     data.pop(CONFIG_KEY_TEXT_DRAFT_EXTERNAL_ACTION, None)
     data.pop(CONFIG_KEY_TEXT_DRAFT_CODEX_PROJECT_ACTION, None)
+    data.pop(CONFIG_KEY_TEXT_DRAFT_CODEX_SESSION_ACTION, None)
     if payload:
         data[CONFIG_KEY_TEXT_DRAFT_EXTERNAL_ACTIONS] = payload
     else:
@@ -2660,69 +2639,6 @@ def save_text_draft_external_action(action: TextDraftExternalAction) -> None:
     save_text_draft_external_actions([action])
 
 
-def _parse_text_draft_codex_project_target(raw: Any) -> TextDraftCodexProjectTarget | None:
-    label = ""
-    path_text = ""
-    if isinstance(raw, str):
-        path_text = raw.strip()
-    elif isinstance(raw, dict):
-        label = str(raw.get("label") or "").strip()
-        path_text = str(raw.get("cwd") or raw.get("path") or "").strip()
-    if not path_text:
-        return None
-    cwd = Path(path_text).expanduser().resolve(strict=False)
-    return TextDraftCodexProjectTarget(label=label or cwd.name or str(cwd), cwd=cwd)
-
-
-def load_text_draft_codex_project_action() -> TextDraftCodexProjectAction:
-    raw = _read_config().get(CONFIG_KEY_TEXT_DRAFT_CODEX_PROJECT_ACTION)
-    if not isinstance(raw, dict):
-        return TextDraftCodexProjectAction(targets=[])
-    raw_targets = raw.get("targets")
-    targets: list[TextDraftCodexProjectTarget] = []
-    if isinstance(raw_targets, list):
-        targets = [
-            target
-            for target in (_parse_text_draft_codex_project_target(item) for item in raw_targets)
-            if target is not None
-        ]
-    return TextDraftCodexProjectAction(
-        enabled=_coerce_bool_config(raw.get("enabled"), True),
-        reasoning_effort=str(raw.get("reasoning_effort") or "").strip(),
-        targets=targets,
-    )
-
-
-def _format_text_draft_codex_project_targets(targets: Iterable[TextDraftCodexProjectTarget]) -> str:
-    lines: list[str] = []
-    for target in targets:
-        label = target.label.strip()
-        path_text = str(target.cwd)
-        if label and label != target.cwd.name:
-            lines.append(f"{label}={path_text}")
-        else:
-            lines.append(path_text)
-    return "\n".join(lines)
-
-
-def _parse_text_draft_codex_project_targets(text: str) -> list[TextDraftCodexProjectTarget]:
-    targets: list[TextDraftCodexProjectTarget] = []
-    for raw_line in text.splitlines():
-        line = raw_line.strip()
-        if not line:
-            continue
-        label = ""
-        path_text = line
-        if "=" in line:
-            maybe_label, maybe_path = line.split("=", 1)
-            if maybe_label.strip() and maybe_path.strip():
-                label = maybe_label.strip()
-                path_text = maybe_path.strip()
-        cwd = Path(path_text).expanduser().resolve(strict=False)
-        targets.append(TextDraftCodexProjectTarget(label=label or cwd.name or str(cwd), cwd=cwd))
-    return targets
-
-
 def _is_text_draft_codex_external_action(action: TextDraftExternalAction) -> bool:
     if action.label.strip().lower() == "codex":
         return True
@@ -2734,39 +2650,6 @@ def _is_text_draft_codex_external_action(action: TextDraftExternalAction) -> boo
             "prose-text-draft-codex-vte.sh",
         )
     )
-
-
-def _migrate_text_draft_codex_project_targets(
-    actions: list[TextDraftExternalAction],
-    raw_config: dict[str, Any],
-) -> list[TextDraftExternalAction]:
-    legacy_raw = raw_config.get(CONFIG_KEY_TEXT_DRAFT_CODEX_PROJECT_ACTION)
-    if not isinstance(legacy_raw, dict):
-        return actions
-    legacy_action = load_text_draft_codex_project_action()
-    targets = legacy_action.configured_targets()
-    if not targets:
-        return actions
-
-    codex_action = next(
-        (action for action in actions if _is_text_draft_codex_external_action(action)),
-        None,
-    )
-    if codex_action is None:
-        codex_action = TextDraftExternalAction(
-            enabled=legacy_action.enabled,
-            label="Codex",
-            command=["bash", str(TEXT_DRAFT_CODEX_VTE_SCRIPT), TEXT_DRAFT_EXTERNAL_ACTION_DRAFT_FILE_TOKEN],
-            cwd=None,
-            env={},
-            icon_name=DEFAULT_TEXT_DRAFT_EXTERNAL_ACTION_ICON,
-            tooltip="Start Codex with the current Draft as the initial prompt.",
-            success_message="Codex launched with Draft text.",
-        )
-        actions.append(codex_action)
-    if not codex_action.codex_project_targets:
-        codex_action.codex_project_targets = targets
-    return actions
 
 
 def load_last_odt_file() -> Path | None:
@@ -4052,17 +3935,6 @@ class ProseWindow(Adw.ApplicationWindow):
                 continue
             display_label = self._text_draft_external_action_display_label(external_action)
             icon_name = self._text_draft_external_action_display_icon(external_action)
-            targets = list(external_action.codex_project_targets or [])
-            if self._is_text_draft_codex_action(external_action) and targets:
-                button = self._build_text_draft_codex_external_action_menu(
-                    external_action,
-                    display_label,
-                    icon_name,
-                    targets,
-                )
-                box.append(button)
-                self._text_draft_external_action_buttons.append(button)
-                continue
             button = Gtk.Button(label=display_label, icon_name=icon_name)
             button.add_css_class("flat")
             button.add_css_class("transform-pill")
@@ -4079,73 +3951,6 @@ class ProseWindow(Adw.ApplicationWindow):
             )
             box.append(button)
             self._text_draft_external_action_buttons.append(button)
-
-    def _build_text_draft_codex_external_action_menu(
-        self,
-        action: TextDraftExternalAction,
-        display_label: str,
-        icon_name: str,
-        targets: list[TextDraftCodexProjectTarget],
-    ) -> Gtk.MenuButton:
-        button = Gtk.MenuButton(label=display_label, icon_name=icon_name)
-        button.add_css_class("flat")
-        button.add_css_class("transform-pill")
-        button.add_css_class("transform-pill-compact")
-        tooltip = action.tooltip.strip() or "Start Codex with the current Draft as the initial prompt."
-        button.set_tooltip_text(tooltip)
-        button.set_sensitive(not self._busy)
-        popover = Gtk.Popover()
-        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
-        box.set_margin_top(6)
-        box.set_margin_bottom(6)
-        box.set_margin_start(6)
-        box.set_margin_end(6)
-        home_item = Gtk.Button(label="Home")
-        home_item.add_css_class("flat")
-        home_item.set_halign(Gtk.Align.FILL)
-        home_item.set_tooltip_text(str(Path.home()))
-        home_item.connect(
-            "clicked",
-            self._on_text_draft_codex_external_home_clicked,
-            popover,
-            action,
-        )
-        box.append(home_item)
-        for target in targets:
-            item = Gtk.Button(label=target.label.strip() or target.cwd.name or str(target.cwd))
-            item.add_css_class("flat")
-            item.set_halign(Gtk.Align.FILL)
-            item.set_tooltip_text(str(target.cwd))
-            item.connect(
-                "clicked",
-                self._on_text_draft_codex_external_target_clicked,
-                popover,
-                action,
-                target,
-            )
-            box.append(item)
-        popover.set_child(box)
-        button.set_popover(popover)
-        return button
-
-    def _on_text_draft_codex_external_home_clicked(
-        self,
-        button: Gtk.Button,
-        popover: Gtk.Popover,
-        action: TextDraftExternalAction,
-    ) -> None:
-        popover.popdown()
-        self._on_text_draft_external_action_clicked(button, action, codex_home=True)
-
-    def _on_text_draft_codex_external_target_clicked(
-        self,
-        button: Gtk.Button,
-        popover: Gtk.Popover,
-        action: TextDraftExternalAction,
-        target: TextDraftCodexProjectTarget,
-    ) -> None:
-        popover.popdown()
-        self._on_text_draft_external_action_clicked(button, action, target)
 
     def _ensure_css(self) -> None:
         if self._css_provider is not None:
@@ -6187,8 +5992,6 @@ button.improve-profile-chip {{
         self,
         _button: Gtk.Button | None,
         action: TextDraftExternalAction | None = None,
-        codex_target: TextDraftCodexProjectTarget | None = None,
-        codex_home: bool = False,
     ) -> None:
         if action is None:
             action = next((item for item in self._text_draft_external_actions if item.is_configured()), None)
@@ -6206,18 +6009,12 @@ button.improve-profile-chip {{
             return
 
         if self._is_text_draft_codex_action(action):
-            cwd_override = None
-            reasoning_effort = "medium"
-            if codex_target is not None:
-                cwd_override = codex_target.cwd
-                reasoning_effort = "xhigh"
-            elif codex_home:
-                cwd_override = Path.home()
             self._start_text_draft_codex_terminal(
                 action,
                 draft_path,
-                cwd_override=cwd_override,
-                reasoning_effort=reasoning_effort,
+                reasoning_effort=_sanitize_text_draft_codex_reasoning_effort(
+                    action.codex_reasoning_effort
+                ),
             )
             return
 
@@ -14190,55 +13987,26 @@ class SettingsWindow(Adw.ApplicationWindow):
             cwd_row.set_show_apply_button(False)
             group.add(cwd_row)
 
-            codex_project_targets_buffer = None
+            codex_reasoning_dropdown = None
             env_values = dict(action.env)
             if self._parent_window._is_text_draft_codex_action(action):
                 env_values.pop("CODEX_REASONING_EFFORT", None)
 
-                codex_project_targets_buffer = Gtk.TextBuffer()
-                codex_project_targets_buffer.set_text(
-                    _format_text_draft_codex_project_targets(action.codex_project_targets or [])
+                codex_reasoning_row = Adw.ActionRow(
+                    title="Codex reasoning effort",
+                    subtitle="Reasoning level used when this Codex action starts.",
                 )
-                targets_row = Adw.PreferencesRow()
-                targets_row.set_selectable(False)
-                targets_row.set_activatable(False)
-                targets_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
-                targets_box.set_margin_top(10)
-                targets_box.set_margin_bottom(10)
-                targets_box.set_margin_start(12)
-                targets_box.set_margin_end(12)
-
-                targets_title = Gtk.Label(label="Codex project directories", xalign=0)
-                targets_title.add_css_class("heading")
-                targets_box.append(targets_title)
-
-                targets_hint = Gtk.Label(
-                    label="Optional. Enter one directory per line. Use Label=/path to customize its menu label.",
-                    xalign=0,
+                codex_reasoning_row.set_activatable(False)
+                codex_reasoning_dropdown = Gtk.DropDown(
+                    model=Gtk.StringList.new(list(TEXT_DRAFT_CODEX_REASONING_EFFORTS))
                 )
-                targets_hint.add_css_class("dim-label")
-                targets_hint.set_wrap(True)
-                targets_box.append(targets_hint)
-
-                targets_view = Gtk.TextView.new_with_buffer(codex_project_targets_buffer)
-                targets_view.set_monospace(True)
-                targets_view.set_wrap_mode(Gtk.WrapMode.NONE)
-                targets_view.set_hexpand(True)
-                targets_view.set_top_margin(8)
-                targets_view.set_bottom_margin(8)
-                targets_view.set_left_margin(8)
-                targets_view.set_right_margin(8)
-
-                targets_scroller = Gtk.ScrolledWindow()
-                targets_scroller.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
-                targets_scroller.set_hexpand(True)
-                targets_scroller.set_min_content_height(96)
-                targets_scroller.set_max_content_height(180)
-                targets_scroller.set_child(targets_view)
-                targets_box.append(targets_scroller)
-
-                targets_row.set_child(targets_box)
-                group.add(targets_row)
+                codex_reasoning_dropdown.set_selected(
+                    TEXT_DRAFT_CODEX_REASONING_EFFORTS.index(
+                        _sanitize_text_draft_codex_reasoning_effort(action.codex_reasoning_effort)
+                    )
+                )
+                codex_reasoning_row.add_suffix(codex_reasoning_dropdown)
+                group.add(codex_reasoning_row)
 
             env_buffer = Gtk.TextBuffer()
             env_buffer.set_text(_format_text_draft_external_action_env(env_values))
@@ -14306,7 +14074,7 @@ class SettingsWindow(Adw.ApplicationWindow):
                     success_message_row=success_message_row,
                     command_row=command_row,
                     cwd_row=cwd_row,
-                    codex_project_targets_buffer=codex_project_targets_buffer,
+                    codex_reasoning_dropdown=codex_reasoning_dropdown,
                     env_buffer=env_buffer,
                 )
             )
@@ -14326,15 +14094,12 @@ class SettingsWindow(Adw.ApplicationWindow):
             if env_error is not None or env is None:
                 self._parent_window._show_toast(f"External action {index + 1} environment {env_error}")
                 return None
-            if widgets.codex_project_targets_buffer is not None:
+            codex_reasoning_effort = DEFAULT_TEXT_DRAFT_CODEX_REASONING_EFFORT
+            if widgets.codex_reasoning_dropdown is not None:
                 env.pop("CODEX_REASONING_EFFORT", None)
-            codex_project_targets = (
-                _parse_text_draft_codex_project_targets(
-                    self._prompt_text(widgets.codex_project_targets_buffer)
-                )
-                if widgets.codex_project_targets_buffer is not None
-                else []
-            )
+                selected_reasoning = int(widgets.codex_reasoning_dropdown.get_selected())
+                if 0 <= selected_reasoning < len(TEXT_DRAFT_CODEX_REASONING_EFFORTS):
+                    codex_reasoning_effort = TEXT_DRAFT_CODEX_REASONING_EFFORTS[selected_reasoning]
             cwd_text = widgets.cwd_row.get_text().strip()
             actions.append(
                 TextDraftExternalAction(
@@ -14346,7 +14111,7 @@ class SettingsWindow(Adw.ApplicationWindow):
                     icon_name=widgets.icon_row.get_text().strip() or DEFAULT_TEXT_DRAFT_EXTERNAL_ACTION_ICON,
                     tooltip=widgets.tooltip_row.get_text().strip(),
                     success_message=widgets.success_message_row.get_text().strip(),
-                    codex_project_targets=codex_project_targets,
+                    codex_reasoning_effort=codex_reasoning_effort,
                 )
             )
         return actions

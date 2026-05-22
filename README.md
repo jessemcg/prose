@@ -108,7 +108,7 @@ After installation, confirm that LibreOffice's program directory exists in a nor
 
 ### 2. Install GTK4 VTE for the embedded terminal
 
-The Text Draft `Codex` action embeds an interactive terminal inside Prose. That terminal requires the GTK4 VTE runtime and GObject introspection bindings.
+The Text Draft view embeds an interactive terminal inside Prose. That terminal requires the GTK4 VTE runtime and GObject introspection bindings.
 
 On Debian/Ubuntu, install:
 
@@ -118,7 +118,7 @@ sudo apt install gir1.2-vte-3.91 libvte-2.91-gtk4-0
 
 If these packages are missing, Prose still starts, but the embedded Text Draft terminal is unavailable.
 
-When the embedded Codex terminal is running, Text Draft generated-text commands stream their output into the terminal at the current cursor instead of writing into the Draft text box. Prose types the text only; it does not send Enter. Replace-style commands such as `Improve Generated` erase the last terminal-routed generated text first, so they expect the Codex cursor to still be immediately after that text.
+The Draft header can show configured external-action buttons such as starting Codex with the current Draft. The Codex action submits the current Draft as the initial interactive prompt using the working directory and reasoning effort configured in Settings. After that, generated Text Draft output is typed into Codex at the current cursor only; Prose does not send Enter for that later text. Replace-style commands such as `Improve Generated` erase the last terminal-routed generated text first, so they expect the Codex cursor to still be immediately after that text. While the embedded terminal has focus, use `Ctrl+Shift+C` to copy its selection and `Ctrl+Shift+V` to paste clipboard text into it. If Codex exits, the embedded terminal falls back to a normal shell; generated-text commands then write to the Draft text box again.
 
 ### 3. Confirm Prose can find `python-uno`
 
@@ -224,8 +224,9 @@ Configure it in `Settings -> Text Draft External Action`, or edit `config.json` 
     "label": "Codex",
     "command": ["/home/jesse/bin/prose-text-draft-codex", "{draft_file}"],
     "cwd": "/home/jesse",
-    "icon_name": "utilities-terminal-symbolic",
-    "tooltip": "Run Codex with the current Draft text.",
+    "codex_reasoning_effort": "medium",
+    "icon_name": "send-to-symbolic",
+    "tooltip": "Start Codex with the current Draft as the initial prompt.",
     "success_message": "Codex launched with Draft text."
   },
   {
@@ -239,7 +240,7 @@ Configure it in `Settings -> Text Draft External Action`, or edit `config.json` 
 ]
 ```
 
-When clicked, Prose writes the current Draft text to a UTF-8 temp file, replaces `{draft_file}` with that path in the selected command, sets `PROSE_TEXT_DRAFT_FILE` for the child process, and launches the command without a shell. Put any terminal-specific or case-specific behavior in wrapper scripts. `tooltip` and `success_message` are optional per-action strings. The older singular `text_draft_external_action` config key is still read as a fallback.
+When clicked, Prose writes the current Draft text to a UTF-8 temp file, replaces `{draft_file}` with that path in the selected command, sets `PROSE_TEXT_DRAFT_FILE` for the child process, and launches the command without a shell. A Codex external action stays a single button. Its Settings row exposes the working directory and `Codex reasoning effort`; the saved `codex_reasoning_effort` value is passed as `CODEX_REASONING_EFFORT` and can be `minimal`, `low`, `medium`, `high`, or `xhigh`. Put terminal-specific or case-specific behavior in wrapper scripts. `tooltip` and `success_message` are optional per-action strings. The older singular `text_draft_external_action` config key is still read as a fallback.
 
 ### Add Case
 
