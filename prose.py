@@ -13043,6 +13043,7 @@ button.improve-profile-chip {{
             xalign=0,
         )
         snippet.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
+        snippet.set_selectable(True)
         snippet.add_css_class("monospace")
         snippet.add_css_class("proof-suggestion-original-text")
         return self._build_suggestion_diff_row(
@@ -13055,6 +13056,7 @@ button.improve-profile-chip {{
     def _build_suggestion_replacement_view(self, suggestion: Suggestion) -> Gtk.Box:
         replacement = Gtk.Label(label=suggestion.replacement, wrap=True, xalign=0)
         replacement.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
+        replacement.set_selectable(True)
         replacement.add_css_class("proof-suggestion-replacement")
         replacement.add_css_class("monospace")
         attributes = Pango.AttrList()
