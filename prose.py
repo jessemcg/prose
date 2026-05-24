@@ -2953,7 +2953,7 @@ class ProseWindow(Adw.ApplicationWindow):
         self._text_draft_case_search_entry: Gtk.SearchEntry | None = None
         self._text_draft_case_results_scroller: Gtk.ScrolledWindow | None = None
         self._text_draft_case_list_box: Gtk.ListBox | None = None
-        self._text_draft_case_attachments_box: Gtk.FlowBox | None = None
+        self._text_draft_case_attachments_box: Gtk.Box | None = None
         self._text_draft_case_suggestions: list[TextDraftCaseSuggestion] = []
         self._text_draft_case_selected_index = 0
         self._text_draft_case_prefix = ""
@@ -3317,6 +3317,7 @@ class ProseWindow(Adw.ApplicationWindow):
         draft_section.set_hexpand(True)
         draft_section.set_vexpand(True)
         draft_header_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        draft_header_row.set_margin_bottom(6)
 
         templates_button = self._build_text_draft_templates_button()
         draft_header_row.append(templates_button)
@@ -3325,7 +3326,9 @@ class ProseWindow(Adw.ApplicationWindow):
         case_search_entry = Gtk.SearchEntry()
         case_search_entry.set_placeholder_text("Add case")
         case_search_entry.set_tooltip_text("Search concordance cases to append to this Draft.")
-        case_search_entry.set_width_chars(18)
+        case_search_entry.set_hexpand(True)
+        case_search_entry.set_halign(Gtk.Align.FILL)
+        case_search_entry.set_size_request(0, -1)
         case_search_entry.add_css_class("text-draft-case-search")
         case_search_entry.connect("search-changed", self._on_text_draft_case_search_changed)
         case_search_key_controller = Gtk.EventControllerKey()
@@ -3334,10 +3337,6 @@ class ProseWindow(Adw.ApplicationWindow):
         case_search_entry.add_controller(case_search_key_controller)
         draft_header_row.append(case_search_entry)
         self._text_draft_case_search_entry = case_search_entry
-
-        header_spacer = Gtk.Box()
-        header_spacer.set_hexpand(True)
-        draft_header_row.append(header_spacer)
 
         template_email_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         template_email_box.set_visible(False)
@@ -3384,14 +3383,10 @@ class ProseWindow(Adw.ApplicationWindow):
         self._text_draft_case_results_scroller = case_results_scroller
         self._text_draft_case_list_box = case_results_list
 
-        case_attachments_box = Gtk.FlowBox()
-        case_attachments_box.set_selection_mode(Gtk.SelectionMode.NONE)
-        case_attachments_box.set_column_spacing(6)
-        case_attachments_box.set_row_spacing(6)
-        case_attachments_box.set_max_children_per_line(3)
+        case_attachments_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        case_attachments_box.set_hexpand(True)
         case_attachments_box.set_visible(False)
         case_attachments_box.add_css_class("text-draft-case-attachments")
-        draft_section.append(case_attachments_box)
         self._text_draft_case_attachments_box = case_attachments_box
 
         draft_surface = Gtk.Stack()
@@ -3470,6 +3465,7 @@ class ProseWindow(Adw.ApplicationWindow):
 
         draft_surface.set_visible_child_name("draft")
         draft_section.append(draft_surface)
+        draft_section.append(case_attachments_box)
         self._text_draft_buffer = draft_buffer
         self._text_draft_view = draft_view
         self._text_draft_draft_surface = draft_surface
@@ -4260,7 +4256,9 @@ button.improve-profile-chip {{
   font-size: 0.92rem;
 }}
 .text-draft-case-search {{
-  min-width: 190px;
+  min-height: 28px;
+  padding-top: 0;
+  padding-bottom: 0;
 }}
 .text-draft-case-attachments {{
   padding: 0;
@@ -10004,22 +10002,31 @@ button.text-draft-case-remove {{
         box = self._text_draft_case_attachments_box
         if box is None:
             return
-        self._clear_flow_box(box)
-        for citation in self._text_draft_case_attachments:
-            chip = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-            chip.add_css_class("text-draft-case-attachment")
-            label = Gtk.Label(label=citation, xalign=0)
-            label.set_ellipsize(Pango.EllipsizeMode.END)
-            label.set_tooltip_text(citation)
-            label.set_max_width_chars(64)
-            chip.append(label)
-            remove_button = Gtk.Button(icon_name="window-close-symbolic")
-            remove_button.add_css_class("flat")
-            remove_button.add_css_class("text-draft-case-remove")
-            remove_button.set_tooltip_text("Remove attached case.")
-            remove_button.connect("clicked", self._remove_text_draft_case_attachment, citation)
-            chip.append(remove_button)
-            box.append(chip)
+        self._clear_box(box)
+        for start in range(0, len(self._text_draft_case_attachments), 2):
+            row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+            row.set_hexpand(True)
+            row.set_halign(Gtk.Align.FILL)
+            row.set_homogeneous(True)
+            for citation in self._text_draft_case_attachments[start:start + 2]:
+                chip = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+                chip.set_hexpand(True)
+                chip.set_halign(Gtk.Align.FILL)
+                chip.add_css_class("text-draft-case-attachment")
+                label = Gtk.Label(label=citation, xalign=0)
+                label.set_hexpand(True)
+                label.set_halign(Gtk.Align.FILL)
+                label.set_ellipsize(Pango.EllipsizeMode.END)
+                label.set_tooltip_text(citation)
+                chip.append(label)
+                remove_button = Gtk.Button(icon_name="window-close-symbolic")
+                remove_button.add_css_class("flat")
+                remove_button.add_css_class("text-draft-case-remove")
+                remove_button.set_tooltip_text("Remove attached case.")
+                remove_button.connect("clicked", self._remove_text_draft_case_attachment, citation)
+                chip.append(remove_button)
+                row.append(chip)
+            box.append(row)
         box.set_visible(bool(self._text_draft_case_attachments))
 
     def _ensure_text_draft_temp_path(self) -> Path | None:
