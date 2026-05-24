@@ -9777,6 +9777,9 @@ button.text-draft-case-remove {{
                 terms.append(normalized)
         return tuple(terms)
 
+    def _is_text_draft_slip_opinion_case(self, term: str, citation: str) -> bool:
+        return any("slip opn" in value.lower() for value in (term, citation))
+
     def _load_text_draft_case_index(self, *, force: bool = False) -> list[TextDraftCaseSuggestion]:
         concordance_file = self._concordance_file_path
         if concordance_file is None:
@@ -9813,6 +9816,8 @@ button.text-draft-case-remove {{
                 continue
             term = parts[0]
             citation = parts[1] or term
+            if self._is_text_draft_slip_opinion_case(term, citation):
+                continue
             if not citation or citation in seen_citations:
                 continue
             display_name = self._autotext_display_name(citation)
