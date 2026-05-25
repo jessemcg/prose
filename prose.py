@@ -2950,7 +2950,7 @@ class ProseWindow(Adw.ApplicationWindow):
         self._text_draft_template_emails: list[tuple[str, str]] = []
         self._text_draft_external_action_box: Gtk.Box | None = None
         self._text_draft_external_action_buttons: list[Gtk.Widget] = []
-        self._text_draft_case_search_entry: Gtk.SearchEntry | None = None
+        self._text_draft_case_search_entry: Gtk.Entry | None = None
         self._text_draft_case_results_scroller: Gtk.ScrolledWindow | None = None
         self._text_draft_case_list_box: Gtk.ListBox | None = None
         self._text_draft_case_attachments_box: Gtk.Box | None = None
@@ -3323,14 +3323,15 @@ class ProseWindow(Adw.ApplicationWindow):
         draft_header_row.append(templates_button)
         self._text_draft_template_button = templates_button
 
-        case_search_entry = Gtk.SearchEntry()
+        case_search_entry = Gtk.Entry()
         case_search_entry.set_placeholder_text("Add case")
         case_search_entry.set_tooltip_text("Search concordance cases to append to this Draft.")
         case_search_entry.set_hexpand(True)
         case_search_entry.set_halign(Gtk.Align.FILL)
+        case_search_entry.set_valign(Gtk.Align.CENTER)
         case_search_entry.set_size_request(0, -1)
         case_search_entry.add_css_class("text-draft-case-search")
-        case_search_entry.connect("search-changed", self._on_text_draft_case_search_changed)
+        case_search_entry.connect("changed", self._on_text_draft_case_search_changed)
         case_search_key_controller = Gtk.EventControllerKey()
         case_search_key_controller.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
         case_search_key_controller.connect("key-pressed", self._on_text_draft_case_search_key_pressed)
@@ -4256,9 +4257,7 @@ button.improve-profile-chip {{
   font-size: 0.92rem;
 }}
 .text-draft-case-search {{
-  min-height: 28px;
-  padding-top: 0;
-  padding-bottom: 0;
+  font-size: {SPELLING_OUTPUT_FONT_SIZE_PX}px;
 }}
 .text-draft-case-attachments {{
   padding: 0;
@@ -9940,7 +9939,7 @@ button.text-draft-case-remove {{
             self._text_draft_case_selected_index = row_index
         self._attach_selected_text_draft_case_suggestion()
 
-    def _on_text_draft_case_search_changed(self, _entry: Gtk.SearchEntry) -> None:
+    def _on_text_draft_case_search_changed(self, _entry: Gtk.Entry) -> None:
         self._refresh_text_draft_case_suggestions()
 
     def _on_text_draft_case_search_key_pressed(
