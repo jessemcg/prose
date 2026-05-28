@@ -2918,6 +2918,7 @@ class ProseWindow(Adw.ApplicationWindow):
         self._text_draft_buffer: Gtk.TextBuffer | None = None
         self._text_draft_view: Gtk.TextView | None = None
         self._text_draft_draft_surface: Gtk.Stack | None = None
+        self._text_draft_clear_button: Gtk.Button | None = None
         self._text_draft_terminal = None
         self._text_draft_terminal_close_button: Gtk.Button | None = None
         self._text_draft_terminal_buttons: list[Gtk.Widget] = []
@@ -3394,6 +3395,10 @@ class ProseWindow(Adw.ApplicationWindow):
         draft_surface.set_hexpand(True)
         draft_surface.set_vexpand(True)
         draft_surface.add_css_class("editor-lookup-surface")
+        draft_surface.connect(
+            "notify::visible-child-name",
+            self._on_text_draft_surface_visible_child_name_changed,
+        )
         draft_scroller = Gtk.ScrolledWindow()
         draft_scroller.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
         draft_scroller.set_hexpand(True)
@@ -3465,11 +3470,27 @@ class ProseWindow(Adw.ApplicationWindow):
             draft_surface.add_named(terminal_missing, "terminal-missing")
 
         draft_surface.set_visible_child_name("draft")
-        draft_section.append(draft_surface)
+        draft_overlay = Gtk.Overlay()
+        draft_overlay.set_hexpand(True)
+        draft_overlay.set_vexpand(True)
+        draft_overlay.set_child(draft_surface)
+        clear_draft_btn = Gtk.Button(icon_name="user-trash-symbolic")
+        clear_draft_btn.add_css_class("flat")
+        clear_draft_btn.add_css_class("text-draft-clear-draft")
+        clear_draft_btn.set_halign(Gtk.Align.END)
+        clear_draft_btn.set_valign(Gtk.Align.END)
+        clear_draft_btn.set_margin_bottom(8)
+        clear_draft_btn.set_margin_end(8)
+        clear_draft_btn.set_tooltip_text("Clear Draft.")
+        clear_draft_btn.set_visible(False)
+        clear_draft_btn.connect("clicked", self._on_clear_text_draft_clicked)
+        draft_overlay.add_overlay(clear_draft_btn)
+        draft_section.append(draft_overlay)
         draft_section.append(case_attachments_box)
         self._text_draft_buffer = draft_buffer
         self._text_draft_view = draft_view
         self._text_draft_draft_surface = draft_surface
+        self._text_draft_clear_button = clear_draft_btn
 
         self._refresh_text_draft_templates()
         panel.append(draft_section)
@@ -4258,6 +4279,18 @@ button.improve-profile-chip {{
 }}
 .text-draft-case-search {{
   font-size: {SPELLING_OUTPUT_FONT_SIZE_PX}px;
+}}
+button.text-draft-clear-draft {{
+  min-height: 28px;
+  min-width: 28px;
+  padding: 4px;
+  border-radius: 999px;
+  opacity: 0.72;
+  background-color: alpha(@window_bg_color, 0.86);
+}}
+button.text-draft-clear-draft:hover {{
+  opacity: 1;
+  background-color: alpha(@window_fg_color, 0.12);
 }}
 .text-draft-case-attachments {{
   padding: 0;
@@ -5697,6 +5730,14 @@ button.text-draft-case-remove {{
         clipboard.set(text)
         self._status_label.set_label("Draft copied to clipboard.")
         self._show_toast("Draft copied to clipboard.")
+
+    def _on_clear_text_draft_clicked(self, _button: Gtk.Button) -> None:
+        if not self._text_draft_has_user_text():
+            self._refresh_text_draft_clear_button()
+            return
+        self._clear_text_draft_text()
+        self._status_label.set_label("Draft cleared.")
+        self._show_toast("Draft cleared.")
 
     def _expand_text_draft_external_action_value(self, value: str, draft_path: Path) -> str:
         expanded = value.replace(TEXT_DRAFT_EXTERNAL_ACTION_DRAFT_FILE_TOKEN, str(draft_path))
@@ -9737,6 +9778,10 @@ button.text-draft-case-remove {{
 
     def _on_text_draft_buffer_changed(self, _buffer: Gtk.TextBuffer) -> None:
         self._mark_text_draft_temp_dirty()
+        self._refresh_text_draft_clear_button()
+
+    def _on_text_draft_surface_visible_child_name_changed(self, _stack: Gtk.Stack, _pspec: object) -> None:
+        self._refresh_text_draft_clear_button()
 
     def _on_text_draft_key_pressed(
         self,
@@ -10032,6 +10077,7 @@ button.text-draft-case-remove {{
                 row.append(chip)
             box.append(row)
         box.set_visible(bool(self._text_draft_case_attachments))
+        self._refresh_text_draft_clear_button()
 
     def _ensure_text_draft_temp_path(self) -> Path | None:
         if self._text_draft_temp_path is not None:
@@ -10143,6 +10189,16 @@ button.text-draft-case-remove {{
 
     def _text_draft_has_user_text(self) -> bool:
         return bool(self._get_text_draft_submission_text().strip())
+
+    def _refresh_text_draft_clear_button(self) -> None:
+        button = self._text_draft_clear_button
+        surface = self._text_draft_draft_surface
+        if button is None or surface is None:
+            return
+        button.set_visible(
+            surface.get_visible_child_name() == "draft"
+            and self._text_draft_has_user_text()
+        )
 
     def _parse_text_draft_template_content(self, raw_text: str) -> tuple[list[tuple[str, str]], str]:
         text = raw_text[1:] if raw_text.startswith("\ufeff") else raw_text
