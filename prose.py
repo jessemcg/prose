@@ -10552,6 +10552,8 @@ button.text-draft-case-remove {{
         buffer = self._text_draft_buffer
         if buffer is None:
             return False
+        if buffer.get_has_selection():
+            return self._prepare_text_draft_selection_replace()
         insert_iter = buffer.get_iter_at_mark(buffer.get_insert())
         self._set_text_draft_insert_marks(insert_iter)
         self._text_draft_pending_newlines = 0
