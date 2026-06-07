@@ -9051,10 +9051,10 @@ button.text-draft-case-remove {{
             return None
         if self._desktop is not None:
             return self._desktop
-        connected = self._connect_desktop()
+        connected = self._connect_desktop(retries=1, delay=0)
         if not connected:
             self._start_listener()
-            connected = self._connect_desktop()
+            connected = self._connect_desktop(retries=8, delay=0.25)
         if not connected:
             self._status_label.set_label("LibreOffice listener unreachable.")
             self._desktop = None
@@ -9349,7 +9349,9 @@ button.text-draft-case-remove {{
             self._active_doc = doc  # Remember for headless sessions with no visible window
             self._maybe_save_last_odt(path)
             try:
-                if getattr(doc, "isReadonly", False):
+                readonly_attr = getattr(doc, "isReadonly", False)
+                readonly = readonly_attr() if callable(readonly_attr) else bool(readonly_attr)
+                if readonly:
                     self._show_toast("Document opened read-only. Close other LibreOffice instances or clear lock file.")
             except Exception:
                 pass
@@ -13520,7 +13522,6 @@ button.text-draft-case-remove {{
         try:
             self._listener_proc = subprocess.Popen(cmd)
             self._status_label.set_label("Starting dedicated LibreOffice listener…")
-            time.sleep(2)
         except Exception as exc:  # noqa: BLE001
             self._show_toast(f"Unable to start LibreOffice: {exc}")
 
