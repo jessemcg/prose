@@ -184,6 +184,14 @@ Because the app launches and controls a local LibreOffice process directly, sand
 
 Use `Launch Writer` to open a Writer document in the Prose-managed LibreOffice session.
 
+You can also start Prose with a specific Writer document from the command line:
+
+```bash
+python3 prose.py /path/to/document.odt
+```
+
+Prose opens its normal app window and loads that `.odt` file through the same managed LibreOffice session.
+
 ### Choose a source text file
 
 In Settings, set `Source text file` to the plain text file that Prose should read when using external-input tools.

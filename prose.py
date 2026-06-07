@@ -2809,13 +2809,28 @@ class TextDraftCaseSuggestion:
 
 class ProseApp(Adw.Application):
     def __init__(self) -> None:
-        super().__init__(application_id=APP_ID, flags=Gio.ApplicationFlags.FLAGS_NONE)
+        super().__init__(application_id=APP_ID, flags=Gio.ApplicationFlags.HANDLES_OPEN)
         self._window: ProseWindow | None = None
 
-    def do_activate(self) -> None:  # noqa: D401
+    def _ensure_window(self) -> ProseWindow:
         if not self._window:
             self._window = ProseWindow(self)
-        self._window.present()
+        return self._window
+
+    def do_activate(self) -> None:  # noqa: D401
+        self._ensure_window().present()
+
+    def do_open(self, files: list[Gio.File], n_files: int, _hint: str) -> None:  # noqa: D401
+        window = self._ensure_window()
+        window.present()
+        if n_files != 1:
+            window.show_open_error("Open one .odt file at a time.")
+            return
+        file_path = files[0].get_path()
+        if not file_path:
+            window.show_open_error("Choose a local .odt file.")
+            return
+        window.open_odt_path(Path(file_path))
 
 
 class ProseWindow(Adw.ApplicationWindow):
@@ -4933,6 +4948,24 @@ button.text-draft-case-remove {{
         except Exception:
             return
         if not path:
+            return
+        self._current_doc_path = path
+        self._launch_writer_document(path)
+
+    def show_open_error(self, message: str) -> None:
+        self._status_label.set_label(message)
+        self._show_toast(message)
+
+    def open_odt_path(self, path: Path) -> None:
+        path = path.expanduser().resolve(strict=False) if path else path
+        if not path:
+            self.show_open_error("Choose a local .odt file.")
+            return
+        if path.suffix.lower() != ".odt":
+            self.show_open_error("Choose an .odt file.")
+            return
+        if not path.exists():
+            self.show_open_error(f"Writer document not found: {path}")
             return
         self._current_doc_path = path
         self._launch_writer_document(path)
@@ -15783,7 +15816,7 @@ class EditorCommandsWindow(Adw.ApplicationWindow):
 
 def main() -> None:
     app = ProseApp()
-    app.run(None)
+    app.run(sys.argv)
 
 
 if __name__ == "__main__":
