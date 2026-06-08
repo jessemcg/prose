@@ -240,7 +240,7 @@ Configure it in `Settings -> Text Draft External Action`, or edit `config.json` 
   {
     "enabled": true,
     "label": "Log",
-    "command": ["/home/jesse/bin/prose-text-draft-case-log", "{draft_file}"],
+    "command": ["/home/jesse/Dropbox/MCGLAW/config_files/scripts/PROJECTS/Prose/scripts/prose-text-draft-case-log.sh", "{draft_file}"],
     "icon_name": "document-save-symbolic",
     "tooltip": "Create Log Entry from the current Draft text.",
     "success_message": "Log entry created."
@@ -248,7 +248,7 @@ Configure it in `Settings -> Text Draft External Action`, or edit `config.json` 
 ]
 ```
 
-When clicked, Prose writes the current Draft text to a UTF-8 temp file, replaces `{draft_file}` with that path in the selected command, sets `PROSE_TEXT_DRAFT_FILE` for the child process, and launches the command without a shell. A Codex external action stays a single button. Its Settings row exposes the working directory and `Codex reasoning effort`; the saved `codex_reasoning_effort` value is passed as `CODEX_REASONING_EFFORT` and can be `minimal`, `low`, `medium`, `high`, or `xhigh`. Put terminal-specific or case-specific behavior in wrapper scripts. `tooltip` and `success_message` are optional per-action strings. The older singular `text_draft_external_action` config key is still read as a fallback.
+When clicked, Prose writes the current Draft text to a UTF-8 temp file, replaces `{draft_file}` with that path in the selected command, sets `PROSE_TEXT_DRAFT_FILE` for the child process, and launches the command without a shell. A Codex external action stays a single button. Its Settings row exposes the working directory and `Codex reasoning effort`; the saved `codex_reasoning_effort` value is passed as `CODEX_REASONING_EFFORT` and can be `minimal`, `low`, `medium`, `high`, or `xhigh`. Put terminal-specific or case-specific behavior in wrapper scripts. The bundled Log wrapper delegates to `CurrentCaseTui/helpers/case_log_actions.py`, which appends the Draft text to `case_log.txt` in the currently selected case directory. `tooltip` and `success_message` are optional per-action strings. The older singular `text_draft_external_action` config key is still read as a fallback.
 
 ### Add Case
 

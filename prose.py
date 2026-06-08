@@ -5780,7 +5780,14 @@ button.text-draft-case-remove {{
     def _is_text_draft_case_log_action(action: TextDraftExternalAction) -> bool:
         if action.label.strip().lower() in {"log", "log entry", "case log"}:
             return True
-        return any("prose-text-draft-case-log.sh" in part for part in action.command)
+        return any(
+            script_name in part
+            for part in action.command
+            for script_name in (
+                "prose-text-draft-case-log",
+                "case_log_actions.py",
+            )
+        )
 
     @staticmethod
     def _text_draft_external_action_display_label(action: TextDraftExternalAction) -> str:
