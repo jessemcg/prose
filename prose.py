@@ -8626,8 +8626,10 @@ button.text-draft-case-remove {{
                 start, end = self._trim_citation_intro_words(text, start, end)
                 if end > start:
                     spans.append((start, end))
-        if not spans:
-            return []
+
+        citation_term_pattern = re.compile(r"(?<![\w'’])(?:Id\.|Ibid\.|supra)(?![\w'’])")
+        for match in citation_term_pattern.finditer(text):
+            spans.append(match.span())
 
         spans.sort()
         merged: list[tuple[int, int]] = []
