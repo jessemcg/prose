@@ -5991,6 +5991,8 @@ button.text-draft-case-remove {{
                 for key, value in action.env.items()
             }
         )
+        if "RR_CLI_KEEP_BROWSER_OPEN" not in action.env:
+            env["RR_CLI_KEEP_BROWSER_OPEN"] = "1"
         env["CODEX_REASONING_EFFORT"] = reasoning_effort
         env.pop("PROSE_CODEX_EMPTY_SESSION", None)
         cwd_path = cwd_override or action.cwd
