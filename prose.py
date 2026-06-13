@@ -461,6 +461,7 @@ DEFAULT_MODEL_PROFILE_NICKNAMES = {
     "profile4": "Profile 4",
 }
 PROFILE_BACKED_COMMAND_TITLES = {
+    "spelling": "SpellingStyle",
     "improve-generated": "Improve Generated",
     "rephrase-generated": "Rephrase Generated",
     "improve-selected": "Improve Selected",
@@ -2864,6 +2865,7 @@ class ProseWindow(Adw.ApplicationWindow):
             {
                 "improve-generated": self._improve1_settings,
                 "rephrase-generated": self._improve2_settings,
+                "spelling": self._spelling_settings,
                 "combine": self._combine_cites_settings,
                 "thesaurus": self._thesaurus_settings,
                 "shorten": self._shorten_settings,
@@ -5157,10 +5159,13 @@ button.text-draft-case-remove {{
     def _on_spellingstyle_clicked(self, _button: Gtk.Button) -> None:
         if self._busy:
             return
-        if not self._spelling_settings.is_configured():
-            self._show_toast("Add SpellingStyle API URL, API key, and prompt in Settings. Model ID may be required.")
+        profile = self._resolve_profile_for_action("spelling", None)
+        if profile is None:
             return
-        if self._spelling_settings.api_url.rstrip("/").endswith("/responses"):
+        if not profile.is_configured():
+            self._show_toast(f'Configure the "{profile.display_name()}" model profile in Settings first.')
+            return
+        if profile.api_url.rstrip("/").endswith("/responses"):
             self._show_toast("SpellingStyle uses a chat endpoint. Update the API URL in Settings.")
             return
         source_text = self._read_editor_source_text()
@@ -5184,7 +5189,7 @@ button.text-draft-case-remove {{
         GLib.idle_add(self._set_spelling_output_text, "")
         self._set_busy(True)
         self._status_label.set_label("Streaming SpellingStyle output…")
-        thread = threading.Thread(target=self._run_spellingstyle, args=(doc, source_text), daemon=True)
+        thread = threading.Thread(target=self._run_spellingstyle, args=(doc, source_text, profile), daemon=True)
         thread.start()
 
     def _run_direct_input(self, add_trailing_space: bool) -> None:
@@ -5491,10 +5496,13 @@ button.text-draft-case-remove {{
     def _on_text_draft_spellingstyle_clicked(self, _button: Gtk.Button | None) -> None:
         if self._busy:
             return
-        if not self._spelling_settings.is_configured():
-            self._show_toast("Add SpellingStyle API URL, API key, and prompt in Settings. Model ID may be required.")
+        profile = self._resolve_profile_for_action("spelling", None)
+        if profile is None:
             return
-        if self._spelling_settings.api_url.rstrip("/").endswith("/responses"):
+        if not profile.is_configured():
+            self._show_toast(f'Configure the "{profile.display_name()}" model profile in Settings first.')
+            return
+        if profile.api_url.rstrip("/").endswith("/responses"):
             self._show_toast("SpellingStyle uses a chat endpoint. Update the API URL in Settings.")
             return
         source_text = self._read_editor_source_text()
@@ -5521,7 +5529,7 @@ button.text-draft-case-remove {{
             self._status_label.set_label("Streaming SpellingStyle output into Text Draft…")
         thread = threading.Thread(
             target=self._run_text_draft_spellingstyle,
-            args=(source_text, route_to_terminal, self._text_draft_terminal_pid),
+            args=(source_text, profile, route_to_terminal, self._text_draft_terminal_pid),
             daemon=True,
         )
         thread.start()
@@ -11648,10 +11656,15 @@ button.text-draft-case-remove {{
         self._focus_first_suggestion(notify_success=False)
         return False
 
-    def _run_spellingstyle(self, doc: XTextDocument, source_text: str) -> None:  # type: ignore[type-arg]
+    def _run_spellingstyle(
+        self,
+        doc: XTextDocument,
+        source_text: str,
+        profile: ModelProfile,
+    ) -> None:  # type: ignore[type-arg]
         try:
-            payload = self._compose_spellingstyle_payload(source_text)
-            stream = self._stream_spellingstyle(payload)
+            payload = self._compose_spellingstyle_payload(source_text, profile)
+            stream = self._stream_spellingstyle(payload, profile)
             for chunk in stream:
                 GLib.idle_add(self._append_editor_text, chunk)
                 GLib.idle_add(self._append_spelling_output_text, chunk)
@@ -11663,13 +11676,14 @@ button.text-draft-case-remove {{
     def _run_text_draft_spellingstyle(
         self,
         source_text: str,
+        profile: ModelProfile,
         route_to_terminal: bool = False,
         terminal_pid: int | None = None,
     ) -> None:
         generated_parts: list[str] = []
         try:
-            payload = self._compose_text_draft_spellingstyle_payload(source_text)
-            for chunk in self._stream_spellingstyle(payload):
+            payload = self._compose_text_draft_spellingstyle_payload(source_text, profile)
+            for chunk in self._stream_spellingstyle(payload, profile):
                 if route_to_terminal:
                     if not self._text_draft_terminal_child_is_running(terminal_pid):
                         raise RuntimeError("Embedded Codex is no longer running.")
@@ -12538,7 +12552,7 @@ button.text-draft-case-remove {{
             raise ValueError(f"Translate output missed indexes: {missing_preview}")
         return translated
 
-    def _compose_spellingstyle_payload(self, source_text: str) -> dict[str, Any]:
+    def _compose_spellingstyle_payload(self, source_text: str, profile: ModelProfile) -> dict[str, Any]:
         system_prompt = _expand_shared_prompt_parts(self._spelling_settings.prompt or DEFAULT_SPELLINGSTYLE_PROMPT)
         payload = {
             "messages": [
@@ -12549,11 +12563,11 @@ button.text-draft-case-remove {{
         }
         return self._add_model_id(
             payload,
-            self._spelling_settings.model_id,
-            disable_reasoning=self._spelling_settings.disable_reasoning,
+            profile.model_id,
+            disable_reasoning=profile.disable_reasoning,
         )
 
-    def _compose_text_draft_spellingstyle_payload(self, source_text: str) -> dict[str, Any]:
+    def _compose_text_draft_spellingstyle_payload(self, source_text: str, profile: ModelProfile) -> dict[str, Any]:
         system_prompt = _expand_shared_prompt_parts(
             self._text_draft_spelling_prompt or DEFAULT_TEXT_DRAFT_SPELLINGSTYLE_PROMPT
         )
@@ -12566,8 +12580,8 @@ button.text-draft-case-remove {{
         }
         return self._add_model_id(
             payload,
-            self._spelling_settings.model_id,
-            disable_reasoning=self._spelling_settings.disable_reasoning,
+            profile.model_id,
+            disable_reasoning=profile.disable_reasoning,
         )
 
     def _compose_improve_payload(self, source_text: str, profile: ModelProfile) -> dict[str, Any]:
@@ -12663,11 +12677,11 @@ button.text-draft-case-remove {{
             profile,
         )
 
-    def _stream_spellingstyle(self, payload: dict[str, Any]) -> Iterable[str]:
+    def _stream_spellingstyle(self, payload: dict[str, Any], profile: ModelProfile) -> Iterable[str]:
         yield from self._stream_custom(
             payload,
-            self._spelling_settings.api_url,
-            self._spelling_settings.api_key,
+            profile.api_url,
+            profile.api_key,
             request_title="SpellingStyle",
         )
 
@@ -15634,10 +15648,10 @@ class SettingsWindow(Adw.ApplicationWindow):
         page_box.append(details_group)
 
         details_row = Adw.ActionRow(
-            title="Uses the main SpellingStyle connection",
+            title="Uses the main SpellingStyle model profile",
             subtitle=(
-                "Text Draft SpellingStyle shares the API URL, model ID, API key, and Disable reasoning "
-                "setting from the SpellingStyle page. Only the prompt below is separate."
+                "Text Draft SpellingStyle shares the default model profile selected on the SpellingStyle page. "
+                "Only the prompt below is separate."
             ),
         )
         details_row.set_activatable(False)
