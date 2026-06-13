@@ -48,7 +48,7 @@ XTextDocument = None  # type: ignore[assignment]
 
 
 APP_ID = "com.mcglaw.Prose"
-ACTION_OBJECT_PATH = "/org/gtk/Application"
+ACTION_OBJECT_PATH = "/com/mcglaw/Prose"
 APP_NAME = "Prose"
 GLib.set_application_name(APP_NAME)
 
@@ -4555,6 +4555,7 @@ button.text-draft-case-remove {{
         _add_action("editor-commands", lambda: self._on_open_editor_commands())
         _add_action("direct-input", lambda: self._on_direct_input_clicked(None))
         _add_string_action("paste-clean-italics", self._on_paste_clean_italics_action)
+        _add_string_action("insert-record-citations", self._on_insert_record_citations_action)
         _add_action("input-rt", lambda: self._on_input_rt_clicked(None))
         _add_action("input-ct", lambda: self._on_input_ct_clicked(None))
         _add_action("speech-find", lambda: self._on_speech_find_clicked(None))
@@ -5489,6 +5490,21 @@ button.text-draft-case-remove {{
             source_text,
             status_text="Pasting cleaned text...",
             completed_text="Cleaned text pasted.",
+            add_trailing_space=True,
+            apply_case_citation_italics=True,
+        )
+
+    def _on_insert_record_citations_action(self, citations: str) -> None:
+        if self._busy:
+            return
+        cleaned = " ".join(citations.split())
+        if not cleaned:
+            self._show_toast("No record citations received.")
+            return
+        self._insert_text_into_writer(
+            cleaned,
+            status_text="Inserting record citations...",
+            completed_text="Record citations inserted.",
             add_trailing_space=True,
             apply_case_citation_italics=True,
         )
