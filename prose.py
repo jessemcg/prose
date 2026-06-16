@@ -608,6 +608,11 @@ def _model_looks_minimax(model_id: str) -> bool:
     return "minimax" in normalized
 
 
+def _api_url_looks_fireworks(api_url: str) -> bool:
+    normalized = (api_url or "").strip().lower()
+    return "fireworks.ai" in normalized
+
+
 def _apply_disable_reasoning_to_body(
     body: dict[str, Any],
     *,
@@ -1012,6 +1017,7 @@ class ModelProfile:
     model_id: str
     api_key: str
     disable_reasoning: bool
+    priority_service_tier: bool
 
     def display_name(self) -> str:
         return self.nickname.strip() or _default_profile_nickname(self.key)
@@ -1360,6 +1366,7 @@ class ModelProfileEditorWidgets:
     model_row: Adw.EntryRow
     api_key_row: Adw.PasswordEntryRow
     disable_reasoning_row: Adw.SwitchRow
+    priority_service_tier_row: Adw.SwitchRow
 
 
 @dataclass
@@ -1849,6 +1856,7 @@ def _sanitize_model_profile(raw: Any, key: str, fallback_nickname: str) -> Model
         model_id=str(data.get("model_id", "") or "").strip(),
         api_key=str(data.get("api_key", "") or "").strip(),
         disable_reasoning=_coerce_bool_config(data.get("disable_reasoning"), False),
+        priority_service_tier=_coerce_bool_config(data.get("priority_service_tier"), False),
     )
 
 
@@ -1862,6 +1870,7 @@ def _legacy_profile_from_improve(prefix: str, nickname: str) -> ModelProfile:
         model_id=str(raw.get(f"{prefix}_model_id", "") or "").strip(),
         api_key=str(raw.get(f"{prefix}_api_key", "") or "").strip(),
         disable_reasoning=_coerce_bool_config(raw.get(f"{prefix}_disable_reasoning"), False),
+        priority_service_tier=False,
     )
 
 
@@ -1915,6 +1924,7 @@ def load_model_profiles() -> list[ModelProfile]:
             model_id="",
             api_key="",
             disable_reasoning=False,
+            priority_service_tier=False,
         ),
         ModelProfile(
             key="profile4",
@@ -1924,6 +1934,7 @@ def load_model_profiles() -> list[ModelProfile]:
             model_id="",
             api_key="",
             disable_reasoning=False,
+            priority_service_tier=False,
         ),
     ]
 
@@ -1938,6 +1949,7 @@ def save_model_profiles(profiles: list[ModelProfile]) -> None:
             "model_id": profile.model_id,
             "api_key": profile.api_key,
             "disable_reasoning": bool(profile.disable_reasoning),
+            "priority_service_tier": bool(profile.priority_service_tier),
         }
         for profile in profiles[: len(MODEL_PROFILE_IDS)]
     ]
@@ -3576,6 +3588,7 @@ class ProseWindow(Adw.ApplicationWindow):
             model_id=self._proof_settings.model_id,
             api_key=self._proof_settings.api_key,
             disable_reasoning=self._proof_settings.disable_reasoning,
+            priority_service_tier=False,
         )
 
     def _profile_slot_label(self, profile: ModelProfile) -> str:
@@ -8040,11 +8053,7 @@ button.text-draft-case-remove {{
             ],
             "stream": False,
         }
-        return self._add_model_id(
-            payload,
-            profile.model_id,
-            disable_reasoning=profile.disable_reasoning,
-        )
+        return self._add_model_profile_options(payload, profile)
 
     def _call_thesaurus(self, payload: dict[str, Any], profile: ModelProfile) -> list[str]:
         raw = self._post_json_and_read(
@@ -9208,11 +9217,7 @@ button.text-draft-case-remove {{
             ],
             "stream": False,
         }
-        return self._add_model_id(
-            payload,
-            profile.model_id,
-            disable_reasoning=profile.disable_reasoning,
-        )
+        return self._add_model_profile_options(payload, profile)
 
     def _call_combine_cites(self, payload: dict[str, Any], profile: ModelProfile) -> str:
         raw = self._post_json_and_read(
@@ -11007,6 +11012,20 @@ button.text-draft-case-remove {{
         )
         return payload
 
+    def _add_model_profile_options(
+        self,
+        payload: dict[str, Any],
+        profile: ModelProfile,
+    ) -> dict[str, Any]:
+        self._add_model_id(
+            payload,
+            profile.model_id,
+            disable_reasoning=profile.disable_reasoning,
+        )
+        if profile.priority_service_tier and _api_url_looks_fireworks(profile.api_url):
+            payload["service_tier"] = "priority"
+        return payload
+
     def _should_retry_without_reasoning_controls(
         self,
         payload: dict[str, Any],
@@ -11103,6 +11122,7 @@ button.text-draft-case-remove {{
             [
                 f"Model: {self._audit_payload_model(payload)}",
                 f"Stream: {self._audit_payload_stream(payload)}",
+                f"Service tier: {self._audit_payload_service_tier(payload)}",
                 f"Reasoning control sent: {self._audit_reasoning_control(payload)}",
                 f"reasoning_content seen: {self._yes_no(self._response_has_reasoning_content(response_obj))}",
                 f"<think> tag seen: {self._yes_no(self._response_has_think_tag(response_obj))}",
@@ -11119,6 +11139,11 @@ button.text-draft-case-remove {{
     def _audit_payload_stream(self, payload: Any) -> str:
         if isinstance(payload, dict) and "stream" in payload:
             return str(bool(payload.get("stream"))).lower()
+        return "not sent"
+
+    def _audit_payload_service_tier(self, payload: Any) -> str:
+        if isinstance(payload, dict) and payload.get("service_tier"):
+            return str(payload["service_tier"])
         return "not sent"
 
     def _audit_reasoning_control(self, payload: Any) -> str:
@@ -11410,11 +11435,7 @@ button.text-draft-case-remove {{
             ],
             "stream": False,
         }
-        return self._add_model_id(
-            payload,
-            profile.model_id,
-            disable_reasoning=profile.disable_reasoning,
-        )
+        return self._add_model_profile_options(payload, profile)
 
     def _call_llm(
         self,
@@ -12331,11 +12352,7 @@ button.text-draft-case-remove {{
                 ),
                 "stream": False,
             }
-            payload = self._add_model_id(
-                payload,
-                profile.model_id,
-                disable_reasoning=profile.disable_reasoning,
-            )
+            payload = self._add_model_profile_options(payload, profile)
             return self._call_responses_text(
                 payload,
                 profile.api_url,
@@ -12355,11 +12372,7 @@ button.text-draft-case-remove {{
             ],
             "stream": False,
         }
-        payload = self._add_model_id(
-            payload,
-            profile.model_id,
-            disable_reasoning=profile.disable_reasoning,
-        )
+        payload = self._add_model_profile_options(payload, profile)
         return self._call_chat_text(
             payload,
             profile.api_url,
@@ -12399,11 +12412,7 @@ button.text-draft-case-remove {{
                 "input": f"{instructions}\n\nSOURCE:\n{source_json}",
                 "stream": False,
             }
-            request_payload = self._add_model_id(
-                request_payload,
-                profile.model_id,
-                disable_reasoning=profile.disable_reasoning,
-            )
+            request_payload = self._add_model_profile_options(request_payload, profile)
             raw_output = self._call_responses_text(
                 request_payload,
                 profile.api_url,
@@ -12418,11 +12427,7 @@ button.text-draft-case-remove {{
                 ],
                 "stream": False,
             }
-            request_payload = self._add_model_id(
-                request_payload,
-                profile.model_id,
-                disable_reasoning=profile.disable_reasoning,
-            )
+            request_payload = self._add_model_profile_options(request_payload, profile)
             raw_output = self._call_chat_text(
                 request_payload,
                 profile.api_url,
@@ -12577,11 +12582,7 @@ button.text-draft-case-remove {{
             ],
             "stream": True,
         }
-        return self._add_model_id(
-            payload,
-            profile.model_id,
-            disable_reasoning=profile.disable_reasoning,
-        )
+        return self._add_model_profile_options(payload, profile)
 
     def _compose_text_draft_spellingstyle_payload(self, source_text: str, profile: ModelProfile) -> dict[str, Any]:
         system_prompt = _expand_shared_prompt_parts(
@@ -12594,11 +12595,7 @@ button.text-draft-case-remove {{
             ],
             "stream": True,
         }
-        return self._add_model_id(
-            payload,
-            profile.model_id,
-            disable_reasoning=profile.disable_reasoning,
-        )
+        return self._add_model_profile_options(payload, profile)
 
     def _compose_improve_payload(self, source_text: str, profile: ModelProfile) -> dict[str, Any]:
         return self._compose_profile_prompt_payload(
@@ -12631,11 +12628,7 @@ button.text-draft-case-remove {{
             ],
             "stream": True,
         }
-        return self._add_model_id(
-            payload,
-            profile.model_id,
-            disable_reasoning=profile.disable_reasoning,
-        )
+        return self._add_model_profile_options(payload, profile)
 
     def _compose_shorten_payload(self, source_text: str, profile: ModelProfile) -> dict[str, Any]:
         return self._compose_profile_prompt_payload(
@@ -14435,6 +14428,10 @@ class SettingsWindow(Adw.ApplicationWindow):
             disable_reasoning_row.set_active(bool(profile.disable_reasoning))
             group.add(disable_reasoning_row)
 
+            priority_service_tier_row = Adw.SwitchRow(title="Priority")
+            priority_service_tier_row.set_active(bool(profile.priority_service_tier))
+            group.add(priority_service_tier_row)
+
             self._model_profile_editors[profile.key] = ModelProfileEditorWidgets(
                 nickname_row=nickname_row,
                 abbreviation_row=abbreviation_row,
@@ -14442,6 +14439,7 @@ class SettingsWindow(Adw.ApplicationWindow):
                 model_row=model_row,
                 api_key_row=api_key_row,
                 disable_reasoning_row=disable_reasoning_row,
+                priority_service_tier_row=priority_service_tier_row,
             )
             page_box.append(group)
 
@@ -15189,6 +15187,7 @@ class SettingsWindow(Adw.ApplicationWindow):
                     model_id=widgets.model_row.get_text().strip(),
                     api_key=widgets.api_key_row.get_text().strip(),
                     disable_reasoning=widgets.disable_reasoning_row.get_active(),
+                    priority_service_tier=widgets.priority_service_tier_row.get_active(),
                 )
             )
 
