@@ -1,30 +1,38 @@
 # Repository Guidelines
 
 ## Project Structure & Module Organization
-- `prose.py` is the main GTK/Libadwaita application and contains the UI plus LibreOffice/UNO integration.
-- `config.json` stores local runtime settings (API URLs, model IDs, keys, prompts, last editor source file).
-- `prompts/` holds baseline prompt text used by the app.
-- `focus_sample_for_prose_coding_tasks.py` is a reference app used for patterns; it is not executed by Prose.
+- `prose/` is the normal system-Python package. Prose is intentionally not a uv project because it must use the local LibreOffice UNO Python bridge.
+- `prose/cli.py` defines the `python3 -m prose app [document.odt]` command. Route launch behavior through this module rather than adding root-level scripts.
+- `prose/app.py` owns `ProseApp` and `ProseWindow`, including the main GTK/Libadwaita UI, action registration, Writer interaction, Text Draft behavior, LLM calls, and proofreader flow.
+- `prose/windows/settings.py` owns the Settings window. `prose/windows/editor_commands.py` owns the command-copy/run window.
+- `prose/runtime.py` contains shared dataclasses, config helpers, action metadata, UNO setup helpers, and app-wide utility functions used across the package.
+- `prose/paths.py` centralizes project-root paths such as `config.json`, `scripts/`, and `prompts/`.
+- `config.json` stores local runtime settings and may contain API keys. Do not commit real credentials.
+- `prompts/` holds baseline prompt text used by the app. `scripts/` holds bundled Text Draft external-action wrappers.
 
 ## Build, Test, and Development Commands
-- `python3 prose.py` runs the desktop app locally.
-- There is no separate build step or test runner configured in this repo.
+- `python3 -m prose app` runs the desktop app locally.
+- `python3 -m prose app /path/to/document.odt` launches Prose and opens a Writer document.
+- `python3 -m prose --help` checks the package CLI.
+- `python3 -m py_compile prose/*.py prose/windows/*.py` is the quick syntax check.
+- There is no uv environment, no pyproject, and no separate build step.
 
 ## Coding Style & Naming Conventions
-- Follow standard Python conventions (PEP 8): 4-space indentation, snake_case for functions/variables, PascalCase for classes.
-- Prefer type hints and dataclasses as used in `prose.py`.
-- Keep UI strings and config keys centralized near the top of the file.
-- No formatter or linter is configured; keep changes minimal and consistent with existing style.
+- Follow standard Python conventions: 4-space indentation, snake_case for functions/variables, PascalCase for classes.
+- Prefer type hints and dataclasses as used in the existing package.
+- Keep UI strings and config keys centralized in shared package modules.
+- Keep changes narrow and consistent with existing GTK/Libadwaita patterns.
 
 ## Testing Guidelines
-- No automated tests are present. Validate changes by running `python3 prose.py` and exercising the affected UI flow.
-- If you add tests in the future, keep them in a new `tests/` directory and name files `test_*.py`.
+- No automated Prose test suite is present. Validate changes with `python3 -m py_compile prose/*.py prose/windows/*.py`.
+- For UI or UNO changes, run `python3 -m prose app` and exercise the affected flow manually.
+- If launcher integration changes, validate the dependent project or desktop script as part of the same change.
 
-## Commit & Pull Request Guidelines
-- The Git history is empty, so no established commit style exists. Use concise, imperative messages (e.g., "Add config validation").
-- PRs should include a short summary, manual testing notes, and screenshots or screen recordings for UI changes.
-- Call out any `config.json` changes or new config keys explicitly.
+## Integration Notes
+- Desktop files live outside this repo in `/home/jesse/Dropbox/MCGLAW/config_files/Desktop_Files`; the launcher should `cd` into this project and run `python3 -m prose app "$@"`.
+- CurrentCaseTui opens `.odt` files through Prose and should call `python3 -m prose app <document>` with this project as the working directory.
+- Keep `APP_ID`, `ACTION_OBJECT_PATH`, and existing GApplication action names stable because Focus and hotkey workflows call them directly.
 
 ## Configuration & Security Notes
 - Do not commit real API keys; keep `config.json` local or use placeholders.
-- LibreOffice integration expects a local UNO socket; if it changes, document it in the PR.
+- LibreOffice integration expects a local UNO socket and a normal non-Flatpak/non-Snap LibreOffice install.

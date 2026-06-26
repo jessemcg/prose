@@ -75,9 +75,16 @@ This keeps Prose's Writer session isolated from your ordinary day-to-day LibreOf
 
 ## Repository Layout
 
-- `prose.py`: main application, UI, Writer integration, and AI actions
+- `prose/`: normal system-Python package for the GTK/Libadwaita app
+- `prose/cli.py`: `python3 -m prose` command dispatcher
+- `prose/app.py`: `ProseApp` and `ProseWindow`, including the main UI, action registration, Writer interaction, Text Draft behavior, LLM calls, and proofreader flow
+- `prose/windows/settings.py`: Settings window
+- `prose/windows/editor_commands.py`: Editor Commands window
+- `prose/runtime.py`: shared dataclasses, config helpers, action metadata, UNO setup helpers, and utility functions
+- `prose/paths.py`: project-root path constants for config, prompts, and bundled scripts
 - `config.json`: local runtime settings such as API URLs, model IDs, keys, prompts, and last source file
 - `prompts/`: baseline prompt text used by the app
+- `scripts/`: bundled Text Draft external-action wrapper scripts
 - `prose.png`: app icon used in the README
 
 ## Running Prose
@@ -85,10 +92,10 @@ This keeps Prose's Writer session isolated from your ordinary day-to-day LibreOf
 Start the app with:
 
 ```bash
-python3 prose.py
+python3 -m prose app
 ```
 
-There is no separate build step in this repository.
+There is no separate build step in this repository. Prose is intentionally a normal system-Python project, not a uv project, because it must use the local LibreOffice UNO Python bridge.
 
 ## First-Time Setup
 
@@ -187,7 +194,7 @@ Use `Launch Writer` to open a Writer document in the Prose-managed LibreOffice s
 You can also start Prose with a specific Writer document from the command line:
 
 ```bash
-python3 prose.py /path/to/document.odt
+python3 -m prose app /path/to/document.odt
 ```
 
 Prose opens its normal app window and loads that `.odt` file through the same managed LibreOffice session.
@@ -358,14 +365,14 @@ Fix:
 Run locally with:
 
 ```bash
-python3 prose.py
+python3 -m prose app
 ```
 
 There is no automated test suite in this repository at the moment. A minimal verification step for changes is:
 
 ```bash
-python3 -m py_compile prose.py
-python3 prose.py
+python3 -m py_compile prose/*.py prose/windows/*.py
+python3 -m prose app
 ```
 
 ## Security
