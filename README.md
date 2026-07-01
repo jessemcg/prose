@@ -67,7 +67,6 @@ This keeps Prose's Writer session isolated from your ordinary day-to-day LibreOf
 - Python 3
 - GTK 4
 - Libadwaita 1
-- GTK4 VTE runtime/introspection packages for the embedded Text Draft terminal
 - LibreOffice Writer installed as a normal `.deb` or `.rpm`
 - LibreOffice Python UNO bridge files available locally
 - network/API access for whichever LLM provider you configure
@@ -113,21 +112,7 @@ After installation, confirm that LibreOffice's program directory exists in a nor
 - `/usr/lib/libreoffice/program`
 - `/usr/lib64/libreoffice/program`
 
-### 2. Install GTK4 VTE for the embedded terminal
-
-The Text Draft view embeds an interactive terminal inside Prose. That terminal requires the GTK4 VTE runtime and GObject introspection bindings.
-
-On Debian/Ubuntu, install:
-
-```bash
-sudo apt install gir1.2-vte-3.91 libvte-2.91-gtk4-0
-```
-
-If these packages are missing, Prose still starts, but the embedded Text Draft terminal is unavailable.
-
-The Draft header can show configured external-action buttons such as starting Codex with the current Draft. The Codex action submits the current Draft as the initial interactive prompt using the working directory and reasoning effort configured in Settings. After that, generated Text Draft output is typed into Codex at the current cursor only; Prose does not send Enter for that later text. Replace-style commands such as `Improve Generated` erase the last terminal-routed generated text first, so they expect the Codex cursor to still be immediately after that text. While the embedded terminal has focus, use `Ctrl+Shift+C` to copy its selection and `Ctrl+Shift+V` to paste clipboard text into it. If Codex exits, the embedded terminal falls back to a normal shell; generated-text commands then write to the Draft text box again.
-
-### 3. Confirm Prose can find `python-uno`
+### 2. Confirm Prose can find `python-uno`
 
 Prose tries to auto-detect LibreOffice's Python bridge files. If it cannot, open Settings and set:
 
@@ -228,22 +213,12 @@ Some actions operate on the current Writer document or selection. Others use the
 
 ### Optional: external Text Draft actions
 
-The Text Draft view can show configurable external-action buttons next to `Copy`. This is for local workflows that are too system-specific to build directly into Prose, such as opening a terminal, handing the current draft to another tool, or appending the draft to a local case log.
+The Text Draft view can show configurable external-action buttons next to `Copy`. This is for local workflows that are too system-specific to build directly into Prose, such as handing the current draft to another tool or appending the draft to a local case log.
 
 Configure it in `Settings -> Text Draft External Action`, or edit `config.json` manually:
 
 ```json
 "text_draft_external_actions": [
-  {
-    "enabled": true,
-    "label": "Codex",
-    "command": ["/home/jesse/bin/prose-text-draft-codex", "{draft_file}"],
-    "cwd": "/home/jesse",
-    "codex_reasoning_effort": "medium",
-    "icon_name": "send-to-symbolic",
-    "tooltip": "Start Codex with the current Draft as the initial prompt.",
-    "success_message": "Codex launched with Draft text."
-  },
   {
     "enabled": true,
     "label": "Log",
@@ -255,7 +230,7 @@ Configure it in `Settings -> Text Draft External Action`, or edit `config.json` 
 ]
 ```
 
-When clicked, Prose writes the current Draft text to a UTF-8 temp file, replaces `{draft_file}` with that path in the selected command, sets `PROSE_TEXT_DRAFT_FILE` for the child process, and launches the command without a shell. A Codex external action stays a single button. Its Settings row exposes the working directory and `Codex reasoning effort`; the saved `codex_reasoning_effort` value is passed as `CODEX_REASONING_EFFORT` and can be `minimal`, `low`, `medium`, `high`, or `xhigh`. Put terminal-specific or case-specific behavior in wrapper scripts. The bundled Log wrapper delegates to `CurrentCaseTui/helpers/case_log_actions.py`, which appends the Draft text to `case_log.txt` in the currently selected case directory. `tooltip` and `success_message` are optional per-action strings. The older singular `text_draft_external_action` config key is still read as a fallback.
+When clicked, Prose writes the current Draft text to a UTF-8 temp file, replaces `{draft_file}` with that path in the selected command, sets `PROSE_TEXT_DRAFT_FILE` for the child process, and launches the command without a shell. Put terminal-specific or case-specific behavior in wrapper scripts. The bundled Log wrapper delegates to `CurrentCaseTui/helpers/case_log_actions.py`, which appends the Draft text to `case_log.txt` in the currently selected case directory. `tooltip` and `success_message` are optional per-action strings. The older singular `text_draft_external_action` config key is still read as a fallback.
 
 ### Add Case
 

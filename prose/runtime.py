@@ -7,7 +7,6 @@ import json
 import importlib
 import os
 import re
-import signal
 import shlex
 import shutil
 import subprocess
@@ -26,20 +25,11 @@ from typing import Any, Callable, Iterable
 
 import gi
 
-from .paths import CONFIG_FILE, PROJECT_DIR, TEXT_DRAFT_CODEX_VTE_SCRIPT, TEXT_DRAFT_PROJECTS_DIR
+from .paths import CONFIG_FILE, PROJECT_DIR
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Adw, Gdk, Gio, GLib, Gtk, Pango  # type: ignore
-
-Vte = None  # type: ignore[assignment]
-try:
-    gi.require_version("Vte", "3.91")
-    from gi.repository import Vte as VteModule  # type: ignore
-
-    Vte = VteModule  # type: ignore[assignment]
-except (ImportError, ValueError):
-    Vte = None  # type: ignore[assignment]
 
 uno = None  # type: ignore
 PropertyValue = None  # type: ignore[assignment]
@@ -162,63 +152,11 @@ CONFIG_KEY_LIBREOFFICE_PYTHON_PATH = "libreoffice_python_path"
 CONFIG_KEY_CONCORDANCE_FILE_PATH = "concordance_file_path"
 CONFIG_KEY_EDITOR_PINNED_ACTIONS = "editor_pinned_actions"
 CONFIG_KEY_TEXT_DRAFT_PINNED_ACTIONS = "text_draft_pinned_actions"
-CONFIG_KEY_TEXT_DRAFT_CODEX_PROJECT_ACTION = "text_draft_codex_project_action"
-CONFIG_KEY_TEXT_DRAFT_CODEX_SESSION_ACTION = "text_draft_codex_session_action"
 CONFIG_KEY_SHARED_STYLE_RULES = "shared_style_rules"
 CONFIG_KEY_TEXT_DRAFT_EXTERNAL_ACTION = "text_draft_external_action"
 CONFIG_KEY_TEXT_DRAFT_EXTERNAL_ACTIONS = "text_draft_external_actions"
 TEXT_DRAFT_EXTERNAL_ACTION_DRAFT_FILE_TOKEN = "{draft_file}"
-TEXT_DRAFT_CODEX_REASONING_EFFORTS = ("minimal", "low", "medium", "high", "xhigh")
-DEFAULT_TEXT_DRAFT_CODEX_REASONING_EFFORT = "medium"
-TEXT_DRAFT_CASE_SUGGESTION_LIMIT = 25
-TEXT_DRAFT_CASE_SUGGESTION_MAX_HEIGHT = 220
 DEFAULT_TEXT_DRAFT_EXTERNAL_ACTION_ICON = "utilities-terminal-symbolic"
-PROSE_TERMINAL_DARK_FOREGROUND = "#f2f4f8"
-PROSE_TERMINAL_DARK_BACKGROUND = "#3d3d3d"
-PROSE_TERMINAL_DARK_SELECTION = "#3d536b"
-PROSE_TERMINAL_DARK_CURSOR = "#8ab4f8"
-PROSE_TERMINAL_DARK_CURSOR_FOREGROUND = "#111318"
-PROSE_TERMINAL_DARK_PALETTE = (
-    "#1f2329",
-    "#ff7b86",
-    "#7bd88f",
-    "#f4cf65",
-    "#8ab4f8",
-    "#c58af9",
-    "#6fd6e8",
-    "#e6e9ef",
-    "#7f8b99",
-    "#ff9aa2",
-    "#9be7ad",
-    "#f8dd85",
-    "#a8c7fa",
-    "#d7aefb",
-    "#8de8f7",
-    "#ffffff",
-)
-PROSE_TERMINAL_LIGHT_FOREGROUND = "#20242c"
-PROSE_TERMINAL_LIGHT_BACKGROUND = "#f5f5f5"
-PROSE_TERMINAL_LIGHT_SELECTION = "#d7e4f5"
-PROSE_TERMINAL_LIGHT_CURSOR = "#1f66d1"
-PROSE_TERMINAL_LIGHT_CURSOR_FOREGROUND = "#ffffff"
-PROSE_TERMINAL_LIGHT_PALETTE = (
-    "#2d333b",
-    "#c2414b",
-    "#2f8f4e",
-    "#8a6a00",
-    "#1f66d1",
-    "#8c4ac9",
-    "#1f7a8c",
-    "#f5f7fa",
-    "#66717f",
-    "#d95560",
-    "#3fae63",
-    "#a78300",
-    "#327fe3",
-    "#a35bd8",
-    "#2695aa",
-    "#ffffff",
-)
 
 DEFAULT_SHARED_STYLE_RULES = """## STYLE RULES
 
@@ -968,43 +906,6 @@ def _format_action_param(variant: GLib.Variant) -> str:
     return f"<{printed}>"
 
 
-def _rgba_color(spec: str) -> Gdk.RGBA:
-    color = Gdk.RGBA()
-    if not color.parse(spec):
-        raise ValueError(f"Invalid color: {spec}")
-    return color
-
-
-def _apply_prose_terminal_theme(terminal: Any) -> None:
-    dark = Adw.StyleManager.get_default().get_dark()
-    if dark:
-        foreground_spec = PROSE_TERMINAL_DARK_FOREGROUND
-        background_spec = PROSE_TERMINAL_DARK_BACKGROUND
-        selection_spec = PROSE_TERMINAL_DARK_SELECTION
-        cursor_spec = PROSE_TERMINAL_DARK_CURSOR
-        cursor_foreground_spec = PROSE_TERMINAL_DARK_CURSOR_FOREGROUND
-        palette_specs = PROSE_TERMINAL_DARK_PALETTE
-    else:
-        foreground_spec = PROSE_TERMINAL_LIGHT_FOREGROUND
-        background_spec = PROSE_TERMINAL_LIGHT_BACKGROUND
-        selection_spec = PROSE_TERMINAL_LIGHT_SELECTION
-        cursor_spec = PROSE_TERMINAL_LIGHT_CURSOR
-        cursor_foreground_spec = PROSE_TERMINAL_LIGHT_CURSOR_FOREGROUND
-        palette_specs = PROSE_TERMINAL_LIGHT_PALETTE
-
-    foreground = _rgba_color(foreground_spec)
-    background = _rgba_color(background_spec)
-    palette = [_rgba_color(spec) for spec in palette_specs]
-    terminal.set_colors(foreground, background, palette)
-    terminal.set_color_background(background)
-    terminal.set_color_foreground(foreground)
-    terminal.set_clear_background(True)
-    terminal.set_color_cursor(_rgba_color(cursor_spec))
-    terminal.set_color_cursor_foreground(_rgba_color(cursor_foreground_spec))
-    terminal.set_color_highlight(_rgba_color(selection_spec))
-    terminal.set_color_highlight_foreground(foreground)
-
-
 @dataclass
 class ModelProfile:
     key: str
@@ -1324,7 +1225,6 @@ class TextDraftExternalAction:
     icon_name: str = DEFAULT_TEXT_DRAFT_EXTERNAL_ACTION_ICON
     tooltip: str = ""
     success_message: str = ""
-    codex_reasoning_effort: str = DEFAULT_TEXT_DRAFT_CODEX_REASONING_EFFORT
 
     def is_configured(self) -> bool:
         return self.enabled and bool(self.command)
@@ -1339,7 +1239,6 @@ class TextDraftExternalActionEditorWidgets:
     success_message_row: Adw.EntryRow
     command_row: Adw.EntryRow
     cwd_row: Adw.EntryRow
-    codex_reasoning_dropdown: Gtk.DropDown | None
     env_buffer: Gtk.TextBuffer
 
 
@@ -2533,17 +2432,7 @@ def _parse_text_draft_external_action(raw: Any) -> TextDraftExternalAction | Non
         icon_name=icon_name,
         tooltip=tooltip,
         success_message=success_message,
-        codex_reasoning_effort=_sanitize_text_draft_codex_reasoning_effort(
-            raw.get("codex_reasoning_effort")
-        ),
     )
-
-
-def _sanitize_text_draft_codex_reasoning_effort(raw: Any) -> str:
-    reasoning_effort = str(raw or "").strip().lower()
-    if reasoning_effort in TEXT_DRAFT_CODEX_REASONING_EFFORTS:
-        return reasoning_effort
-    return DEFAULT_TEXT_DRAFT_CODEX_REASONING_EFFORT
 
 
 def _format_text_draft_external_action_env(env: dict[str, str]) -> str:
@@ -2573,12 +2462,14 @@ def load_text_draft_external_actions() -> list[TextDraftExternalAction]:
         actions = [
             action
             for action in (_parse_text_draft_external_action(item) for item in raw_actions)
-            if action is not None
+            if action is not None and not _is_ignored_text_draft_codex_action(action)
         ]
         return actions
 
     legacy_action = _parse_text_draft_external_action(raw.get(CONFIG_KEY_TEXT_DRAFT_EXTERNAL_ACTION))
-    return [legacy_action] if legacy_action is not None else []
+    if legacy_action is None or _is_ignored_text_draft_codex_action(legacy_action):
+        return []
+    return [legacy_action]
 
 
 def _text_draft_external_action_has_payload(action: TextDraftExternalAction) -> bool:
@@ -2614,10 +2505,6 @@ def _text_draft_external_action_payload(action: TextDraftExternalAction) -> dict
         payload["tooltip"] = action.tooltip.strip()
     if action.success_message.strip():
         payload["success_message"] = action.success_message.strip()
-    if _is_text_draft_codex_external_action(action):
-        payload["codex_reasoning_effort"] = _sanitize_text_draft_codex_reasoning_effort(
-            action.codex_reasoning_effort
-        )
     return payload
 
 
@@ -2627,10 +2514,9 @@ def save_text_draft_external_actions(actions: list[TextDraftExternalAction]) -> 
         _text_draft_external_action_payload(action)
         for action in actions
         if _text_draft_external_action_has_payload(action)
+        and not _is_ignored_text_draft_codex_action(action)
     ]
     data.pop(CONFIG_KEY_TEXT_DRAFT_EXTERNAL_ACTION, None)
-    data.pop(CONFIG_KEY_TEXT_DRAFT_CODEX_PROJECT_ACTION, None)
-    data.pop(CONFIG_KEY_TEXT_DRAFT_CODEX_SESSION_ACTION, None)
     if payload:
         data[CONFIG_KEY_TEXT_DRAFT_EXTERNAL_ACTIONS] = payload
     else:
@@ -2649,7 +2535,7 @@ def save_text_draft_external_action(action: TextDraftExternalAction) -> None:
     save_text_draft_external_actions([action])
 
 
-def _is_text_draft_codex_external_action(action: TextDraftExternalAction) -> bool:
+def _is_ignored_text_draft_codex_action(action: TextDraftExternalAction) -> bool:
     if action.label.strip().lower() == "codex":
         return True
     return any(
@@ -2808,13 +2694,6 @@ class TextDraftTemplateCategory:
     key: str
     name: str
     template_paths: list[Path]
-
-
-@dataclass(frozen=True)
-class TextDraftCaseSuggestion:
-    citation: str
-    display_name: str
-    search_terms: tuple[str, ...]
 
 
 __all__ = [name for name in globals() if not name.startswith("__")]

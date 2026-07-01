@@ -161,17 +161,6 @@ class ProseWindow(Adw.ApplicationWindow):
         self._text_draft_view: Gtk.TextView | None = None
         self._text_draft_draft_surface: Gtk.Stack | None = None
         self._text_draft_clear_button: Gtk.Button | None = None
-        self._text_draft_terminal = None
-        self._text_draft_terminal_close_button: Gtk.Button | None = None
-        self._text_draft_terminal_buttons: list[Gtk.Widget] = []
-        self._text_draft_terminal_active = False
-        self._text_draft_terminal_pid: int | None = None
-        self._text_draft_terminal_mode: str | None = None
-        self._text_draft_terminal_cwd: str | None = None
-        self._text_draft_terminal_closing = False
-        self._text_draft_terminal_generated_output = ""
-        self._text_draft_terminal_replace_text = ""
-        self._text_draft_clear_draft_on_terminal_return = False
         self._text_draft_insert_start_mark: Gtk.TextMark | None = None
         self._text_draft_insert_end_mark: Gtk.TextMark | None = None
         self._text_draft_pending_regenerate_context: RegenerateContext | None = None
@@ -193,18 +182,6 @@ class ProseWindow(Adw.ApplicationWindow):
         self._text_draft_template_emails: list[tuple[str, str]] = []
         self._text_draft_external_action_box: Gtk.Box | None = None
         self._text_draft_external_action_buttons: list[Gtk.Widget] = []
-        self._text_draft_case_search_entry: Gtk.Entry | None = None
-        self._text_draft_case_results_scroller: Gtk.ScrolledWindow | None = None
-        self._text_draft_case_list_box: Gtk.ListBox | None = None
-        self._text_draft_case_attachments_box: Gtk.Box | None = None
-        self._text_draft_case_suggestions: list[TextDraftCaseSuggestion] = []
-        self._text_draft_case_selected_index = 0
-        self._text_draft_case_prefix = ""
-        self._text_draft_case_prefix_bounds: tuple[int, int] | None = None
-        self._text_draft_case_attachments: list[str] = []
-        self._text_draft_case_index: list[TextDraftCaseSuggestion] = []
-        self._text_draft_case_index_path: Path | None = None
-        self._text_draft_case_index_mtime_ns: int | None = None
         self._text_draft_temp_path: Path | None = None
         self._text_draft_temp_flush_source_id = 0
         self._text_draft_temp_dirty = False
@@ -566,36 +543,10 @@ class ProseWindow(Adw.ApplicationWindow):
         draft_header_row.append(templates_button)
         self._text_draft_template_button = templates_button
 
-        case_search_entry = Gtk.Entry()
-        case_search_entry.set_placeholder_text("Add case")
-        case_search_entry.set_tooltip_text("Search concordance cases to append to this Draft.")
-        case_search_entry.set_hexpand(True)
-        case_search_entry.set_halign(Gtk.Align.FILL)
-        case_search_entry.set_valign(Gtk.Align.CENTER)
-        case_search_entry.set_size_request(0, -1)
-        case_search_entry.add_css_class("text-draft-case-search")
-        case_search_entry.connect("changed", self._on_text_draft_case_search_changed)
-        case_search_key_controller = Gtk.EventControllerKey()
-        case_search_key_controller.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
-        case_search_key_controller.connect("key-pressed", self._on_text_draft_case_search_key_pressed)
-        case_search_entry.add_controller(case_search_key_controller)
-        draft_header_row.append(case_search_entry)
-        self._text_draft_case_search_entry = case_search_entry
-
         template_email_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         template_email_box.set_visible(False)
         draft_header_row.append(template_email_box)
         self._text_draft_template_email_box = template_email_box
-
-        terminal_close_btn = Gtk.Button(icon_name="go-previous-symbolic")
-        terminal_close_btn.add_css_class("flat")
-        terminal_close_btn.add_css_class("transform-pill")
-        terminal_close_btn.add_css_class("transform-pill-compact")
-        terminal_close_btn.set_tooltip_text("Return to the Draft text box.")
-        terminal_close_btn.set_visible(False)
-        terminal_close_btn.connect("clicked", self._on_text_draft_terminal_close_clicked)
-        draft_header_row.append(terminal_close_btn)
-        self._text_draft_terminal_close_button = terminal_close_btn
 
         external_action_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
         draft_header_row.append(external_action_box)
@@ -611,27 +562,6 @@ class ProseWindow(Adw.ApplicationWindow):
         draft_header_row.append(copy_draft_btn)
 
         draft_section.append(draft_header_row)
-
-        case_results_list = Gtk.ListBox()
-        case_results_list.add_css_class("text-draft-case-suggestion-list")
-        case_results_list.set_selection_mode(Gtk.SelectionMode.SINGLE)
-        case_results_list.connect("row-activated", self._on_text_draft_case_row_activated)
-        case_results_scroller = Gtk.ScrolledWindow()
-        case_results_scroller.add_css_class("text-draft-case-results")
-        case_results_scroller.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
-        case_results_scroller.set_max_content_height(TEXT_DRAFT_CASE_SUGGESTION_MAX_HEIGHT)
-        case_results_scroller.set_propagate_natural_height(True)
-        case_results_scroller.set_visible(False)
-        case_results_scroller.set_child(case_results_list)
-        draft_section.append(case_results_scroller)
-        self._text_draft_case_results_scroller = case_results_scroller
-        self._text_draft_case_list_box = case_results_list
-
-        case_attachments_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
-        case_attachments_box.set_hexpand(True)
-        case_attachments_box.set_visible(False)
-        case_attachments_box.add_css_class("text-draft-case-attachments")
-        self._text_draft_case_attachments_box = case_attachments_box
 
         draft_surface = Gtk.Stack()
         draft_surface.set_hexpand(True)
@@ -670,47 +600,6 @@ class ProseWindow(Adw.ApplicationWindow):
         draft_scroller.set_child(draft_view)
         draft_surface.add_named(draft_scroller, "draft")
 
-        if Vte is not None:
-            terminal_frame = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-            terminal_frame.set_hexpand(True)
-            terminal_frame.set_vexpand(True)
-            terminal_frame.set_size_request(-1, 260)
-            terminal_frame.add_css_class("text-draft-terminal-frame")
-            terminal_frame.set_overflow(Gtk.Overflow.HIDDEN)
-            terminal = Vte.Terminal()
-            terminal.set_hexpand(True)
-            terminal.set_vexpand(True)
-            terminal.add_css_class("text-draft-terminal")
-            _apply_prose_terminal_theme(terminal)
-            terminal_key_controller = Gtk.EventControllerKey()
-            terminal_key_controller.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
-            terminal_key_controller.connect("key-pressed", self._on_text_draft_terminal_key_pressed)
-            terminal.add_controller(terminal_key_controller)
-            Adw.StyleManager.get_default().connect(
-                "notify::dark",
-                self._on_text_draft_terminal_style_changed,
-            )
-            terminal.connect("child-exited", self._on_text_draft_terminal_child_exited)
-            terminal_frame.append(terminal)
-            draft_surface.add_named(terminal_frame, "terminal")
-            self._text_draft_terminal = terminal
-        else:
-            terminal_missing = Gtk.Label(
-                label=(
-                    "Embedded terminal support requires GTK4 VTE "
-                    "(gir1.2-vte-3.91 and libvte-2.91-gtk4-0)."
-                ),
-                xalign=0,
-            )
-            terminal_missing.set_wrap(True)
-            terminal_missing.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
-            terminal_missing.set_margin_top(SPELLING_OUTPUT_PADDING_PX)
-            terminal_missing.set_margin_bottom(SPELLING_OUTPUT_PADDING_PX)
-            terminal_missing.set_margin_start(SPELLING_OUTPUT_PADDING_PX)
-            terminal_missing.set_margin_end(SPELLING_OUTPUT_PADDING_PX)
-            terminal_missing.add_css_class("dim-label")
-            draft_surface.add_named(terminal_missing, "terminal-missing")
-
         draft_surface.set_visible_child_name("draft")
         draft_overlay = Gtk.Overlay()
         draft_overlay.set_hexpand(True)
@@ -728,7 +617,6 @@ class ProseWindow(Adw.ApplicationWindow):
         clear_draft_btn.connect("clicked", self._on_clear_text_draft_clicked)
         draft_overlay.add_overlay(clear_draft_btn)
         draft_section.append(draft_overlay)
-        draft_section.append(case_attachments_box)
         self._text_draft_buffer = draft_buffer
         self._text_draft_view = draft_view
         self._text_draft_draft_surface = draft_surface
@@ -1381,20 +1269,6 @@ textview.spelling-output-view.view border {{
   border: none;
   box-shadow: none;
 }}
-.text-draft-terminal-frame {{
-  border-radius: {SPELLING_OUTPUT_CORNER_RADIUS_PX}px;
-  background-color: @window_bg_color;
-  background-image: none;
-  border: none;
-  box-shadow: none;
-}}
-.text-draft-terminal {{
-  border-radius: {SPELLING_OUTPUT_CORNER_RADIUS_PX}px;
-  padding: 8px;
-  background-color: @window_bg_color;
-  background-image: none;
-  color: @window_fg_color;
-}}
 .editor-lookup-surface > stackpage {{
   background-color: transparent;
 }}
@@ -1500,29 +1374,6 @@ button.improve-profile-chip {{
 .reference-query-entry {{
   font-size: {SPELLING_OUTPUT_FONT_SIZE_PX}px;
 }}
-.text-draft-case-suggestion-list {{
-  min-width: 260px;
-  padding: 2px;
-  background-color: transparent;
-}}
-.text-draft-case-results {{
-  background-color: transparent;
-  border: none;
-  box-shadow: none;
-}}
-.text-draft-case-results > viewport {{
-  background-color: transparent;
-}}
-.text-draft-case-suggestion-row {{
-  border-radius: 4px;
-  padding: 3px 6px;
-}}
-.text-draft-case-suggestion-row label {{
-  font-size: 0.92rem;
-}}
-.text-draft-case-search {{
-  font-size: {SPELLING_OUTPUT_FONT_SIZE_PX}px;
-}}
 button.text-draft-clear-draft {{
   min-height: 28px;
   min-width: 28px;
@@ -1534,20 +1385,6 @@ button.text-draft-clear-draft {{
 button.text-draft-clear-draft:hover {{
   opacity: 1;
   background-color: alpha(@window_fg_color, 0.12);
-}}
-.text-draft-case-attachments {{
-  padding: 0;
-}}
-.text-draft-case-attachment {{
-  border-radius: 8px;
-  background-color: alpha(@window_fg_color, 0.08);
-  padding: 4px 6px 4px 10px;
-}}
-button.text-draft-case-remove {{
-  min-height: 20px;
-  min-width: 20px;
-  padding: 0;
-  border-radius: 6px;
 }}
 """
         provider = Gtk.CssProvider()
@@ -1901,15 +1738,6 @@ button.text-draft-case-remove {{
         )
         section.append(editor_group)
 
-        terminal_group = Gtk.ShortcutsGroup(title="Text Draft Terminal")
-        terminal_group.append(
-            Gtk.ShortcutsShortcut(title="Copy terminal selection", accelerator="<Primary><Shift>C")
-        )
-        terminal_group.append(
-            Gtk.ShortcutsShortcut(title="Paste into terminal", accelerator="<Primary><Shift>V")
-        )
-        section.append(terminal_group)
-
         help_group = Gtk.ShortcutsGroup(title="Reference")
         help_group.append(Gtk.ShortcutsShortcut(title="Show keyboard shortcuts", accelerator="F1"))
         section.append(help_group)
@@ -2104,7 +1932,6 @@ button.text-draft-case-remove {{
         self._concordance_file_path = (
             concordance_file_path.expanduser().resolve(strict=False) if concordance_file_path else None
         )
-        self._load_text_draft_case_index(force=True)
         save_model_profiles(model_profiles)
         save_proofread_settings(proof_settings)
         save_spellingstyle_settings(spelling_settings)
@@ -2756,24 +2583,16 @@ button.text-draft-case-remove {{
         if not source_text.strip():
             self._show_toast("Source file is empty.")
             return
-        route_to_terminal = self._text_draft_terminal_target_available()
-        if not route_to_terminal and not self._prepare_text_draft_append_output():
+        if not self._prepare_text_draft_append_output():
             self._show_toast("Unable to prepare Text Draft output.")
             return
-        if route_to_terminal:
-            self._text_draft_terminal_generated_output = ""
-            self._text_draft_terminal_replace_text = ""
-        else:
-            GLib.idle_add(self._set_text_draft_original_output_text, "")
+        GLib.idle_add(self._set_text_draft_original_output_text, "")
         self._clear_pending_text_draft_regenerate_context()
         self._set_busy(True)
-        if route_to_terminal:
-            self._status_label.set_label("Streaming SpellingStyle output into embedded Codex…")
-        else:
-            self._status_label.set_label("Streaming SpellingStyle output into Text Draft…")
+        self._status_label.set_label("Streaming SpellingStyle output into Text Draft…")
         thread = threading.Thread(
             target=self._run_text_draft_spellingstyle,
-            args=(source_text, profile, route_to_terminal, self._text_draft_terminal_pid),
+            args=(source_text, profile),
             daemon=True,
         )
         thread.start()
@@ -2787,25 +2606,19 @@ button.text-draft-case-remove {{
         if not profile.is_configured():
             self._show_toast(f'Configure the "{profile.display_name()}" model profile in Settings first.')
             return
-        route_to_terminal = self._text_draft_terminal_target_available()
         source_text = self._get_text_draft_generated_source_text().strip()
         if not source_text:
             self._show_toast("Original Output is empty.")
             return
-        if not route_to_terminal and not self._prepare_text_draft_generated_replace():
+        if not self._prepare_text_draft_generated_replace():
             self._show_toast("Unable to replace the last generated draft output.")
-            return
-        if route_to_terminal and not self._delete_text_draft_terminal_generated_output():
             return
         self._set_pending_text_draft_regenerate_context("improve-generated", source_text)
         self._set_busy(True)
-        if route_to_terminal:
-            self._status_label.set_label(f"Streaming improved output into embedded Codex with {profile.display_name()}…")
-        else:
-            self._status_label.set_label(f"Improving Text Draft output with {profile.display_name()}…")
+        self._status_label.set_label(f"Improving Text Draft output with {profile.display_name()}…")
         thread = threading.Thread(
             target=self._run_text_draft_improve,
-            args=(source_text, profile, route_to_terminal, self._text_draft_terminal_pid),
+            args=(source_text, profile),
             daemon=True,
         )
         thread.start()
@@ -2813,18 +2626,14 @@ button.text-draft-case-remove {{
     def _on_text_draft_generated_choices_clicked(self, _button: Gtk.Button | None) -> None:
         if self._busy:
             return
-        route_to_terminal = self._text_draft_terminal_target_available()
         source_text = self._get_text_draft_generated_source_text().strip()
         if not source_text:
             self._show_toast("Original Output is empty.")
             return
         if (
-            not route_to_terminal
-            and (
-                self._text_draft_buffer is None
-                or self._text_draft_insert_start_mark is None
-                or self._text_draft_insert_end_mark is None
-            )
+            self._text_draft_buffer is None
+            or self._text_draft_insert_start_mark is None
+            or self._text_draft_insert_end_mark is None
         ):
             self._show_toast("Unable to replace the last generated draft output.")
             return
@@ -2841,7 +2650,7 @@ button.text-draft-case-remove {{
             request_title="Text Draft Generated Choice",
             requests=requests,
         )
-        self._multi_draft_insert_mode = "text-draft-terminal-replace-generated" if route_to_terminal else "text-draft-replace-generated"
+        self._multi_draft_insert_mode = "text-draft-replace-generated"
         self._multi_draft_replace_doc = None
         self._multi_draft_replace_start = None
         self._multi_draft_replace_end = None
@@ -2859,25 +2668,19 @@ button.text-draft-case-remove {{
         if not profile.is_configured():
             self._show_toast(f'Configure the "{profile.display_name()}" model profile in Settings first.')
             return
-        route_to_terminal = self._text_draft_terminal_target_available()
         source_text = self._get_text_draft_generated_source_text().strip()
         if not source_text:
             self._show_toast("Original Output is empty.")
             return
-        if not route_to_terminal and not self._prepare_text_draft_generated_replace():
+        if not self._prepare_text_draft_generated_replace():
             self._show_toast("Unable to replace the last generated draft output.")
-            return
-        if route_to_terminal and not self._delete_text_draft_terminal_generated_output():
             return
         self._set_pending_text_draft_regenerate_context("rephrase-generated", source_text)
         self._set_busy(True)
-        if route_to_terminal:
-            self._status_label.set_label(f"Streaming rephrased output into embedded Codex with {profile.display_name()}…")
-        else:
-            self._status_label.set_label(f"Rephrasing Text Draft output with {profile.display_name()}…")
+        self._status_label.set_label(f"Rephrasing Text Draft output with {profile.display_name()}…")
         thread = threading.Thread(
             target=self._run_text_draft_rephrase_generated,
-            args=(source_text, profile, route_to_terminal, self._text_draft_terminal_pid),
+            args=(source_text, profile),
             daemon=True,
         )
         thread.start()
@@ -2899,21 +2702,16 @@ button.text-draft-case-remove {{
         if not source_text:
             self._show_toast("Select text in the Draft box first.")
             return
-        route_to_terminal = self._text_draft_terminal_target_available()
-        if not route_to_terminal and not self._prepare_text_draft_selection_replace():
+        if not self._prepare_text_draft_selection_replace():
             self._show_toast("Unable to prepare Draft selection replacement.")
             return
-        if not route_to_terminal:
-            self._set_text_draft_original_output_text(source_text)
+        self._set_text_draft_original_output_text(source_text)
         self._set_pending_text_draft_regenerate_context("improve-selected", source_text)
         self._set_busy(True)
-        if route_to_terminal:
-            self._status_label.set_label(f"Streaming improved selection into embedded Codex with {profile.display_name()}…")
-        else:
-            self._status_label.set_label(f"Improving Draft selection with {profile.display_name()}…")
+        self._status_label.set_label(f"Improving Draft selection with {profile.display_name()}…")
         thread = threading.Thread(
             target=self._run_text_draft_improve_selected,
-            args=(source_text, profile, route_to_terminal, self._text_draft_terminal_pid),
+            args=(source_text, profile),
             daemon=True,
         )
         thread.start()
@@ -2925,13 +2723,11 @@ button.text-draft-case-remove {{
         if not source_text:
             self._show_toast("Select text in the Draft box first.")
             return
-        route_to_terminal = self._text_draft_terminal_target_available()
-        offsets = None if route_to_terminal else self._get_text_draft_selection_offsets()
-        if not route_to_terminal and offsets is None:
+        offsets = self._get_text_draft_selection_offsets()
+        if offsets is None:
             self._show_toast("Unable to remember the Draft selection.")
             return
-        if not route_to_terminal:
-            self._set_text_draft_original_output_text(source_text)
+        self._set_text_draft_original_output_text(source_text)
         requests = self._build_editor_improve_rephrase_choice_requests("Text Draft Selected Choice")
         if len(requests) != len(STACKED_CHOICE_VARIANTS):
             self._show_toast("Choose Improve, Rephrase 1, and Rephrase 2 profiles in Settings first.")
@@ -2945,7 +2741,7 @@ button.text-draft-case-remove {{
             request_title="Text Draft Selected Choice",
             requests=requests,
         )
-        self._multi_draft_insert_mode = "text-draft-terminal" if route_to_terminal else "text-draft-replace-selection"
+        self._multi_draft_insert_mode = "text-draft-replace-selection"
         self._multi_draft_replace_doc = None
         self._multi_draft_replace_start = offsets[0] if offsets is not None else None
         self._multi_draft_replace_end = offsets[1] if offsets is not None else None
@@ -2953,31 +2749,19 @@ button.text-draft-case-remove {{
     def _on_text_draft_keep_original_clicked(self, _button: Gtk.Button | None) -> None:
         if self._busy:
             return
-        route_to_terminal = self._text_draft_terminal_target_available()
         source_text = self._get_text_draft_generated_source_text().strip()
         if not source_text:
             self._show_toast("Original Output is empty.")
             return
-        if not route_to_terminal and not self._prepare_text_draft_generated_replace():
+        if not self._prepare_text_draft_generated_replace():
             self._show_toast("Unable to replace the last generated draft output.")
             return
-        if route_to_terminal and not self._delete_text_draft_terminal_generated_output():
-            return
         self._set_busy(True)
-        if route_to_terminal:
-            self._status_label.set_label("Streaming original output into embedded Codex…")
-            if not self._feed_text_draft_terminal_text(source_text):
-                return
-            self._set_text_draft_terminal_generated_output(source_text)
-        else:
-            self._status_label.set_label("Restoring Original Output in Draft…")
-            self._append_text_draft_inserted_text(source_text)
-            self._ensure_single_text_draft_trailing_space()
+        self._status_label.set_label("Restoring Original Output in Draft…")
+        self._append_text_draft_inserted_text(source_text)
+        self._ensure_single_text_draft_trailing_space()
         self._set_busy(False)
-        if route_to_terminal:
-            self._status_label.set_label("Original output streamed to embedded Codex.")
-        else:
-            self._status_label.set_label("Original output restored in Draft.")
+        self._status_label.set_label("Original output restored in Draft.")
 
     def _on_text_draft_wrap_quotes_clicked(self, _button: Gtk.Button | None) -> None:
         if self._busy:
@@ -2987,24 +2771,14 @@ button.text-draft-case-remove {{
             self._show_toast("Select text in the Draft box first.")
             return
         wrapped = self._wrap_text_in_curly_quotes(source_text)
-        route_to_terminal = self._text_draft_terminal_target_available()
-        if not route_to_terminal and not self._prepare_text_draft_selection_replace():
+        if not self._prepare_text_draft_selection_replace():
             self._show_toast("Unable to prepare Draft selection replacement.")
             return
         self._set_busy(True)
-        if route_to_terminal:
-            self._status_label.set_label("Streaming quoted selection into embedded Codex…")
-            if not self._feed_text_draft_terminal_text(wrapped):
-                return
-            self._set_text_draft_terminal_generated_output(wrapped)
-        else:
-            self._status_label.set_label("Wrapping Draft selection in quotes…")
-            self._append_text_draft_inserted_text(wrapped)
+        self._status_label.set_label("Wrapping Draft selection in quotes…")
+        self._append_text_draft_inserted_text(wrapped)
         self._set_busy(False)
-        if route_to_terminal:
-            self._status_label.set_label("Quoted selection streamed to embedded Codex.")
-        else:
-            self._status_label.set_label("Draft selection wrapped in quotes.")
+        self._status_label.set_label("Draft selection wrapped in quotes.")
 
     def _on_copy_text_draft_clicked(self, _button: Gtk.Button | None) -> None:
         text = self._get_text_draft_submission_text()
@@ -3052,339 +2826,10 @@ button.text-draft-case-remove {{
     def _text_draft_external_action_display_icon(action: TextDraftExternalAction) -> str:
         if ProseWindow._is_text_draft_case_log_action(action):
             return "document-edit-symbolic"
-        if ProseWindow._is_text_draft_codex_action(action):
-            return "send-to-symbolic"
         return action.icon_name.strip() or DEFAULT_TEXT_DRAFT_EXTERNAL_ACTION_ICON
 
-    @staticmethod
-    def _is_text_draft_codex_action(action: TextDraftExternalAction) -> bool:
-        return _is_text_draft_codex_external_action(action)
-
-    def _text_draft_codex_action(self) -> TextDraftExternalAction | None:
-        return next(
-            (
-                action
-                for action in self._text_draft_external_actions
-                if self._is_text_draft_codex_action(action)
-            ),
-            None,
-        )
-
-    def _show_text_draft_terminal_controls(self) -> None:
-        if self._text_draft_terminal_close_button is not None:
-            self._text_draft_terminal_close_button.set_visible(True)
-            self._text_draft_terminal_close_button.set_sensitive(True)
-
-    def _hide_text_draft_terminal_controls(self) -> None:
-        if self._text_draft_terminal_close_button is not None:
-            self._text_draft_terminal_close_button.set_visible(False)
-
-    def _text_draft_terminal_child_is_running(self, pid: int | None = None) -> bool:
-        target_pid = self._text_draft_terminal_pid if pid is None else pid
-        if target_pid is None:
-            return self._text_draft_terminal_active
-        try:
-            os.kill(target_pid, 0)
-        except ProcessLookupError:
-            return False
-        except PermissionError:
-            return True
-        except OSError:
-            return False
-        return True
-
-    def _text_draft_terminal_target_available(self) -> bool:
-        if Vte is None or self._text_draft_terminal is None:
-            return False
-        if not self._text_draft_terminal_active:
-            return False
-        if self._text_draft_terminal_mode != "codex":
-            return False
-        if self._text_draft_terminal_child_is_running():
-            return True
-        self._text_draft_terminal_active = False
-        self._text_draft_terminal_pid = None
-        self._text_draft_terminal_mode = None
-        return False
-
-    def _feed_text_draft_terminal_text(self, text: str) -> bool:
-        if not text:
-            return True
-        terminal = self._text_draft_terminal
-        if terminal is None or not self._text_draft_terminal_target_available():
-            self._on_text_draft_failed("Embedded Codex is no longer running.")
-            return False
-        try:
-            terminal.feed_child(text.encode("utf-8"))
-            terminal.grab_focus()
-        except Exception as exc:  # noqa: BLE001
-            self._on_text_draft_failed(f"Unable to stream text into embedded Codex: {exc}")
-            return False
-        return True
-
-    def _append_text_draft_terminal_text(self, text: str) -> bool:
-        self._feed_text_draft_terminal_text(text)
-        return False
-
-    def _set_text_draft_terminal_generated_output(self, text: str) -> bool:
-        self._text_draft_terminal_generated_output = self._normalize_generated_output_text(text)
-        self._text_draft_terminal_replace_text = text
-        return False
-
     def _get_text_draft_generated_source_text(self) -> str:
-        if self._text_draft_terminal_target_available() and self._text_draft_terminal_generated_output.strip():
-            return self._text_draft_terminal_generated_output
         return self._get_text_draft_original_output_text()
-
-    def _delete_text_draft_terminal_generated_output(self) -> bool:
-        text = self._text_draft_terminal_replace_text or self._text_draft_terminal_generated_output
-        if not text:
-            return True
-        backspaces = "\x7f" * len(text)
-        if not self._feed_text_draft_terminal_text(backspaces):
-            return False
-        self._text_draft_terminal_generated_output = ""
-        self._text_draft_terminal_replace_text = ""
-        return True
-
-    def _text_draft_embedded_terminal_unavailable(self) -> None:
-        if self._text_draft_draft_surface is not None:
-            self._text_draft_draft_surface.set_visible_child_name("terminal-missing")
-            self._show_text_draft_terminal_controls()
-        message = "Install gir1.2-vte-3.91 and libvte-2.91-gtk4-0 to use the embedded terminal."
-        self._status_label.set_label(message)
-        self._show_toast(message)
-
-    def _reset_text_draft_terminal_state(self) -> None:
-        self._text_draft_terminal_active = False
-        self._text_draft_terminal_pid = None
-        self._text_draft_terminal_mode = None
-        self._text_draft_terminal_cwd = None
-        self._text_draft_terminal_generated_output = ""
-        self._text_draft_terminal_replace_text = ""
-
-    def _spawn_text_draft_terminal(
-        self,
-        argv: list[str],
-        cwd: str,
-        env: dict[str, str],
-        action_label: str,
-        mode: str,
-        clear_draft_on_return: bool = False,
-    ) -> None:
-        terminal = self._text_draft_terminal
-        if Vte is None or terminal is None:
-            self._text_draft_embedded_terminal_unavailable()
-            return
-        if self._text_draft_terminal_active:
-            if self._text_draft_draft_surface is not None:
-                self._text_draft_draft_surface.set_visible_child_name("terminal")
-            terminal.grab_focus()
-            self._show_toast("Embedded terminal is already running.")
-            return
-
-        try:
-            terminal.reset(True, True)
-            _apply_prose_terminal_theme(terminal)
-            terminal.spawn_async(
-                Vte.PtyFlags.DEFAULT,
-                cwd,
-                argv,
-                [f"{key}={value}" for key, value in env.items()],
-                GLib.SpawnFlags.DEFAULT,
-                None,
-                None,
-                -1,
-                None,
-                self._on_text_draft_terminal_spawned,
-                (action_label, mode),
-            )
-        except Exception as exc:  # noqa: BLE001
-            self._status_label.set_label(f"Unable to start embedded {action_label}: {exc}")
-            self._show_toast(f"Unable to start embedded {action_label}.")
-            return
-
-        self._text_draft_terminal_active = True
-        self._text_draft_terminal_mode = mode
-        self._text_draft_terminal_cwd = cwd
-        self._text_draft_terminal_closing = False
-        self._text_draft_terminal_generated_output = ""
-        self._text_draft_terminal_replace_text = ""
-        self._text_draft_clear_draft_on_terminal_return = clear_draft_on_return
-        if self._text_draft_draft_surface is not None:
-            self._text_draft_draft_surface.set_visible_child_name("terminal")
-        self._show_text_draft_terminal_controls()
-        self._status_label.set_label(f"Started embedded {action_label}.")
-        terminal.grab_focus()
-
-    def _start_text_draft_codex_terminal(
-        self,
-        action: TextDraftExternalAction,
-        draft_path: Path,
-        cwd_override: Path | None = None,
-        reasoning_effort: str = "medium",
-    ) -> None:
-        terminal = self._text_draft_terminal
-        if Vte is None or terminal is None:
-            self._text_draft_embedded_terminal_unavailable()
-            return
-        if self._text_draft_terminal_active:
-            if self._text_draft_draft_surface is not None:
-                self._text_draft_draft_surface.set_visible_child_name("terminal")
-            terminal.grab_focus()
-            self._show_toast("Embedded Codex is already running.")
-            return
-
-        env = os.environ.copy()
-        env["PROSE_TEXT_DRAFT_FILE"] = str(draft_path)
-        env.update(
-            {
-                key: self._expand_text_draft_external_action_value(value, draft_path)
-                for key, value in action.env.items()
-            }
-        )
-        if "RR_CLI_KEEP_BROWSER_OPEN" not in action.env:
-            env["RR_CLI_KEEP_BROWSER_OPEN"] = "1"
-        env["CODEX_REASONING_EFFORT"] = reasoning_effort
-        env.pop("PROSE_CODEX_EMPTY_SESSION", None)
-        cwd_path = cwd_override or action.cwd
-        cwd = str(cwd_path) if cwd_path is not None else os.getcwd()
-        if cwd_override is not None:
-            env["CODEX_CWD"] = cwd
-        argv = [
-            self._expand_text_draft_external_action_value(part, draft_path)
-            for part in action.command
-        ]
-        if (
-            not argv
-            or any("prose-text-draft-codex-ghostty.sh" in part for part in argv)
-        ):
-            if not TEXT_DRAFT_CODEX_VTE_SCRIPT.is_file():
-                message = f"Codex VTE script not found: {TEXT_DRAFT_CODEX_VTE_SCRIPT}"
-                self._status_label.set_label(message)
-                self._show_toast(message)
-                return
-            argv = ["bash", str(TEXT_DRAFT_CODEX_VTE_SCRIPT), str(draft_path)]
-
-        self._spawn_text_draft_terminal(
-            argv,
-            cwd,
-            env,
-            action.label,
-            "codex",
-            clear_draft_on_return=True,
-        )
-
-    def _start_text_draft_shell_terminal(self, fallback: bool = False, cwd: str | None = None) -> None:
-        terminal = self._text_draft_terminal
-        if Vte is None or terminal is None:
-            self._text_draft_embedded_terminal_unavailable()
-            return
-        shell = os.environ.get("SHELL") or "/bin/bash"
-        if not Path(shell).is_file():
-            shell = "/bin/bash"
-        if not Path(shell).is_file():
-            message = "Unable to find a shell for the embedded terminal."
-            self._status_label.set_label(message)
-            self._show_toast(message)
-            return
-        if self._text_draft_terminal_active:
-            if self._text_draft_draft_surface is not None:
-                self._text_draft_draft_surface.set_visible_child_name("terminal")
-            terminal.grab_focus()
-            self._show_toast("Embedded terminal is already running.")
-            return
-
-        label = "terminal" if not fallback else "terminal after Codex exited"
-        shell_cwd = cwd or str(TEXT_DRAFT_PROJECTS_DIR)
-        self._spawn_text_draft_terminal(
-            [shell],
-            shell_cwd,
-            os.environ.copy(),
-            label,
-            "shell",
-            clear_draft_on_return=(
-                self._text_draft_clear_draft_on_terminal_return if fallback else False
-            ),
-        )
-
-    def _on_text_draft_terminal_spawned(
-        self,
-        terminal: Any,
-        pid: int,
-        error: GLib.Error | None,
-        user_data: tuple[str, str],
-    ) -> None:
-        action_label, mode = user_data
-        if error is not None:
-            self._reset_text_draft_terminal_state()
-            self._show_text_draft_terminal_controls()
-            self._status_label.set_label(f"Unable to start embedded {action_label}: {error.message}")
-            self._show_toast(f"Unable to start embedded {action_label}.")
-            return
-        self._text_draft_terminal_pid = int(pid)
-        self._text_draft_terminal_mode = mode
-
-    def _on_text_draft_terminal_child_exited(self, _terminal: Any, _status: int) -> None:
-        ended_mode = self._text_draft_terminal_mode
-        ended_cwd = self._text_draft_terminal_cwd
-        closing = self._text_draft_terminal_closing
-        self._reset_text_draft_terminal_state()
-        self._text_draft_terminal_closing = False
-        if closing:
-            self._hide_text_draft_terminal_controls()
-            self._status_label.set_label("Embedded terminal closed.")
-            return
-        self._show_text_draft_terminal_controls()
-        if ended_mode == "codex" and not closing:
-            self._status_label.set_label("Embedded Codex session ended; opening terminal.")
-            self._start_text_draft_shell_terminal(fallback=True, cwd=ended_cwd)
-            return
-        self._status_label.set_label("Embedded terminal session ended.")
-
-    def _on_text_draft_terminal_style_changed(self, *_args: object) -> None:
-        terminal = self._text_draft_terminal
-        if terminal is not None:
-            _apply_prose_terminal_theme(terminal)
-
-    def _on_text_draft_terminal_key_pressed(
-        self,
-        _controller: Gtk.EventControllerKey,
-        keyval: int,
-        _keycode: int,
-        state: Gdk.ModifierType,
-    ) -> bool:
-        terminal = self._text_draft_terminal
-        if Vte is None or terminal is None:
-            return False
-        required_modifiers = Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.SHIFT_MASK
-        if state & required_modifiers != required_modifiers:
-            return False
-        if keyval in (Gdk.KEY_C, Gdk.KEY_c):
-            terminal.copy_clipboard_format(Vte.Format.TEXT)
-            return True
-        if keyval in (Gdk.KEY_V, Gdk.KEY_v):
-            terminal.paste_clipboard()
-            return True
-        return False
-
-    def _on_text_draft_terminal_close_clicked(self, _button: Gtk.Button) -> None:
-        clear_draft_on_return = self._text_draft_clear_draft_on_terminal_return
-        if self._text_draft_terminal_active and self._text_draft_terminal_pid is not None:
-            self._text_draft_terminal_closing = True
-            try:
-                os.kill(self._text_draft_terminal_pid, signal.SIGTERM)
-            except OSError:
-                pass
-        self._reset_text_draft_terminal_state()
-        self._text_draft_clear_draft_on_terminal_return = False
-        if self._text_draft_draft_surface is not None:
-            self._text_draft_draft_surface.set_visible_child_name("draft")
-        if clear_draft_on_return:
-            self._clear_text_draft_text()
-        self._hide_text_draft_terminal_controls()
-        if self._text_draft_view is not None:
-            self._text_draft_view.grab_focus()
 
     def _on_text_draft_external_action_clicked(
         self,
@@ -3404,16 +2849,6 @@ button.text-draft-case-remove {{
             return
         draft_path = self._write_text_draft_temp_file_now()
         if draft_path is None:
-            return
-
-        if self._is_text_draft_codex_action(action):
-            self._start_text_draft_codex_terminal(
-                action,
-                draft_path,
-                reasoning_effort=_sanitize_text_draft_codex_reasoning_effort(
-                    action.codex_reasoning_effort
-                ),
-            )
             return
 
         command = [
@@ -3448,17 +2883,15 @@ button.text-draft-case-remove {{
         self,
         context: RegenerateContext,
         profile: ModelProfile,
-        route_to_terminal: bool = False,
-        terminal_pid: int | None = None,
     ) -> None:
         if context.action_key == "improve-generated":
-            self._run_text_draft_improve(context.source_text, profile, route_to_terminal, terminal_pid)
+            self._run_text_draft_improve(context.source_text, profile)
             return
         if context.action_key == "rephrase-generated":
-            self._run_text_draft_rephrase_generated(context.source_text, profile, route_to_terminal, terminal_pid)
+            self._run_text_draft_rephrase_generated(context.source_text, profile)
             return
         if context.action_key == "improve-selected":
-            self._run_text_draft_improve_selected(context.source_text, profile, route_to_terminal, terminal_pid)
+            self._run_text_draft_improve_selected(context.source_text, profile)
             return
         GLib.idle_add(self._on_text_draft_failed, f'Unsupported Text Draft regenerate action "{context.action_key}".')
 
@@ -3479,27 +2912,18 @@ button.text-draft-case-remove {{
         if not profile.is_configured():
             self._show_toast(f'Configure the "{profile.display_name()}" model profile in Settings first.')
             return
-        route_to_terminal = self._text_draft_terminal_target_available()
-        if not route_to_terminal and not self._prepare_text_draft_generated_replace():
+        if not self._prepare_text_draft_generated_replace():
             self._show_toast("Unable to replace the last generated draft output.")
             return
-        if route_to_terminal and not self._delete_text_draft_terminal_generated_output():
-            return
         self._set_pending_text_draft_regenerate_context(context.action_key, context.source_text)
-        if not route_to_terminal:
-            self._prepare_text_draft_regenerate_output_state(context)
+        self._prepare_text_draft_regenerate_output_state(context)
         self._set_busy(True)
-        if route_to_terminal:
-            self._status_label.set_label(
-                f"Streaming regenerated {context.command_title.lower()} into embedded Codex with {profile.display_name()}…"
-            )
-        else:
-            self._status_label.set_label(
-                f"Regenerating {context.command_title.lower()} in Text Draft with {profile.display_name()}…"
-            )
+        self._status_label.set_label(
+            f"Regenerating {context.command_title.lower()} in Text Draft with {profile.display_name()}…"
+        )
         thread = threading.Thread(
             target=self._run_text_draft_regenerate_command,
-            args=(context, profile, route_to_terminal, self._text_draft_terminal_pid),
+            args=(context, profile),
             daemon=True,
         )
         thread.start()
@@ -5099,20 +4523,6 @@ button.text-draft-case-remove {{
         if not insert_text:
             return
         choice.text = insert_text
-        if self._multi_draft_insert_mode in {"text-draft-terminal", "text-draft-terminal-replace-generated"}:
-            if not self._text_draft_terminal_target_available():
-                self._show_toast("Embedded Codex is no longer running.")
-                return
-            if (
-                self._multi_draft_insert_mode == "text-draft-terminal-replace-generated"
-                and not self._delete_text_draft_terminal_generated_output()
-            ):
-                return
-            if not self._feed_text_draft_terminal_text(insert_text):
-                return
-            self._set_text_draft_terminal_generated_output(insert_text)
-            self._finish_text_draft_terminal_choice_insert(choice)
-            return
         if self._multi_draft_insert_mode == "text-draft-replace-generated":
             if not self._prepare_text_draft_generated_replace():
                 self._show_toast("Unable to replace the last generated draft output.")
@@ -5206,14 +4616,6 @@ button.text-draft-case-remove {{
         for insert_button in self._multi_draft_insert_buttons:
             insert_button.set_sensitive(False)
         self._status_label.set_label(f"Inserted {self._multi_draft_choice_display_label(choice)} draft.")
-        self._close_multi_draft_window_after_insert()
-
-    def _finish_text_draft_terminal_choice_insert(self, choice: MultiDraftChoice) -> None:
-        for insert_button in self._multi_draft_insert_buttons:
-            insert_button.set_sensitive(False)
-        self._status_label.set_label(
-            f"Streamed {self._multi_draft_choice_display_label(choice)} draft to embedded Codex."
-        )
         self._close_multi_draft_window_after_insert()
 
     def _close_multi_draft_window_after_insert(self) -> None:
@@ -7087,293 +6489,6 @@ button.text-draft-case-remove {{
     ) -> bool:
         return False
 
-    def _hide_text_draft_case_suggestions(self) -> None:
-        if self._text_draft_case_results_scroller is not None:
-            self._text_draft_case_results_scroller.set_visible(False)
-        self._text_draft_case_suggestions = []
-        self._text_draft_case_selected_index = 0
-        self._text_draft_case_prefix = ""
-        self._text_draft_case_prefix_bounds = None
-
-    def _normalize_text_draft_case_lookup_text(self, text: str) -> str:
-        return re.sub(r"\s+", " ", text).strip().lower()
-
-    def _compact_text_draft_case_lookup_text(self, text: str) -> str:
-        return re.sub(r"[^a-z0-9]+", "", text.lower())
-
-    def _text_draft_case_search_terms(self, display_name: str) -> tuple[str, ...]:
-        candidates = [display_name]
-        seen: set[str] = set()
-        terms: list[str] = []
-        for candidate in candidates:
-            for normalized in (
-                self._normalize_text_draft_case_lookup_text(candidate),
-                self._compact_text_draft_case_lookup_text(candidate),
-            ):
-                if not normalized or normalized in seen:
-                    continue
-                seen.add(normalized)
-                terms.append(normalized)
-        return tuple(terms)
-
-    def _is_text_draft_slip_opinion_case(self, term: str, citation: str) -> bool:
-        return any("slip opn" in value.lower() for value in (term, citation))
-
-    def _load_text_draft_case_index(self, *, force: bool = False) -> list[TextDraftCaseSuggestion]:
-        concordance_file = self._concordance_file_path
-        if concordance_file is None:
-            self._text_draft_case_index = []
-            self._text_draft_case_index_path = None
-            self._text_draft_case_index_mtime_ns = None
-            return []
-        try:
-            stat = concordance_file.stat()
-        except OSError:
-            self._text_draft_case_index = []
-            self._text_draft_case_index_path = concordance_file
-            self._text_draft_case_index_mtime_ns = None
-            return []
-        if (
-            not force
-            and self._text_draft_case_index_path == concordance_file
-            and self._text_draft_case_index_mtime_ns == stat.st_mtime_ns
-        ):
-            return self._text_draft_case_index
-
-        suggestions: list[TextDraftCaseSuggestion] = []
-        seen_citations: set[str] = set()
-        try:
-            lines = concordance_file.read_text(encoding="utf-8", errors="ignore").splitlines()
-        except OSError:
-            lines = []
-        for raw_line in lines:
-            line = raw_line.strip()
-            if not line or line.startswith("#"):
-                continue
-            parts = [part.strip() for part in line.split(";")]
-            if len(parts) < 3 or parts[2] != "Cases":
-                continue
-            term = parts[0]
-            citation = parts[1] or term
-            if self._is_text_draft_slip_opinion_case(term, citation):
-                continue
-            if not citation or citation in seen_citations:
-                continue
-            display_name = self._autotext_display_name(citation)
-            search_terms = self._text_draft_case_search_terms(display_name)
-            if not search_terms:
-                continue
-            seen_citations.add(citation)
-            suggestions.append(
-                TextDraftCaseSuggestion(
-                    citation=citation,
-                    display_name=display_name,
-                    search_terms=search_terms,
-                )
-            )
-        suggestions.sort(key=lambda suggestion: suggestion.display_name.lower())
-        self._text_draft_case_index = suggestions
-        self._text_draft_case_index_path = concordance_file
-        self._text_draft_case_index_mtime_ns = stat.st_mtime_ns
-        return suggestions
-
-    def _matching_text_draft_case_suggestions(
-        self,
-        prefix: str,
-        *,
-        limit: int | None = TEXT_DRAFT_CASE_SUGGESTION_LIMIT,
-    ) -> tuple[list[TextDraftCaseSuggestion], int]:
-        normalized_prefix = self._normalize_text_draft_case_lookup_text(prefix)
-        compact_prefix = self._compact_text_draft_case_lookup_text(prefix)
-        if not normalized_prefix and not compact_prefix:
-            return ([], 0)
-        prefixes = tuple(
-            candidate
-            for candidate in (normalized_prefix, compact_prefix)
-            if candidate
-        )
-        ranked_matches: list[tuple[int, TextDraftCaseSuggestion]] = []
-        for suggestion in self._load_text_draft_case_index():
-            rank: int | None = None
-            for term in suggestion.search_terms:
-                if any(
-                    term.startswith(prefix_candidate)
-                    for prefix_candidate in prefixes
-                ):
-                    rank = 0
-                    break
-                if any(prefix_candidate in term for prefix_candidate in prefixes):
-                    rank = 1
-            if rank is not None:
-                ranked_matches.append((rank, suggestion))
-        ranked_matches.sort(
-            key=lambda match: (match[0], match[1].display_name.lower())
-        )
-        matches = [suggestion for _rank, suggestion in ranked_matches]
-        total = len(matches)
-        if limit is not None:
-            matches = matches[:limit]
-        return (matches, total)
-
-    def _refresh_text_draft_case_suggestions(self) -> None:
-        entry = self._text_draft_case_search_entry
-        if entry is None:
-            return
-        entry_had_focus = entry.has_focus()
-        prefix = entry.get_text().strip()
-        suggestions, _total = self._matching_text_draft_case_suggestions(prefix)
-        if not suggestions:
-            self._hide_text_draft_case_suggestions()
-            if entry_had_focus:
-                entry.grab_focus()
-            return
-        if prefix != self._text_draft_case_prefix:
-            self._text_draft_case_selected_index = 0
-            self._text_draft_case_prefix = prefix
-        self._text_draft_case_suggestions = suggestions
-        self._text_draft_case_prefix_bounds = None
-        self._text_draft_case_selected_index = min(
-            self._text_draft_case_selected_index,
-            len(suggestions) - 1,
-        )
-        self._show_text_draft_case_suggestions()
-        if entry_had_focus:
-            entry.grab_focus()
-
-    def _show_text_draft_case_suggestions(self) -> None:
-        scroller = self._text_draft_case_results_scroller
-        list_box = self._text_draft_case_list_box
-        if scroller is None or list_box is None:
-            return
-        self._clear_list_box(list_box)
-        for suggestion in self._text_draft_case_suggestions:
-            row = Gtk.ListBoxRow()
-            row.set_selectable(True)
-            row.set_activatable(True)
-            row.add_css_class("text-draft-case-suggestion-row")
-            label = Gtk.Label(label=suggestion.citation, xalign=0)
-            label.set_ellipsize(Pango.EllipsizeMode.END)
-            label.set_tooltip_text(suggestion.citation)
-            row.set_child(label)
-            list_box.append(row)
-        selected_row = list_box.get_row_at_index(self._text_draft_case_selected_index)
-        if selected_row is not None:
-            list_box.select_row(selected_row)
-        scroller.set_visible(True)
-
-    def _move_text_draft_case_selection(self, direction: int) -> None:
-        if not self._text_draft_case_suggestions:
-            return
-        self._text_draft_case_selected_index = (
-            self._text_draft_case_selected_index + direction
-        ) % len(self._text_draft_case_suggestions)
-        list_box = self._text_draft_case_list_box
-        if list_box is not None:
-            row = list_box.get_row_at_index(self._text_draft_case_selected_index)
-            if row is not None:
-                list_box.select_row(row)
-
-    def _on_text_draft_case_row_activated(self, _list_box: Gtk.ListBox, row: Gtk.ListBoxRow) -> None:
-        row_index = row.get_index()
-        if 0 <= row_index < len(self._text_draft_case_suggestions):
-            self._text_draft_case_selected_index = row_index
-        self._attach_selected_text_draft_case_suggestion()
-
-    def _on_text_draft_case_search_changed(self, _entry: Gtk.Entry) -> None:
-        self._refresh_text_draft_case_suggestions()
-
-    def _on_text_draft_case_search_key_pressed(
-        self,
-        _controller: Gtk.EventControllerKey,
-        keyval: int,
-        _keycode: int,
-        state: Gdk.ModifierType,
-    ) -> bool:
-        if keyval in (Gdk.KEY_Escape,):
-            self._hide_text_draft_case_suggestions()
-            return True
-        if (
-            self._text_draft_case_results_scroller is None
-            or not self._text_draft_case_suggestions
-            or not self._text_draft_case_results_scroller.get_visible()
-        ):
-            return False
-        if keyval in (Gdk.KEY_Return, Gdk.KEY_KP_Enter):
-            self._attach_selected_text_draft_case_suggestion()
-            return True
-        if keyval in (Gdk.KEY_Down, Gdk.KEY_Tab, Gdk.KEY_ISO_Left_Tab):
-            direction = -1 if state & Gdk.ModifierType.SHIFT_MASK else 1
-            if keyval == Gdk.KEY_ISO_Left_Tab:
-                direction = -1
-            self._move_text_draft_case_selection(direction)
-            return True
-        if keyval == Gdk.KEY_Up:
-            self._move_text_draft_case_selection(-1)
-            return True
-        return False
-
-    def _attach_selected_text_draft_case_suggestion(self) -> None:
-        if not self._text_draft_case_suggestions:
-            self._hide_text_draft_case_suggestions()
-            return
-        suggestion = self._text_draft_case_suggestions[self._text_draft_case_selected_index]
-        if suggestion.citation not in self._text_draft_case_attachments:
-            self._text_draft_case_attachments.append(suggestion.citation)
-            self._render_text_draft_case_attachments()
-            self._mark_text_draft_temp_dirty()
-            self._status_label.set_label(f"Attached {self._autotext_display_name(suggestion.citation)}.")
-        entry = self._text_draft_case_search_entry
-        if entry is not None:
-            entry.set_text("")
-            entry.grab_focus()
-        self._hide_text_draft_case_suggestions()
-
-    def _remove_text_draft_case_attachment(self, _button: Gtk.Button, citation: str) -> None:
-        self._text_draft_case_attachments = [
-            existing for existing in self._text_draft_case_attachments if existing != citation
-        ]
-        self._render_text_draft_case_attachments()
-        self._mark_text_draft_temp_dirty()
-
-    def _clear_text_draft_case_attachments(self) -> None:
-        if not self._text_draft_case_attachments:
-            return
-        self._text_draft_case_attachments = []
-        self._render_text_draft_case_attachments()
-        self._mark_text_draft_temp_dirty()
-
-    def _render_text_draft_case_attachments(self) -> None:
-        box = self._text_draft_case_attachments_box
-        if box is None:
-            return
-        self._clear_box(box)
-        for start in range(0, len(self._text_draft_case_attachments), 2):
-            row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-            row.set_hexpand(True)
-            row.set_halign(Gtk.Align.FILL)
-            row.set_homogeneous(True)
-            for citation in self._text_draft_case_attachments[start:start + 2]:
-                chip = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-                chip.set_hexpand(True)
-                chip.set_halign(Gtk.Align.FILL)
-                chip.add_css_class("text-draft-case-attachment")
-                label = Gtk.Label(label=citation, xalign=0)
-                label.set_hexpand(True)
-                label.set_halign(Gtk.Align.FILL)
-                label.set_ellipsize(Pango.EllipsizeMode.END)
-                label.set_tooltip_text(citation)
-                chip.append(label)
-                remove_button = Gtk.Button(icon_name="window-close-symbolic")
-                remove_button.add_css_class("flat")
-                remove_button.add_css_class("text-draft-case-remove")
-                remove_button.set_tooltip_text("Remove attached case.")
-                remove_button.connect("clicked", self._remove_text_draft_case_attachment, citation)
-                chip.append(remove_button)
-                row.append(chip)
-            box.append(row)
-        box.set_visible(bool(self._text_draft_case_attachments))
-        self._refresh_text_draft_clear_button()
-
     def _ensure_text_draft_temp_path(self) -> Path | None:
         if self._text_draft_temp_path is not None:
             return self._text_draft_temp_path
@@ -7428,13 +6543,6 @@ button.text-draft-case-remove {{
         self._text_draft_temp_path = None
 
     def _on_window_close_request(self, _window: Gtk.Window) -> bool:
-        if self._text_draft_terminal_active and self._text_draft_terminal_pid is not None:
-            try:
-                os.kill(self._text_draft_terminal_pid, signal.SIGTERM)
-            except OSError:
-                pass
-            self._text_draft_terminal_active = False
-            self._text_draft_terminal_pid = None
         self._cleanup_text_draft_temp_file()
         return False
 
@@ -7464,13 +6572,7 @@ button.text-draft-case-remove {{
         return self._text_draft_buffer.get_text(start, end, True)
 
     def _get_text_draft_submission_text(self) -> str:
-        draft_text = self._get_text_draft_text()
-        if not self._text_draft_case_attachments:
-            return draft_text
-        cases_text = "\n".join(self._text_draft_case_attachments)
-        if draft_text.strip():
-            return f"{draft_text.rstrip()}\n\nCases:\n{cases_text}"
-        return f"Cases:\n{cases_text}"
+        return self._get_text_draft_text()
 
     def _clear_text_draft_text(self) -> None:
         if self._text_draft_buffer is None:
@@ -7478,8 +6580,6 @@ button.text-draft-case-remove {{
         self._clear_text_draft_insert_marks()
         self._text_draft_pending_newlines = 0
         self._text_draft_buffer.set_text("")
-        self._clear_text_draft_case_attachments()
-        self._hide_text_draft_case_suggestions()
         self._text_draft_temp_dirty = True
 
     def _text_draft_has_user_text(self) -> bool:
@@ -7749,7 +6849,6 @@ button.text-draft-case-remove {{
         self._clear_pending_text_draft_regenerate_context()
         self._text_draft_last_regenerate_context = None
         self._set_text_draft_original_output_text("")
-        self._clear_text_draft_case_attachments()
         self._text_draft_pending_newlines = 0
         buffer.set_text(text)
         end_iter = buffer.get_end_iter()
@@ -8150,9 +7249,6 @@ button.text-draft-case-remove {{
                 button.set_sensitive(not busy)
         if hasattr(self, "_text_draft_external_action_buttons"):
             for button in self._text_draft_external_action_buttons:
-                button.set_sensitive(not busy)
-        if hasattr(self, "_text_draft_terminal_buttons"):
-            for button in self._text_draft_terminal_buttons:
                 button.set_sensitive(not busy)
         if hasattr(self, "_update_text_draft_template_controls"):
             self._update_text_draft_template_controls()
@@ -8934,31 +8030,16 @@ button.text-draft-case-remove {{
         self,
         source_text: str,
         profile: ModelProfile,
-        route_to_terminal: bool = False,
-        terminal_pid: int | None = None,
     ) -> None:
-        generated_parts: list[str] = []
         try:
             payload = self._compose_text_draft_spellingstyle_payload(source_text, profile)
             for chunk in self._stream_spellingstyle(payload, profile):
-                if route_to_terminal:
-                    if not self._text_draft_terminal_child_is_running(terminal_pid):
-                        raise RuntimeError("Embedded Codex is no longer running.")
-                    generated_parts.append(chunk)
-                    GLib.idle_add(self._append_text_draft_terminal_text, chunk)
-                else:
-                    GLib.idle_add(self._append_text_draft_inserted_text, chunk)
-                    GLib.idle_add(self._append_text_draft_original_output_text, chunk)
+                GLib.idle_add(self._append_text_draft_inserted_text, chunk)
+                GLib.idle_add(self._append_text_draft_original_output_text, chunk)
         except Exception as exc:  # noqa: BLE001
             GLib.idle_add(self._on_text_draft_failed, str(exc))
             return
-        if route_to_terminal:
-            GLib.idle_add(self._set_text_draft_terminal_generated_output, "".join(generated_parts))
-        GLib.idle_add(
-            self._on_text_draft_spellingstyle_finished,
-            "Text Draft SpellingStyle streamed to embedded Codex." if route_to_terminal else "Text Draft SpellingStyle complete.",
-            route_to_terminal,
-        )
+        GLib.idle_add(self._on_text_draft_spellingstyle_finished, "Text Draft SpellingStyle complete.")
 
     def _run_improve(self, source_text: str, profile: ModelProfile) -> None:
         payload = self._compose_improve_payload(source_text, profile)
@@ -8974,33 +8055,17 @@ button.text-draft-case-remove {{
         self,
         source_text: str,
         profile: ModelProfile,
-        route_to_terminal: bool = False,
-        terminal_pid: int | None = None,
     ) -> None:
         payload = self._compose_improve_payload(source_text, profile)
-        generated_parts: list[str] = []
         try:
             for chunk in self._stream_custom(payload, profile.api_url, profile.api_key, request_title="Improve"):
-                if route_to_terminal:
-                    if not self._text_draft_terminal_child_is_running(terminal_pid):
-                        raise RuntimeError("Embedded Codex is no longer running.")
-                    generated_parts.append(chunk)
-                    GLib.idle_add(self._append_text_draft_terminal_text, chunk)
-                else:
-                    GLib.idle_add(self._append_text_draft_inserted_text, chunk)
+                GLib.idle_add(self._append_text_draft_inserted_text, chunk)
         except Exception as exc:  # noqa: BLE001
             GLib.idle_add(self._on_text_draft_failed, str(exc))
             return
-        if route_to_terminal:
-            GLib.idle_add(self._set_text_draft_terminal_generated_output, "".join(generated_parts))
         GLib.idle_add(
             self._on_text_draft_improve_finished,
-            (
-                f"Improve Generated streamed to embedded Codex with {profile.display_name()}."
-                if route_to_terminal
-                else f"Improve Generated complete with {profile.display_name()}."
-            ),
-            route_to_terminal,
+            f"Improve Generated complete with {profile.display_name()}.",
         )
 
     def _run_rephrase_generated(self, source_text: str, profile: ModelProfile) -> None:
@@ -9017,33 +8082,17 @@ button.text-draft-case-remove {{
         self,
         source_text: str,
         profile: ModelProfile,
-        route_to_terminal: bool = False,
-        terminal_pid: int | None = None,
     ) -> None:
         payload = self._compose_rephrase_generated_payload(source_text, profile)
-        generated_parts: list[str] = []
         try:
             for chunk in self._stream_custom(payload, profile.api_url, profile.api_key, request_title="Rephrase"):
-                if route_to_terminal:
-                    if not self._text_draft_terminal_child_is_running(terminal_pid):
-                        raise RuntimeError("Embedded Codex is no longer running.")
-                    generated_parts.append(chunk)
-                    GLib.idle_add(self._append_text_draft_terminal_text, chunk)
-                else:
-                    GLib.idle_add(self._append_text_draft_inserted_text, chunk)
+                GLib.idle_add(self._append_text_draft_inserted_text, chunk)
         except Exception as exc:  # noqa: BLE001
             GLib.idle_add(self._on_text_draft_failed, str(exc))
             return
-        if route_to_terminal:
-            GLib.idle_add(self._set_text_draft_terminal_generated_output, "".join(generated_parts))
         GLib.idle_add(
             self._on_text_draft_improve_finished,
-            (
-                f"Rephrase Generated streamed to embedded Codex with {profile.display_name()}."
-                if route_to_terminal
-                else f"Rephrase Generated complete with {profile.display_name()}."
-            ),
-            route_to_terminal,
+            f"Rephrase Generated complete with {profile.display_name()}.",
         )
 
     def _run_improve_selected(self, source_text: str, profile: ModelProfile) -> None:
@@ -9063,33 +8112,17 @@ button.text-draft-case-remove {{
         self,
         source_text: str,
         profile: ModelProfile,
-        route_to_terminal: bool = False,
-        terminal_pid: int | None = None,
     ) -> None:
         payload = self._compose_improve_payload(source_text, profile)
-        generated_parts: list[str] = []
         try:
             for chunk in self._stream_custom(payload, profile.api_url, profile.api_key, request_title="Improve"):
-                if route_to_terminal:
-                    if not self._text_draft_terminal_child_is_running(terminal_pid):
-                        raise RuntimeError("Embedded Codex is no longer running.")
-                    generated_parts.append(chunk)
-                    GLib.idle_add(self._append_text_draft_terminal_text, chunk)
-                else:
-                    GLib.idle_add(self._append_text_draft_inserted_text, chunk)
+                GLib.idle_add(self._append_text_draft_inserted_text, chunk)
         except Exception as exc:  # noqa: BLE001
             GLib.idle_add(self._on_text_draft_failed, str(exc))
             return
-        if route_to_terminal:
-            GLib.idle_add(self._set_text_draft_terminal_generated_output, "".join(generated_parts))
         GLib.idle_add(
             self._on_text_draft_improve_finished,
-            (
-                f"Improve Selected streamed to embedded Codex with {profile.display_name()}."
-                if route_to_terminal
-                else f"Improve Selected complete with {profile.display_name()}."
-            ),
-            route_to_terminal,
+            f"Improve Selected complete with {profile.display_name()}.",
         )
 
     def _run_shorten(self, source_text: str, profile: ModelProfile) -> None:
@@ -10203,11 +9236,9 @@ button.text-draft-case-remove {{
         self._capture_spellingstyle_range_end()
         return False
 
-    def _on_text_draft_spellingstyle_finished(self, message: str, route_to_terminal: bool = False) -> bool:
+    def _on_text_draft_spellingstyle_finished(self, message: str) -> bool:
         self._set_busy(False)
         self._status_label.set_label(message)
-        if route_to_terminal:
-            return False
         self._flush_text_draft_pending_newlines(is_original_output=False)
         self._flush_text_draft_pending_newlines(is_original_output=True)
         self._ensure_single_text_draft_trailing_space()
@@ -10234,12 +9265,9 @@ button.text-draft-case-remove {{
         self._capture_improve1_range_end()
         return False
 
-    def _on_text_draft_improve_finished(self, message: str, route_to_terminal: bool = False) -> bool:
+    def _on_text_draft_improve_finished(self, message: str) -> bool:
         self._set_busy(False)
         self._status_label.set_label(message)
-        if route_to_terminal:
-            self._commit_pending_text_draft_regenerate_context()
-            return False
         self._flush_text_draft_pending_newlines(is_original_output=False)
         self._ensure_single_text_draft_trailing_space()
         self._focus_text_draft_insert_end()

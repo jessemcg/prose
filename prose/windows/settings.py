@@ -446,8 +446,7 @@ class SettingsWindow(Adw.ApplicationWindow):
             title="Concordance file",
             value=str(self._concordance_file_path or ""),
             info_text=(
-                "Optional. Used by Add Case when appending citations to the concordance file "
-                "and by the Text Draft case picker."
+                "Optional. Used by Add Case when appending citations to the concordance file."
             ),
             on_changed=self._on_concordance_path_row_changed,
             on_choose=self._on_choose_concordance_file,
@@ -560,27 +559,7 @@ class SettingsWindow(Adw.ApplicationWindow):
             cwd_row.set_show_apply_button(False)
             group.add(cwd_row)
 
-            codex_reasoning_dropdown = None
             env_values = dict(action.env)
-            if self._parent_window._is_text_draft_codex_action(action):
-                env_values.pop("CODEX_REASONING_EFFORT", None)
-
-                codex_reasoning_row = Adw.ActionRow(
-                    title="Codex reasoning effort",
-                    subtitle="Reasoning level used when this Codex action starts.",
-                )
-                codex_reasoning_row.set_activatable(False)
-                codex_reasoning_dropdown = Gtk.DropDown(
-                    model=Gtk.StringList.new(list(TEXT_DRAFT_CODEX_REASONING_EFFORTS))
-                )
-                codex_reasoning_dropdown.set_selected(
-                    TEXT_DRAFT_CODEX_REASONING_EFFORTS.index(
-                        _sanitize_text_draft_codex_reasoning_effort(action.codex_reasoning_effort)
-                    )
-                )
-                codex_reasoning_row.add_suffix(codex_reasoning_dropdown)
-                group.add(codex_reasoning_row)
-
             env_buffer = Gtk.TextBuffer()
             env_buffer.set_text(_format_text_draft_external_action_env(env_values))
             env_row = Adw.PreferencesRow()
@@ -647,7 +626,6 @@ class SettingsWindow(Adw.ApplicationWindow):
                     success_message_row=success_message_row,
                     command_row=command_row,
                     cwd_row=cwd_row,
-                    codex_reasoning_dropdown=codex_reasoning_dropdown,
                     env_buffer=env_buffer,
                 )
             )
@@ -667,12 +645,6 @@ class SettingsWindow(Adw.ApplicationWindow):
             if env_error is not None or env is None:
                 self._parent_window._show_toast(f"External action {index + 1} environment {env_error}")
                 return None
-            codex_reasoning_effort = DEFAULT_TEXT_DRAFT_CODEX_REASONING_EFFORT
-            if widgets.codex_reasoning_dropdown is not None:
-                env.pop("CODEX_REASONING_EFFORT", None)
-                selected_reasoning = int(widgets.codex_reasoning_dropdown.get_selected())
-                if 0 <= selected_reasoning < len(TEXT_DRAFT_CODEX_REASONING_EFFORTS):
-                    codex_reasoning_effort = TEXT_DRAFT_CODEX_REASONING_EFFORTS[selected_reasoning]
             cwd_text = widgets.cwd_row.get_text().strip()
             actions.append(
                 TextDraftExternalAction(
@@ -684,7 +656,6 @@ class SettingsWindow(Adw.ApplicationWindow):
                     icon_name=widgets.icon_row.get_text().strip() or DEFAULT_TEXT_DRAFT_EXTERNAL_ACTION_ICON,
                     tooltip=widgets.tooltip_row.get_text().strip(),
                     success_message=widgets.success_message_row.get_text().strip(),
-                    codex_reasoning_effort=codex_reasoning_effort,
                 )
             )
         return actions
@@ -2069,5 +2040,3 @@ class SettingsWindow(Adw.ApplicationWindow):
     def _prompt_text(self, buffer: Gtk.TextBuffer) -> str:
         start, end = buffer.get_bounds()
         return buffer.get_text(start, end, True)
-
-
